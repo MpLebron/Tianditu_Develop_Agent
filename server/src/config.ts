@@ -12,8 +12,8 @@ export const config = {
   llm: {
     apiKey: process.env.LLM_API_KEY || '',
     baseUrl: process.env.LLM_BASE_URL || 'https://aihubmix.com/v1',
-    provider: process.env.LLM_PROVIDER || 'claude',
-    model: process.env.LLM_MODEL || 'claude-sonnet-4-5',
+    provider: process.env.LLM_PROVIDER || 'qwen',
+    model: process.env.LLM_MODEL || 'qwen3.5-plus',
     maxOutputTokens: parseInt(process.env.LLM_MAX_OUTPUT_TOKENS || '8192'),
     requestTimeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '240000'),
     maxRetries: parseInt(process.env.LLM_MAX_RETRIES || '2'),

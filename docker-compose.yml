@@ -1,0 +1,37 @@
+services:
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: tianditu-api
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - api_uploads:/app/uploads
+    networks:
+      - tianditu_net
+
+  web:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: tianditu-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+    networks:
+      - tianditu_net
+
+volumes:
+  api_uploads:
+
+networks:
+  tianditu_net:
+    driver: bridge

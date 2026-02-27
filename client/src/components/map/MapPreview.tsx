@@ -37,7 +37,7 @@ export function MapPreview() {
   const { currentCode, executing, execError, fixing, fixRetryCount } = useMapStore()
   const { iframeRef, run } = useCodeRunner()
   const [showError, setShowError] = useState(true)
-  const fixTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const fixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const defaultLoaded = useRef(false)
 
   // 加载默认地图或用户代码
@@ -80,7 +80,7 @@ export function MapPreview() {
   useEffect(() => {
     if (fixTimerRef.current) {
       clearTimeout(fixTimerRef.current)
-      fixTimerRef.current = undefined
+      fixTimerRef.current = null
     }
 
     if (execError) {
@@ -95,6 +95,7 @@ export function MapPreview() {
     return () => {
       if (fixTimerRef.current) {
         clearTimeout(fixTimerRef.current)
+        fixTimerRef.current = null
       }
     }
   }, [execError, fixing, fixRetryCount])

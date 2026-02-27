@@ -62,6 +62,11 @@ const PROVIDER_CATALOG: ProviderCatalogItem[] = [
   },
 ]
 
+const CATALOG_DEFAULT_SELECTION: LlmSelection = {
+  providerId: 'qwen',
+  model: 'qwen3.5-plus',
+}
+
 const providerMap = new Map(PROVIDER_CATALOG.map((p) => [p.id, p]))
 const modelLookup = new Map<string, { providerId: LlmProviderId; model: string }>()
 
@@ -76,6 +81,10 @@ export function getProviderCatalog(): ProviderCatalogItem[] {
 }
 
 export function getCatalogDefaultSelection(): LlmSelection {
+  const provider = providerMap.get(CATALOG_DEFAULT_SELECTION.providerId)
+  if (provider && provider.models.includes(CATALOG_DEFAULT_SELECTION.model)) {
+    return { ...CATALOG_DEFAULT_SELECTION }
+  }
   const firstProvider = PROVIDER_CATALOG[0]
   return { providerId: firstProvider.id, model: firstProvider.models[0] }
 }
@@ -118,4 +127,3 @@ export function resolveLlmSelection(input: LlmSelectionInput, fallback?: LlmSele
 
   return normalized
 }
-

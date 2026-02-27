@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useMapStore } from '../../stores/useMapStore'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
@@ -49,7 +49,7 @@ export function CodePanel() {
     setTimeout(() => setDownloaded(false), 2000)
   }
 
-  const lineCount = displayCode.split('\n').length
+  const lineCount = (displayCode || '').split('\n').length
 
   return (
     <div className="flex flex-col h-full bg-[#1e1e2e] text-gray-100 overflow-hidden dark-scrollbar">
