@@ -254,6 +254,8 @@ function injectCaptureScript(code: string) {
  */
 export function useCodeRunner() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const runSeqRef = useRef(0)
+  const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { setExecError, setExecuting } = useMapStore()
 
   const run = useCallback((code: string) => {
@@ -263,17 +265,39 @@ export function useCodeRunner() {
     setExecuting(true)
     setExecError(null)
 
-    const doc = iframe.contentDocument
-    if (!doc) return
-
     // 注入错误捕获脚本（同步错误/Promise/console/fetch/xhr）
     const wrappedCode = injectCaptureScript(code)
+    const runSeq = ++runSeqRef.current
 
-    doc.open()
-    doc.write(wrappedCode)
-    doc.close()
+    if (finishTimerRef.current) {
+      clearTimeout(finishTimerRef.current)
+      finishTimerRef.current = null
+    }
 
-    setTimeout(() => setExecuting(false), 1000)
+    const handleLoad = () => {
+      if (runSeq !== runSeqRef.current) return
+      if (finishTimerRef.current) {
+        clearTimeout(finishTimerRef.current)
+        finishTimerRef.current = null
+      }
+      setExecuting(false)
+    }
+    iframe.addEventListener('load', handleLoad, { once: true })
+
+    /**
+     * 使用 srcdoc 触发 iframe 导航，确保每次运行都是新的文档上下文。
+     * 避免 document.open/write 在同一全局作用域下重复执行时产生
+     * "Identifier 'map' has already been declared"。
+     */
+    iframe.srcdoc = wrappedCode
+
+    // 兜底：极少数情况下 load 事件不触发时，避免 UI 一直停在“渲染中”
+    finishTimerRef.current = setTimeout(() => {
+      if (runSeq === runSeqRef.current) {
+        setExecuting(false)
+      }
+      finishTimerRef.current = null
+    }, 2000)
   }, [setExecError, setExecuting])
 
   return { iframeRef, run }

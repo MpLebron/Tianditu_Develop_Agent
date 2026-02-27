@@ -335,6 +335,7 @@ export class CodeGenerator {
 6. 中文注释
 7. 默认底图时不要显式设置 style（不要写 style: 'default'，该写法在当前运行环境可能触发底图 404）
 8. 如需主题样式，仅使用 'black' 或 'blue'，禁止使用 mapbox:// 或任何其他样式 URL
+9. 地图实例变量统一使用 \`var map\`，禁止在同一 HTML 中重复 \`let/const map\` 声明（避免 "Identifier 'map' has already been declared"）
 
 ## 数据文件处理规则（极其重要，必须严格遵守）
 当用户上传了数据文件时：
@@ -379,6 +380,10 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
    - 在确认结构/入参无误前，不要优先归因到坐标系问题
 7. 如果文件上下文给出了 "GeoJSON提取路径"，修复时必须遵循该提取路径
 8. 如果错误包含 "AJAXError: Not Found (404): default"，优先检查并移除/修正 style: 'default'（默认样式应省略 style 字段）
+9. 如果错误包含 "Identifier 'map' has already been declared"：
+   - 检查是否存在重复 \`let/const map\` 声明
+   - 统一改为单次声明或改为 \`var map\`
+   - 不要在同一 HTML 的多个脚本块中重复声明 \`let/const map\`
 
 ## 参考文档
 ${params.skillDocs}`
@@ -508,16 +513,30 @@ ${params.error}
     // 提取 HTML 代码块
     const htmlMatch = content.match(/```html\s*([\s\S]*?)```/)
     if (htmlMatch) {
-      const code = htmlMatch[1].trim()
+      const code = this.postProcessGeneratedHtml(htmlMatch[1].trim())
       const explanation = content.replace(htmlMatch[0], '').trim()
       return { code, explanation }
     }
 
     // 如果整个响应就是 HTML
     if (content.trim().startsWith('<!DOCTYPE') || content.trim().startsWith('<html')) {
-      return { code: content.trim(), explanation: '' }
+      return { code: this.postProcessGeneratedHtml(content.trim()), explanation: '' }
     }
 
     return { code: '', explanation: content }
+  }
+
+  /**
+   * 生成代码兜底规范化：
+   * 将可能导致重复声明语法错误的 let/const map 统一降级为 var map。
+   */
+  private postProcessGeneratedHtml(code: string): string {
+    if (!code) return code
+
+    return code
+      .replace(/\blet\s+map\s*;/g, 'var map;')
+      .replace(/\bconst\s+map\s*;/g, 'var map;')
+      .replace(/\blet\s+map\s*=/g, 'var map =')
+      .replace(/\bconst\s+map\s*=/g, 'var map =')
   }
 }
