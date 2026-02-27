@@ -3,6 +3,7 @@ import type { Message, ThoughtChainItem } from '../types/chat'
 import { useMapStore } from './useMapStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
 import { useModelStore } from './useModelStore'
+import { createId } from '../utils/createId'
 
 interface ChatStore {
   messages: Message[]
@@ -32,7 +33,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   sendMessage: async (content, file, syntheticFile) => {
     const displayFile = file ? { name: file.name, size: file.size } : syntheticFile
     const userMsg: Message = {
-      id: crypto.randomUUID(),
+      id: createId(),
       role: 'user',
       content,
       timestamp: Date.now(),
@@ -47,7 +48,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((s) => ({ messages: [...s.messages, userMsg], loading: true, error: null }))
 
     // 不提前创建空的 assistant 消息，等第一个 text chunk 到达再创建
-    const assistantId = crypto.randomUUID()
+    const assistantId = createId()
     let assistantCreated = false
     let textContent = ''
     let receivedCode = false
@@ -284,7 +285,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     const attempt = fixRetryCount + 1
     const modelSelection = useModelStore.getState().getRequestSelection()
-    const assistantId = crypto.randomUUID()
+    const assistantId = createId()
     let assistantCreated = false
     let receivedCode = false
     let explanationStarted = false
