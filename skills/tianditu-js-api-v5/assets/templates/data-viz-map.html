@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据可视化地图</title>
+    <style>
+        html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            background: rgba(255,255,255,0.95);
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            font-size: 13px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .legend h4 { margin: 0 0 8px; font-size: 14px; }
+        .legend-item { display: flex; align-items: center; margin: 4px 0; }
+        .legend-color { width: 16px; height: 16px; margin-right: 8px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="legend">
+        <h4>图例</h4>
+        <!-- 根据实际数据修改图例项 -->
+        <div class="legend-item">
+            <div class="legend-color" style="background: #1890ff;"></div>
+            <span>数据区域</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #ea4335; border-radius: 50%;"></div>
+            <span>数据点</span>
+        </div>
+    </div>
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=${TIANDITU_TOKEN}" type="text/javascript"></script>
+    <script>
+        var map = new TMapGL.Map("map", {
+            center: [116.40, 39.90],
+            zoom: 10,
+            style: "black"  // 暗黑底图适合数据可视化
+        });
+
+        map.on("load", function() {
+            map.addControl(new TMapGL.NavigationControl(), "top-right");
+            map.addControl(new TMapGL.ScaleControl({ unit: "metric" }), "bottom-left");
+
+            // === 在此添加数据源和图层 ===
+            // map.addSource('data', { type: 'geojson', data: ... });
+            // map.addLayer({ id: 'data-layer', type: 'circle', source: 'data', paint: { ... } });
+        });
+    </script>
+</body>
+</html>

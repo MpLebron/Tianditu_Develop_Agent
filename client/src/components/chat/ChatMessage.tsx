@@ -1,0 +1,157 @@
+import { useState, type ReactNode } from 'react'
+import type { Message } from '../../types/chat'
+import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { ThoughtChain } from './ThoughtChain'
+
+function CodeBlock({ language, children }: { language: string; children: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(children)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className="relative group my-2.5 rounded-xl overflow-hidden text-[13px] shadow-sm">
+      <div className="flex items-center justify-between bg-[#21252b] px-3.5 py-1.5 text-[11px] text-gray-500">
+        <span className="font-mono">{language || 'code'}</span>
+        <button
+          onClick={handleCopy}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-gray-300"
+        >
+          {copied ? (
+            <span className="flex items-center gap-1 text-green-400">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              copied
+            </span>
+          ) : 'copy'}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        language={language || 'text'}
+        style={oneDark}
+        customStyle={{ margin: 0, borderRadius: 0, fontSize: '13px', padding: '14px 16px' }}
+        wrapLongLines
+      >
+        {children}
+      </SyntaxHighlighter>
+    </div>
+  )
+}
+
+const mdComponents: Components = {
+  code({ className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || '')
+    const codeStr = String(children).replace(/\n$/, '')
+
+    if (match || codeStr.includes('\n')) {
+      return <CodeBlock language={match?.[1] || ''} children={codeStr} />
+    }
+
+    return (
+      <code className="bg-blue-50/80 text-blue-700 px-1.5 py-0.5 rounded-md text-[12.5px] font-mono" {...props}>
+        {children}
+      </code>
+    )
+  },
+  p({ children }: { children?: ReactNode }) {
+    return <p className="my-1.5 leading-relaxed">{children}</p>
+  },
+  table({ children }: { children?: ReactNode }) {
+    return (
+      <div className="overflow-x-auto my-2.5 rounded-lg border border-gray-200/80">
+        <table className="min-w-full text-[12px] border-collapse">{children}</table>
+      </div>
+    )
+  },
+  th({ children }: { children?: ReactNode }) {
+    return <th className="border-b border-gray-200 bg-gray-50 px-3 py-2 text-left font-medium text-gray-700">{children}</th>
+  },
+  td({ children }: { children?: ReactNode }) {
+    return <td className="border-b border-gray-100/80 px-3 py-2 text-gray-600">{children}</td>
+  },
+  ul({ children }: { children?: ReactNode }) {
+    return <ul className="list-disc pl-5 my-1.5 space-y-0.5 marker:text-gray-300">{children}</ul>
+  },
+  ol({ children }: { children?: ReactNode }) {
+    return <ol className="list-decimal pl-5 my-1.5 space-y-0.5 marker:text-gray-400">{children}</ol>
+  },
+  li({ children }: { children?: ReactNode }) {
+    return <li className="leading-relaxed">{children}</li>
+  },
+  strong({ children }: { children?: ReactNode }) {
+    return <strong className="font-semibold text-gray-900">{children}</strong>
+  },
+  h1({ children }: { children?: ReactNode }) {
+    return <h1 className="text-[15px] font-bold text-gray-900 mt-4 mb-2 pb-1.5 border-b border-gray-100">{children}</h1>
+  },
+  h2({ children }: { children?: ReactNode }) {
+    return <h2 className="text-[14px] font-semibold text-gray-800 mt-3 mb-1.5">{children}</h2>
+  },
+  h3({ children }: { children?: ReactNode }) {
+    return <h3 className="text-[13.5px] font-medium text-gray-700 mt-2.5 mb-1">{children}</h3>
+  },
+  blockquote({ children }: { children?: ReactNode }) {
+    return <blockquote className="border-l-[3px] border-blue-300 pl-3 my-2 text-gray-500 italic">{children}</blockquote>
+  },
+  hr() {
+    return <hr className="my-3 border-gray-100" />
+  },
+}
+
+export function ChatMessage({ msg }: { msg: Message }) {
+  const isUser = msg.role === 'user'
+
+  if (isUser) {
+    return (
+      <div className="flex justify-end mb-3 animate-msg-in">
+        <div className="max-w-[85%] bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm shadow-blue-500/10">
+          {msg.file && (
+            <div className="text-[11px] text-blue-100/80 mb-1.5 flex items-center gap-1.5">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32" />
+              </svg>
+              <span>{msg.file.name}</span>
+              <span className="opacity-60">({(msg.file.size / 1024).toFixed(1)}KB)</span>
+            </div>
+          )}
+          <p className="text-[13.5px] leading-relaxed m-0">{msg.content}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Assistant message — 无背景气泡，直接渲染，类似 ChatGPT 风格
+  return (
+    <div className="flex items-start gap-2.5 mb-4 animate-msg-in">
+      {/* 助手头像 */}
+      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-blue-500/15">
+        <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.893 13.393l-1.135-1.135a2.252 2.252 0 01-.421-.585l-1.08-2.16a.414.414 0 00-.663-.107.827.827 0 01-.812.21l-1.273-.363a.89.89 0 00-.738 1.595l.587.39c.59.395.674 1.23.172 1.732l-.2.2c-.212.212-.33.498-.33.796v.41c0 .409-.11.809-.32 1.158l-1.315 2.191a2.11 2.11 0 01-1.81 1.025 1.055 1.055 0 01-1.055-1.055v-1.172c0-.92-.56-1.747-1.414-2.089l-.655-.261a2.25 2.25 0 01-1.383-2.46l.007-.042a2.25 2.25 0 01.29-.787l.09-.15a2.25 2.25 0 012.37-1.048l1.178.236a1.125 1.125 0 001.302-.795l.208-.73a1.125 1.125 0 00-.578-1.315l-.665-.332-.091.091a2.25 2.25 0 01-1.591.659h-.18c-.249 0-.487.1-.662.274a.931.931 0 01-1.458-1.137l1.411-2.353a2.25 2.25 0 00.286-.76m11.928 9.869A9 9 0 008.965 3.525m11.928 9.868A9 9 0 118.965 3.525" />
+        </svg>
+      </div>
+
+      {/* 消息内容 */}
+      <div className={`min-w-0 flex-1 text-gray-700 ${msg.streaming ? 'typing-cursor' : ''}`}>
+        {msg.thoughtChain && msg.thoughtChain.length > 0 && (
+          <ThoughtChain items={msg.thoughtChain} streaming={msg.streaming} />
+        )}
+        {msg.file && (
+          <div className="text-[11px] text-gray-400 mb-1 flex items-center gap-1.5">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32" />
+            </svg>
+            <span>{msg.file.name}</span>
+          </div>
+        )}
+        <div className="text-[13.5px] leading-[1.7] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{msg.content}</ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  )
+}
