@@ -337,6 +337,7 @@ export class CodeGenerator {
 7. 默认底图时不要显式设置 style（不要写 style: 'default'，该写法在当前运行环境可能触发底图 404）
 8. 如需主题样式，仅使用 'black' 或 'blue'，禁止使用 mapbox:// 或任何其他样式 URL
 9. 地图实例变量统一使用 \`var map\`，禁止在同一 HTML 中重复 \`let/const map\` 声明（避免 "Identifier 'map' has already been declared"）
+10. 默认不要添加 \`symbol + text-field\` 的常驻文字标注图层（容易触发字体 pbf 请求告警）；优先用侧边栏/弹窗展示文字信息。仅当用户明确要求“地图上常驻文字标注”时才添加文本图层
 
 ## 数据文件处理规则（极其重要，必须严格遵守）
 当用户上传了数据文件时：
@@ -385,6 +386,10 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
    - 检查是否存在重复 \`let/const map\` 声明
    - 统一改为单次声明或改为 \`var map\`
    - 不要在同一 HTML 的多个脚本块中重复声明 \`let/const map\`
+10. 如果错误是 \`vector.tianditu.gov.cn/static/font/*.pbf\` 的 404：
+   - 这通常是字体资源请求告警，不一定影响地图主体功能
+   - 优先避免新增 \`symbol + text-field\` 常驻文字图层，改为侧边栏/弹窗展示文字
+   - 不要因为该告警去重写核心业务逻辑（先确认地图主体与交互是否正常）
 
 ## 参考文档
 ${params.skillDocs}`

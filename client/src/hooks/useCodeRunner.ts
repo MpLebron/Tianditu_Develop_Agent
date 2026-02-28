@@ -9,6 +9,10 @@ function buildCaptureScriptTag() {
         'Script error', 'ResizeObserver loop',
         'Ignored call to', 'allow-modals',
         'favicon.ico',
+        // 天地图字体资源 404（常见于 symbol 文本图层字体栈请求），通常不影响底图与核心交互
+        'vector.tianditu.gov.cn/static/font/',
+        '/static/font/Open%20Sans%20Regular,Arial%20Unicode%20MS%20Regular/0-255.pbf',
+        '/static/font/Microsoft%20YaHei%20Regular/0-255.pbf',
       ];
       var recentReports = Object.create(null);
 
