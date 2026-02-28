@@ -2,7 +2,8 @@ import { Router, type Request } from 'express'
 import { constants as fsConstants } from 'fs'
 import { access, stat, writeFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
-import { basename } from 'path'
+import { basename, dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { MapAgent } from '../agent/MapAgent.js'
 import { FileParser } from '../services/FileParser.js'
 import { GeoJSONParser } from '../services/GeoJSONParser.js'
@@ -36,10 +37,13 @@ const MAX_SAMPLE_ARRAY_ITEMS = 8
 const MAX_SAMPLE_DEPTH = 5
 const MAX_SAMPLE_STRING_LEN = 160
 
+const currentDir = dirname(fileURLToPath(import.meta.url))
+const builtinSampleDir = resolve(currentDir, '../../assets/samples')
+
 const BUILTIN_SAMPLE_FILES = {
-  'village-renovation': '/Users/mpl/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_jsoxolvw307z12_cbf0/msg/attach/60d0cff34c23bab045b719ecea6d592e/2026-01/Rec/fd5da1fea9a99ca0/F/1/禾仓村城中村改造.geojson',
-  'fulian-centers': '/Users/mpl/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_jsoxolvw307z12_cbf0/msg/attach/60d0cff34c23bab045b719ecea6d592e/2026-01/Rec/fd5da1fea9a99ca0/F/3/fulian-geojson.geojson',
-  'china-flood-events': '/Users/mpl/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_jsoxolvw307z12_cbf0/msg/attach/60d0cff34c23bab045b719ecea6d592e/2026-01/Rec/fd5da1fea9a99ca0/F/2/2006_2017_flood_event.geojson',
+  'village-renovation': resolve(builtinSampleDir, 'village-renovation.geojson'),
+  'fulian-centers': resolve(builtinSampleDir, 'fulian-centers.geojson'),
+  'china-flood-events': resolve(builtinSampleDir, 'china-flood-events.geojson'),
 } as const
 
 type BuiltinSampleId = keyof typeof BUILTIN_SAMPLE_FILES
