@@ -1,10 +1,10 @@
 FROM node:20-alpine AS builder
-WORKDIR /app
+WORKDIR /app/server
 
-COPY package*.json ./
+COPY server/package*.json ./
 RUN npm ci
 
-COPY . .
+COPY server ./
 RUN npm run build
 RUN npm prune --omit=dev
 
@@ -12,10 +12,11 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/assets ./assets
+COPY --from=builder /app/server/package*.json ./
+COPY --from=builder /app/server/node_modules ./node_modules
+COPY --from=builder /app/server/dist ./dist
+COPY --from=builder /app/server/assets ./assets
+COPY skills ./skills
 
 RUN mkdir -p /app/uploads
 

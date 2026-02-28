@@ -1,7 +1,26 @@
 import dotenv from 'dotenv'
+import { existsSync } from 'fs'
 import { resolve } from 'path'
 
 dotenv.config({ path: resolve(import.meta.dirname, '../../.env') })
+
+function resolveSkillsDir(): string {
+  const candidates = [
+    process.env.SKILLS_DIR,
+    // 本地开发（monorepo）：server/dist -> ../../skills
+    resolve(import.meta.dirname, '../../skills'),
+    // 容器运行（/app）：dist -> ../skills => /app/skills
+    resolve(import.meta.dirname, '../skills'),
+    '/app/skills',
+    '/skills',
+  ].filter((p): p is string => Boolean(p && p.trim()))
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+
+  return candidates[0] || resolve(import.meta.dirname, '../../skills')
+}
 
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
@@ -27,6 +46,6 @@ export const config = {
 
   logLevel: process.env.LOG_LEVEL || 'info',
 
-  // Skills 文档目录（相对于项目根目录）
-  skillsDir: resolve(import.meta.dirname, '../../skills'),
+  // Skills 文档目录（支持本地与容器多种目录结构）
+  skillsDir: resolveSkillsDir(),
 }
