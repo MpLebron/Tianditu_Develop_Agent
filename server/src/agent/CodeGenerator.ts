@@ -329,6 +329,7 @@ export class CodeGenerator {
 ## 代码生成规则（仅当你判断需要生成代码时）
 1. 命名空间：只使用 TMapGL
 2. Token：使用 \${TIANDITU_TOKEN} 占位符
+2.1 地图构造函数必须使用天地图 v5 写法：\`new TMapGL.Map('map', { ... })\`，禁止使用 mapbox 风格 \`new TMapGL.Map({ container: 'map', ... })\`
 3. 控件/图层：必须在 map.on("load", ...) 回调内
 4. 坐标格式：[经度, 纬度]
 5. 输出：完整可运行 HTML 文件
@@ -533,10 +534,25 @@ ${params.error}
   private postProcessGeneratedHtml(code: string): string {
     if (!code) return code
 
-    return code
+    let next = code
       .replace(/\blet\s+map\s*;/g, 'var map;')
       .replace(/\bconst\s+map\s*;/g, 'var map;')
       .replace(/\blet\s+map\s*=/g, 'var map =')
       .replace(/\bconst\s+map\s*=/g, 'var map =')
+
+    // 纠偏：将误生成的 mapbox 风格构造改为天地图 v5 构造签名
+    // from: new TMapGL.Map({ container: 'map', ... })
+    // to:   new TMapGL.Map('map', { ... })
+    next = next.replace(/new\s+TMapGL\.Map\s*\(\s*\{([\s\S]*?)\}\s*\)/g, (full, body) => {
+      const containerMatch = String(body).match(/container\s*:\s*(['"`])([^'"`]+)\1/)
+      if (!containerMatch) return full
+
+      const containerId = containerMatch[2]
+      let optionsBody = String(body).replace(/(^|,)\s*container\s*:\s*(['"`])[^'"`]+\2\s*(?=,|$)/, '$1')
+      optionsBody = optionsBody.replace(/^\s*,\s*/, '').replace(/,\s*,/g, ',')
+      return `new TMapGL.Map('${containerId}', {${optionsBody}})`
+    })
+
+    return next
   }
 }
