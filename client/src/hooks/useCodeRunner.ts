@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useMapStore } from '../stores/useMapStore'
 
 function buildCaptureScriptTag() {
@@ -256,6 +256,7 @@ export function useCodeRunner() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const runSeqRef = useRef(0)
   const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const blobUrlRef = useRef<string | null>(null)
   const { setExecError, setExecuting } = useMapStore()
 
   const run = useCallback((code: string) => {
@@ -285,11 +286,17 @@ export function useCodeRunner() {
     iframe.addEventListener('load', handleLoad, { once: true })
 
     /**
-     * 使用 srcdoc 触发 iframe 导航，确保每次运行都是新的文档上下文。
-     * 避免 document.open/write 在同一全局作用域下重复执行时产生
-     * "Identifier 'map' has already been declared"。
+     * 使用 Blob URL 触发 iframe 导航，确保每次运行都是新的文档上下文，
+     * 同时避免部分 SDK 在 srcdoc/about:srcdoc 下的兼容问题。
      */
-    iframe.srcdoc = wrappedCode
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current)
+      blobUrlRef.current = null
+    }
+    const blob = new Blob([wrappedCode], { type: 'text/html;charset=utf-8' })
+    const blobUrl = URL.createObjectURL(blob)
+    blobUrlRef.current = blobUrl
+    iframe.src = blobUrl
 
     // 兜底：极少数情况下 load 事件不触发时，避免 UI 一直停在“渲染中”
     finishTimerRef.current = setTimeout(() => {
@@ -299,6 +306,19 @@ export function useCodeRunner() {
       finishTimerRef.current = null
     }, 2000)
   }, [setExecError, setExecuting])
+
+  useEffect(() => {
+    return () => {
+      if (finishTimerRef.current) {
+        clearTimeout(finishTimerRef.current)
+        finishTimerRef.current = null
+      }
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
+    }
+  }, [])
 
   return { iframeRef, run }
 }
