@@ -63,22 +63,37 @@ function reverseGeocode(lng, lat) {
 }
 ```
 
-## 常用模式：地址定位并标注
+## 红线规则（必须遵守）
+
+1. 正向编码（`geocoder?ds=...`）响应只保证有 `location`，不保证有 `addressComponent`
+2. 逆向编码（`geocoder?postStr=...&type=geocode`）响应中的 `result.addressComponent` 才是结构化行政区字段
+3. 禁止在正向编码返回上直接读取 `data.addressComponent.*`（会导致 `Cannot read properties of undefined`）
+
+## 常用模式：地址定位并标注（推荐两步法）
 
 ```javascript
-geocode('北京市海淀区莲花池西路28号').then(function(data) {
-    if (data.status === '0' && data.location) {
-        var lng = data.location.lon;
-        var lat = data.location.lat;
+var addr = '北京市海淀区莲花池西路28号';
+geocode(addr).then(function(data) {
+    if (data.status !== '0' || !data.location) return;
 
-        map.flyTo({ center: [lng, lat], zoom: 16 });
+    var lng = Number(data.location.lon);
+    var lat = Number(data.location.lat);
+    map.flyTo({ center: [lng, lat], zoom: 16 });
+    new TMapGL.Marker().setLngLat([lng, lat]).addTo(map);
 
-        new TMapGL.Marker().setLngLat([lng, lat]).addTo(map);
+    // 需要省/市/区等结构化字段时，必须再调逆向编码
+    return reverseGeocode(lng, lat).then(function(rev) {
+        var result = rev && rev.result ? rev.result : {};
+        var ac = result.addressComponent || {};
+        var html = ''
+            + '<b>' + (result.formatted_address || addr) + '</b><br>'
+            + '省市区：' + (ac.province || '') + (ac.city || '') + (ac.county || '');
+
         new TMapGL.Popup({ offset: [0, -30] })
             .setLngLat([lng, lat])
-            .setHTML('<b>北京市海淀区莲花池西路28号</b>')
+            .setHTML(html)
             .addTo(map);
-    }
+    });
 });
 ```
 
@@ -102,3 +117,4 @@ map.on('click', function(e) {
 1. API 参数需要 `encodeURIComponent(JSON.stringify(...))` 编码
 2. 正向编码的参数名是 `ds`，逆向是 `postStr` + `type=geocode`
 3. 返回的坐标是 `{ lon, lat }` 对象，不是数组
+4. 正向编码不要读取 `data.addressComponent`；需要结构化地址请走“正向取坐标 + 逆向取地址组件”
