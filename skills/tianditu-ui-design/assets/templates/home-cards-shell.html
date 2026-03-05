@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>天地图应用首页壳模板</title>
+  <style>
+    :root {
+      --bg-page: #f5f7fb;
+      --bg-card: #ffffff;
+      --text-primary: #16213a;
+      --text-secondary: #5b6780;
+      --brand-500: #2f6bff;
+      --brand-600: #2558d9;
+      --border-soft: #e3e8f2;
+      --shadow-card: 0 8px 24px rgba(22, 33, 58, 0.08);
+      --radius-card: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% -10%, #e8f0ff 0%, transparent 45%),
+                  radial-gradient(circle at 85% 0%, #eef4ff 0%, transparent 40%),
+                  var(--bg-page);
+      color: var(--text-primary);
+      font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .container {
+      width: min(1200px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    .hero {
+      text-align: center;
+      margin: 32px 0 40px;
+    }
+
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: clamp(32px, 4vw, 52px);
+      line-height: 1.15;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 18px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-card);
+      padding: 18px;
+      min-height: 186px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card h3 {
+      margin: 8px 0 8px;
+      font-size: 22px;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--text-secondary);
+      line-height: 1.55;
+      flex: 1;
+    }
+
+    .card a {
+      color: var(--brand-500);
+      text-decoration: none;
+      font-weight: 600;
+      margin-top: 14px;
+    }
+
+    .card a:hover {
+      color: var(--brand-600);
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <h1>用自然语言创建天地图应用</h1>
+      <p>先定义任务，再选择案例，快速进入地图工作区。</p>
+    </section>
+    <section class="cards">
+      <article class="card">
+        <h3>城市地块专题</h3>
+        <p>自动加载地块数据并分类着色，支持点击查看属性详情。</p>
+        <a href="#">运行案例</a>
+      </article>
+      <article class="card">
+        <h3>驾车路线规划</h3>
+        <p>调用驾车 API 获取真实路径，展示路程、时长与步骤信息。</p>
+        <a href="#">运行案例</a>
+      </article>
+      <article class="card">
+        <h3>POI 检索分析</h3>
+        <p>按半径检索周边 POI，地图与侧栏联动展示结果。</p>
+        <a href="#">运行案例</a>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
+

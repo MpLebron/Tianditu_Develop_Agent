@@ -17,6 +17,7 @@ allowed-tools: Read Bash(node *)
 
 本 Skill 不负责：
 - 与天地图无关的通用前端页面设计
+- 页面视觉风格策划与版式打磨（此类需求优先读取 `tianditu-ui-design` skill 包）
 - 用 Leaflet/Mapbox/Google Maps 替代天地图实现同类功能（除非用户明确要求做迁移对比）
 
 ## 使用方式（重要）
@@ -38,6 +39,16 @@ allowed-tools: Read Bash(node *)
 8. **文件 URL（上传数据）**：如果用户文件上下文中提供了“文件获取链接URL”，必须原样使用，不得改写文件名或路径
 9. **GeoJSON 数据源**：传给 `map.addSource({ type: 'geojson', data })` 的 `data` 必须是 `FeatureCollection`/`Feature`，禁止直接传 `geojson.features`
 10. **文件上下文结构优先级**：若上下文标注“返回结构: 标准 GeoJSON FeatureCollection”，则 `fetch(url).json()` 结果可直接作为 GeoJSON 使用；若给出“GeoJSON提取路径”，必须按该路径提取（例如 `rawData.data`）
+11. **数据契约优先**：若文件上下文包含“数据契约(JSON，运行时优先遵循)”，运行时代码必须按契约中的 `pointAccessorByGeometryType` 与 `safeGuards` 编写
+12. **禁用预览字段**：`coordinatesPreview` 仅用于预览样例，运行时代码禁止读取该字段；一律从 `geometry.coordinates` 取值
+13. **SDK 脚本不可省略**：只要代码中使用 `TMapGL`，必须保留天地图 SDK 引入：
+   `<script src="https://api.tianditu.gov.cn/api/v5/js?tk=${TIANDITU_TOKEN}" type="text/javascript"></script>`
+14. **行政区划边界优先走代理**：行政区划场景优先调用 `/api/tianditu/administrative` 并使用 `boundaryGeoJSON` 渲染；禁止在前端用正则硬拆 `MULTIPOLYGON` 生成几何
+15. **代理 URL 写法**：在运行沙箱中优先用绝对地址调用代理（例如 `new URL('/api/tianditu/administrative', window.location.origin)`），避免相对 URL 解析失败
+16. **子级边界参数**：加载省下地级市边界时，使用 `childLevel=1` 且优先 `outputScope=children`，并启用 `expandChildrenBoundary=true`
+17. **路径/地理编码优先代理**：地理编码优先 `/api/tianditu/geocode`、逆地理优先 `/api/tianditu/reverse-geocode`、驾车优先 `/api/tianditu/drive`、公交地铁优先 `/api/tianditu/transit`
+18. **POI 搜索优先代理**：POI/地名检索优先 `/api/tianditu/search`，并做 `status.infocode` 判定（`1000` 成功）
+19. **异步状态机**：所有搜索/规划页面必须有 `loading / ready / empty / error` 四态，禁止悬挂 loading
 
 ## API 引入方式
 
@@ -83,9 +94,11 @@ allowed-tools: Read Bash(node *)
 ### D. 搜索、地理编码与路径规划
 
 - 地理编码/逆地理编码：`references/geocoder.md`
+- 地名搜索 V2.0（普通/视野/周边/多边形/行政区/分类/统计）：`references/search-v2.md`
 - POI 搜索：`references/search-poi.md`
-- 行政区划查询：`references/search-admin.md`
-- 路径规划（驾车/公交/步行）：`references/search-route.md`
+- 行政区划查询（V2 + xlsx 编码表联动）：`references/search-admin.md`
+- 驾车/步行路径规划：`references/search-route.md`
+- 公交/地铁路径规划：`references/search-transit.md`
 
 ### E. 组合能力与跨库联动
 
@@ -112,8 +125,16 @@ allowed-tools: Read Bash(node *)
   - （如疑似坐标异常）`references/coordinate-transform.md`
 
 - “POI 搜索 + 路径规划 + 结果面板”：
+  - `references/search-v2.md`
   - `references/search-poi.md`
-  - `references/search-route.md`
+  - `references/search-route.md`（驾车/步行）
+  - `references/search-transit.md`（公交/地铁）
+  - `references/bindEvents.md`
+
+- “地名搜索 V2.0（视野/周边/多边形/统计）”：
+  - `references/search-v2.md`
+  - （可选）`references/search-admin.md`
+  - （可选）`references/search-poi.md`
   - `references/bindEvents.md`
 
 - “主题样式 + 数据可视化（热力/聚合/3D）”：
@@ -153,6 +174,7 @@ allowed-tools: Read Bash(node *)
 6. **`Input data is not a valid GeoJSON object`**：优先检查 `map.addSource` 的 `data` 是否传成了 `features` 数组或错误包装对象
 7. **`AJAXError: Not Found (404): default`**：优先检查是否误写了 `style: 'default'`（默认样式应省略 `style`）
 8. **上传文件 404**：必须使用文件上下文中的“文件获取链接URL”，不要自编 `/uploads/*.geojson` 路径
+9. **`Failed to parse URL from /api/...`**：优先修复 URL 构建方式（改绝对 URL），不要直接切换到官方直连接口
 
 ## 输出要求（最终检查清单）
 

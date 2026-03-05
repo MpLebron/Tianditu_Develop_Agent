@@ -9,7 +9,11 @@ interface MapStore {
   executing: boolean
   execError: string | null
   fixing: boolean
+  fixingSource: 'runtime' | 'visual' | null
   fixRetryCount: number
+  visualChecking: boolean
+  visualFixRetryCount: number
+  lastVisualCheckedCodeHash: string | null
   setCode: (code: string | null) => void
   /** 开始代码流式生成 */
   startCodeStream: () => void
@@ -19,6 +23,8 @@ interface MapStore {
   finishCodeStream: (finalCode: string) => void
   setExecError: (error: string | null) => void
   setExecuting: (v: boolean) => void
+  setVisualChecking: (v: boolean) => void
+  markVisualChecked: (hash: string | null) => void
   autoFix: (userInput?: string) => Promise<void>
 }
 
@@ -31,9 +37,23 @@ export const useMapStore = create<MapStore>((set, get) => ({
   executing: false,
   execError: null,
   fixing: false,
+  fixingSource: null,
   fixRetryCount: 0,
+  visualChecking: false,
+  visualFixRetryCount: 0,
+  lastVisualCheckedCodeHash: null,
 
-  setCode: (code) => set({ currentCode: code, streamingCode: null, codeStreaming: false, execError: null, fixRetryCount: 0 }),
+  setCode: (code) => set({
+    currentCode: code,
+    streamingCode: null,
+    codeStreaming: false,
+    execError: null,
+    fixRetryCount: 0,
+    fixingSource: null,
+    visualChecking: false,
+    visualFixRetryCount: 0,
+    lastVisualCheckedCodeHash: null,
+  }),
 
   startCodeStream: () => set({ streamingCode: '', codeStreaming: true }),
 
@@ -47,10 +67,16 @@ export const useMapStore = create<MapStore>((set, get) => ({
     codeStreaming: false,
     execError: null,
     fixRetryCount: 0,
+    fixingSource: null,
+    visualChecking: false,
+    visualFixRetryCount: 0,
+    lastVisualCheckedCodeHash: null,
   }),
 
   setExecError: (error) => set({ execError: error }),
   setExecuting: (v) => set({ executing: v }),
+  setVisualChecking: (v) => set({ visualChecking: v }),
+  markVisualChecked: (hash) => set({ lastVisualCheckedCodeHash: hash }),
 
   autoFix: async (userInput?: string) => {
     const { currentCode, execError, fixRetryCount, fixing } = get()
@@ -58,7 +84,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
     // 防止重复修复、超过重试次数、无代码/无错误
     if (fixing || !currentCode || !execError || fixRetryCount >= MAX_FIX_RETRIES) return
 
-    set({ fixing: true })
+    set({ fixing: true, fixingSource: 'runtime' })
     console.log(`[AutoFix] 第 ${fixRetryCount + 1} 次修复尝试:`, execError)
 
     try {
@@ -82,15 +108,16 @@ export const useMapStore = create<MapStore>((set, get) => ({
           currentCode: json.data.code,
           execError: null,
           fixing: false,
+          fixingSource: null,
           fixRetryCount: fixRetryCount + 1,
         })
       } else {
         console.log('[AutoFix] 修复失败:', json.data?.explanation)
-        set({ fixing: false, fixRetryCount: fixRetryCount + 1 })
+        set({ fixing: false, fixingSource: null, fixRetryCount: fixRetryCount + 1 })
       }
     } catch (err: any) {
       console.error('[AutoFix] 请求错误:', err.message)
-      set({ fixing: false, fixRetryCount: fixRetryCount + 1 })
+      set({ fixing: false, fixingSource: null, fixRetryCount: fixRetryCount + 1 })
     }
   },
 }))

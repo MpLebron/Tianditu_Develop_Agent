@@ -119,6 +119,62 @@ function buildCaptureScriptTag() {
       // 5. Hook fetch：主动上报 4xx/5xx 和网络异常（比等 SDK 再抛错更接近根因）
       if (window.fetch) {
         var origFetch = window.fetch.bind(window);
+        function getHttpBaseOrigin() {
+          try {
+            if (
+              window.location &&
+              typeof window.location.origin === 'string' &&
+              /^https?:\\/\\//i.test(window.location.origin)
+            ) {
+              return window.location.origin;
+            }
+          } catch (_) {}
+          try {
+            if (document && document.referrer) {
+              var ref = new URL(document.referrer);
+              if (/^https?:$/i.test(ref.protocol)) return ref.origin;
+            }
+          } catch (_) {}
+          return '';
+        }
+
+        function resolveFetchInput(input) {
+          var currentInput = input;
+          var rawUrl = '';
+          try {
+            if (typeof input === 'string') rawUrl = input;
+            else if (input && typeof input.url === 'string') rawUrl = input.url;
+          } catch (_) {}
+
+          if (!rawUrl) {
+            return { input: currentInput, url: rawUrl };
+          }
+
+          var resolvedUrl = rawUrl;
+          try {
+            var hasScheme = /^[a-zA-Z][a-zA-Z\\d+\\-.]*:/.test(rawUrl);
+            var protocolRelative = rawUrl.indexOf('//') === 0;
+            if (!hasScheme && !protocolRelative) {
+              var baseOrigin = getHttpBaseOrigin();
+              if (baseOrigin) {
+                resolvedUrl = new URL(rawUrl, baseOrigin).toString();
+              }
+            }
+          } catch (_) {}
+
+          if (resolvedUrl !== rawUrl) {
+            try {
+              if (typeof input === 'string') {
+                currentInput = resolvedUrl;
+              } else if (typeof Request !== 'undefined' && input instanceof Request) {
+                currentInput = new Request(resolvedUrl, input);
+              }
+            } catch (_) {}
+          }
+
+          return { input: currentInput, url: resolvedUrl };
+        }
+
         window.fetch = function() {
           var args = Array.prototype.slice.call(arguments);
           var input = args[0];
@@ -130,6 +186,12 @@ function buildCaptureScriptTag() {
             else if (input && typeof input.url === 'string') url = input.url;
             if (init && init.method) method = String(init.method);
             else if (input && input.method) method = String(input.method);
+          } catch (_) {}
+
+          try {
+            var resolved = resolveFetchInput(input);
+            args[0] = resolved.input;
+            if (resolved.url) url = resolved.url;
           } catch (_) {}
 
           return origFetch.apply(window, args).then(function(res) {

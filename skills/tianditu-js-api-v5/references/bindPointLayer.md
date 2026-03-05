@@ -96,8 +96,42 @@ map.addLayer({
 });
 ```
 
+## 数据守卫模板（推荐直接复用）
+
+```javascript
+function normalizePointFeature(feature) {
+    if (!feature || !feature.geometry) return null;
+    var g = feature.geometry;
+    if (!Array.isArray(g.coordinates)) return null;
+
+    if (g.type === 'Point') {
+        if (g.coordinates.length < 2) return null;
+        return feature;
+    }
+
+    if (g.type === 'MultiPoint') {
+        var first = g.coordinates[0];
+        if (!Array.isArray(first) || first.length < 2) return null;
+        return {
+            type: 'Feature',
+            properties: feature.properties || {},
+            geometry: { type: 'Point', coordinates: first }
+        };
+    }
+
+    return null;
+}
+
+map.on('click', 'point-layer', function(e) {
+    if (!e.features || !e.features.length) return;
+    // 继续处理点击逻辑...
+});
+```
+
 ## 踩坑提醒
 
 1. 图层操作必须在 `map.on("load", ...)` 回调内
 2. `addSource` 和 `addLayer` 的 id 不能重复
 3. 数据驱动样式中 `['get', 'fieldName']` 从 Feature 的 `properties` 中读取字段
+4. 点击事件里访问 `e.features[0]` 前必须判空：`if (!e.features || !e.features.length) return`
+5. 坐标校验优先看 `geometry.coordinates`，禁止读取预览字段 `coordinatesPreview`

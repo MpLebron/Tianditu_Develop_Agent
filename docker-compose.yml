@@ -11,9 +11,12 @@ services:
       NODE_ENV: production
       PORT: 3000
       UPLOAD_DIR: /app/uploads
+      SHARE_DIR: /app/share
       SKILLS_DIR: /app/skills
+      THUMBNAIL_CHROMIUM_PATH: /usr/bin/chromium
     volumes:
       - api_uploads:/app/uploads
+      - api_share:/app/share
     networks:
       - tianditu_net
 
@@ -32,6 +35,7 @@ services:
 
 volumes:
   api_uploads:
+  api_share:
 
 networks:
   tianditu_net:

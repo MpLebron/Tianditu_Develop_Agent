@@ -22,6 +22,10 @@ license: Apache-2.0
 1. 先读 `references/bindEcharts.md` 解决桥接与布局问题
 2. 再结合 `echarts-charts` skill 包读取 `echarts-index.md` + 1~2 个具体图表示例
 3. 输出时保持“桥接逻辑”和“图表 option”职责分离，避免把所有代码糅在一个长函数里
+4. 生成前执行 `bindEcharts.md` 中“输出前自检”，重点检查：
+   - 共享变量是否在顶层集中定义（避免跨函数 `ReferenceError`）
+   - 图表 DOM 变量名是否一致（避免 `chart2Dom/chart2Dem` 拼写错误）
+   - 重绘时 layer/source 是否先清理再添加
 
 ## 参考文档
 

@@ -106,3 +106,209 @@ textarea:focus {
   outline: none;
   box-shadow: none;
 }
+
+/* ===== 视觉巡检遮罩（Atlas 风格） ===== */
+@keyframes visual-grid-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.56; }
+  50% { transform: translate3d(8px, -6px, 0) scale(1.02); opacity: 0.74; }
+  100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.56; }
+}
+
+@keyframes visual-glow-breathe {
+  0% { transform: scale(0.94); opacity: 0.24; }
+  50% { transform: scale(1.08); opacity: 0.5; }
+  100% { transform: scale(0.94); opacity: 0.24; }
+}
+
+@keyframes visual-scan {
+  0% { transform: translateY(-55%); opacity: 0; }
+  12% { opacity: 0.18; }
+  86% { opacity: 0.2; }
+  100% { transform: translateY(150%); opacity: 0; }
+}
+
+@keyframes visual-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.visual-inspect-overlay {
+  overflow: hidden;
+  background:
+    radial-gradient(125% 90% at 50% 30%, rgba(232, 238, 255, 0.14) 0%, rgba(211, 217, 243, 0.08) 42%, rgba(190, 200, 236, 0.05) 65%, rgba(171, 184, 228, 0.02) 100%),
+    linear-gradient(180deg, rgba(244, 247, 255, 0.16) 0%, rgba(236, 242, 255, 0.12) 50%, rgba(223, 232, 255, 0.1) 100%);
+  backdrop-filter: blur(2.2px) saturate(108%);
+}
+
+.visual-inspect-haze {
+  position: absolute;
+  inset: -12%;
+  background:
+    radial-gradient(46% 50% at 16% 18%, rgba(255, 214, 236, 0.24), transparent 72%),
+    radial-gradient(52% 48% at 84% 17%, rgba(171, 206, 255, 0.34), transparent 74%),
+    radial-gradient(60% 56% at 82% 80%, rgba(163, 187, 255, 0.28), transparent 78%),
+    radial-gradient(62% 56% at 18% 82%, rgba(198, 179, 255, 0.22), transparent 80%);
+  filter: blur(26px);
+  opacity: 0.46;
+}
+
+.visual-inspect-grid {
+  position: absolute;
+  width: min(48vw, 620px);
+  height: min(48vw, 620px);
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.9) 1.1px, transparent 1.4px);
+  background-size: 13px 13px;
+  animation: visual-grid-drift 6.4s ease-in-out infinite;
+}
+
+.visual-inspect-grid-ne {
+  right: -8%;
+  top: -9%;
+  opacity: 0.42;
+  -webkit-mask-image: radial-gradient(circle at 0% 100%, rgba(0, 0, 0, 0.95) 24%, rgba(0, 0, 0, 0.35) 60%, transparent 100%);
+  mask-image: radial-gradient(circle at 0% 100%, rgba(0, 0, 0, 0.95) 24%, rgba(0, 0, 0, 0.35) 60%, transparent 100%);
+}
+
+.visual-inspect-grid-nw {
+  left: -12%;
+  top: -12%;
+  opacity: 0.2;
+  animation-delay: -1.7s;
+  -webkit-mask-image: radial-gradient(circle at 100% 100%, rgba(0, 0, 0, 0.78) 12%, rgba(0, 0, 0, 0.2) 45%, transparent 100%);
+  mask-image: radial-gradient(circle at 100% 100%, rgba(0, 0, 0, 0.78) 12%, rgba(0, 0, 0, 0.2) 45%, transparent 100%);
+}
+
+.visual-inspect-grid-se {
+  right: -10%;
+  bottom: -16%;
+  opacity: 0.17;
+  animation-delay: -2.5s;
+  -webkit-mask-image: radial-gradient(circle at 0% 0%, rgba(0, 0, 0, 0.76) 15%, rgba(0, 0, 0, 0.18) 50%, transparent 100%);
+  mask-image: radial-gradient(circle at 0% 0%, rgba(0, 0, 0, 0.76) 15%, rgba(0, 0, 0, 0.18) 50%, transparent 100%);
+}
+
+.visual-inspect-grid-sw {
+  left: -14%;
+  bottom: -18%;
+  opacity: 0.12;
+  animation-delay: -3.2s;
+  -webkit-mask-image: radial-gradient(circle at 100% 0%, rgba(0, 0, 0, 0.7) 8%, rgba(0, 0, 0, 0.16) 45%, transparent 100%);
+  mask-image: radial-gradient(circle at 100% 0%, rgba(0, 0, 0, 0.7) 8%, rgba(0, 0, 0, 0.16) 45%, transparent 100%);
+}
+
+.visual-inspect-glow {
+  position: absolute;
+  width: min(54vw, 760px);
+  height: min(54vw, 760px);
+  border-radius: 999px;
+  filter: blur(44px) saturate(116%);
+  animation: visual-glow-breathe 5.6s ease-in-out infinite;
+}
+
+.visual-inspect-glow-ne {
+  right: -10%;
+  top: -14%;
+  background: radial-gradient(circle at 40% 42%, rgba(112, 183, 255, 0.34) 0%, rgba(132, 176, 255, 0.13) 42%, transparent 74%);
+}
+
+.visual-inspect-glow-nw {
+  left: -18%;
+  top: -22%;
+  background: radial-gradient(circle at 58% 50%, rgba(192, 176, 255, 0.24) 0%, rgba(166, 196, 255, 0.08) 40%, transparent 75%);
+  animation-delay: -2.2s;
+}
+
+.visual-inspect-glow-se {
+  right: -18%;
+  bottom: -24%;
+  background: radial-gradient(circle at 45% 44%, rgba(138, 188, 255, 0.24) 0%, rgba(176, 214, 255, 0.08) 46%, transparent 80%);
+  animation-delay: -1.1s;
+}
+
+.visual-inspect-glow-sw {
+  left: -22%;
+  bottom: -24%;
+  background: radial-gradient(circle at 58% 42%, rgba(209, 176, 255, 0.2) 0%, rgba(174, 198, 255, 0.06) 45%, transparent 78%);
+  animation-delay: -3.4s;
+}
+
+.visual-inspect-scanline {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  top: 0;
+  height: 44%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(236, 240, 255, 0.08) 35%,
+    rgba(190, 209, 255, 0.06) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: visual-scan 4.6s ease-in-out infinite;
+  filter: blur(0.5px);
+}
+
+.visual-inspect-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.visual-inspect-chip {
+  width: min(78vw, 520px);
+  padding: 14px 16px 13px;
+  border-radius: 16px;
+  border: 1px solid rgba(193, 212, 255, 0.62);
+  background: linear-gradient(180deg, rgba(245, 249, 255, 0.84), rgba(227, 238, 255, 0.78));
+  box-shadow:
+    0 16px 48px rgba(119, 145, 206, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(5px) saturate(120%);
+}
+
+.visual-inspect-chip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #25408a;
+  letter-spacing: 0.01em;
+}
+
+.visual-inspect-chip-subtitle {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #4f6299;
+}
+
+.visual-inspect-progress {
+  margin-top: 10px;
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(142, 162, 214, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+.visual-inspect-progress::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(124, 121, 255, 0) 0%, rgba(115, 153, 255, 0.95) 45%, rgba(129, 214, 255, 0.9) 100%);
+  animation: visual-progress 1.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .visual-inspect-grid,
+  .visual-inspect-glow,
+  .visual-inspect-scanline,
+  .visual-inspect-progress::before {
+    animation: none !important;
+  }
+}

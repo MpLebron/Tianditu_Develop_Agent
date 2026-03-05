@@ -52,10 +52,16 @@ function getTitle(item: ThoughtChainItem): string {
       return '根据运行错误修复代码'
     case 'code_generator.generateStream':
       return '调用代码生成器'
+    case 'code_guard.validate':
+      return '执行代码守卫校验'
     case 'skill_planner.selectSkills':
       return mode === 'fix' ? '修复阶段兜底：选择技能' : '生成阶段兜底：选择技能'
     case 'skill_matcher.matchByKeywords':
       return '关键词匹配兜底（仅在规划失败时）'
+    case 'visual_inspector.capture':
+      return '视觉巡检：渲染并截图'
+    case 'visual_inspector.diagnose':
+      return '视觉巡检：AI图像诊断'
     default:
       return item.toolName
   }
@@ -127,6 +133,16 @@ function getSummary(item: ThoughtChainItem): string | null {
     ].filter(Boolean).join(' | ') || null
   }
 
+  if (item.toolName === 'code_guard.validate') {
+    if (item.status === 'running') return '正在检查高风险接口调用与参数格式'
+    const issueCount = typeof result?.issueCount === 'number' ? result.issueCount : 0
+    const blocking = result?.blocking === true
+    return [
+      issueCount > 0 ? `发现 ${issueCount} 个风险点` : '未发现明显风险点',
+      blocking ? '包含阻断级问题' : '无阻断级问题',
+    ].filter(Boolean).join(' | ')
+  }
+
   if (item.toolName === 'skill_matcher.matchByKeywords') {
     if (item.status === 'running') return '关键词兜底匹配中（说明上游 planner 异常）'
     const matched = Array.isArray(result?.matchedSkills) ? result.matchedSkills : []
@@ -135,6 +151,26 @@ function getSummary(item: ThoughtChainItem): string | null {
       matched.length ? `匹配结果: ${matched.join(', ')}` : '未匹配到 skill',
       source ? `来源：${source}` : '',
     ].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'visual_inspector.capture') {
+    if (item.status === 'running') return '正在渲染页面并抓取地图截图'
+    if (typeof item.result === 'string') return item.result
+    const ok = result?.ok === true
+    const reason = typeof result?.reason === 'string' ? result.reason : ''
+    return ok ? '截图完成' : `截图失败${reason ? `：${reason}` : ''}`
+  }
+
+  if (item.toolName === 'visual_inspector.diagnose') {
+    if (item.status === 'running') return '正在调用AI进行视觉诊断'
+    if (typeof item.result === 'string') return item.result
+    const status = typeof result?.status === 'string' ? result.status : ''
+    const anomalous = result?.anomalous === true
+    const summary = typeof result?.summary === 'string' ? result.summary : ''
+    return [
+      status === 'unavailable' ? '巡检不可用' : anomalous ? '发现视觉异常' : '视觉巡检通过',
+      summary,
+    ].filter(Boolean).join(' | ')
   }
 
   return null

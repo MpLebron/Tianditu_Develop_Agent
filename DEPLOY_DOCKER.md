@@ -48,6 +48,10 @@ LLM_PROVIDER=qwen
 LLM_MODEL=qwen3.5-plus
 MAX_FILE_SIZE=52428800
 UPLOAD_DIR=/app/uploads
+SHARE_DIR=/app/share
+SHARE_THUMBNAIL_ENABLED=true
+SHARE_THUMBNAIL_BASE_URL=http://127.0.0.1:3000
+THUMBNAIL_CHROMIUM_PATH=/usr/bin/chromium
 ```
 
 ## 4. 启动服务
@@ -83,4 +87,3 @@ docker compose up -d --build
 # 停止
 docker compose down
 ```
-

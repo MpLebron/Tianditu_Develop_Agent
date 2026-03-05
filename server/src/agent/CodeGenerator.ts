@@ -16,12 +16,17 @@ export class CodeGenerator {
     userInput: string
     skillDocs: string
     skillCatalog?: string
+    apiContractsPrompt?: string
     conversationHistory?: string
     existingCode?: string
     fileData?: string
     llmSelection?: LlmSelection
   }): Promise<{ code: string; explanation: string }> {
-    const systemPrompt = this.buildSystemPrompt({ skillDocs: params.skillDocs, skillCatalog: params.skillCatalog })
+    const systemPrompt = this.buildSystemPrompt({
+      skillDocs: params.skillDocs,
+      skillCatalog: params.skillCatalog,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
     const userPrompt = this.buildUserPrompt(params)
 
     const llm = createLLM({ temperature: 0.3, llmSelection: params.llmSelection })
@@ -44,11 +49,15 @@ export class CodeGenerator {
     code: string
     error: string
     skillDocs: string
+    apiContractsPrompt?: string
     fileData?: string
     errorDiagnosis?: string
     llmSelection?: LlmSelection
   }): Promise<{ code: string; explanation: string }> {
-    const systemPrompt = this.buildFixSystemPrompt({ skillDocs: params.skillDocs })
+    const systemPrompt = this.buildFixSystemPrompt({
+      skillDocs: params.skillDocs,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
     const userPrompt = this.buildFixUserPrompt(params)
 
     const llm = createLLM({ temperature: 0.3, llmSelection: params.llmSelection })
@@ -71,11 +80,15 @@ export class CodeGenerator {
     code: string
     error: string
     skillDocs: string
+    apiContractsPrompt?: string
     fileData?: string
     errorDiagnosis?: string
     llmSelection?: LlmSelection
   }): AsyncGenerator<{ type: 'text' | 'code_start' | 'code_delta' | 'code' | 'error'; content: string }> {
-    const systemPrompt = this.buildFixSystemPrompt({ skillDocs: params.skillDocs })
+    const systemPrompt = this.buildFixSystemPrompt({
+      skillDocs: params.skillDocs,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
     const userPrompt = this.buildFixUserPrompt(params)
 
     try {
@@ -193,12 +206,17 @@ export class CodeGenerator {
     userInput: string
     skillDocs: string
     skillCatalog?: string
+    apiContractsPrompt?: string
     conversationHistory?: string
     existingCode?: string
     fileData?: string
     llmSelection?: LlmSelection
   }): AsyncGenerator<{ type: 'text' | 'code_start' | 'code_delta' | 'code' | 'error'; content: string }> {
-    const systemPrompt = this.buildSystemPrompt({ skillDocs: params.skillDocs, skillCatalog: params.skillCatalog })
+    const systemPrompt = this.buildSystemPrompt({
+      skillDocs: params.skillDocs,
+      skillCatalog: params.skillCatalog,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
     const userPrompt = this.buildUserPrompt(params)
 
     try {
@@ -311,7 +329,7 @@ export class CodeGenerator {
     }
   }
 
-  private buildSystemPrompt(params: { skillDocs: string; skillCatalog?: string }): string {
+  private buildSystemPrompt(params: { skillDocs: string; skillCatalog?: string; apiContractsPrompt?: string }): string {
     return `你是天地图 JS API v5.0 智能开发助手。你需要根据用户请求自主判断应该做什么。
 
 ## 你的能力
@@ -329,6 +347,7 @@ export class CodeGenerator {
 ## 代码生成规则（仅当你判断需要生成代码时）
 1. 命名空间：只使用 TMapGL
 2. Token：使用 \${TIANDITU_TOKEN} 占位符
+2.2 若代码中出现 TMapGL（包括 new TMapGL.Map / TMapGL.Marker / TMapGL.Popup 等），必须包含天地图 SDK 引入脚本：\`<script src="https://api.tianditu.gov.cn/api/v5/js?tk=\${TIANDITU_TOKEN}"></script>\`
 2.1 地图构造函数必须使用天地图 v5 写法：\`new TMapGL.Map('map', { ... })\`，禁止使用 mapbox 风格 \`new TMapGL.Map({ container: 'map', ... })\`
 3. 控件/图层：必须在 map.on("load", ...) 回调内
 4. 坐标格式：[经度, 纬度]
@@ -346,6 +365,7 @@ export class CodeGenerator {
 - 在生成的代码中使用 fetch() 加载该 URL，不要将数据硬编码在代码中
 - 若文件上下文标注了“返回结构: 标准 GeoJSON FeatureCollection”，则 fetch(url).json() 的结果可直接作为 GeoJSON 使用（无需猜测 rawData.data / rawData[0].data）
 - 若文件上下文中提供了 "GeoJSON提取路径"，必须按该路径提取 GeoJSON（例如 rawData.data）
+- \`coordinatesPreview\` 仅用于文件预览展示，运行时代码禁止使用该字段；运行时统一读取 \`geometry.coordinates\`
 - 传给 map.addSource({ type: 'geojson', data }) 的 data 必须是 FeatureCollection/Feature 对象
 - 禁止把 geojson.features（数组）直接传给 map.addSource 的 data
 - ❌ 错误示范：fetch('/uploads/us-airports.geojson') ← 自编文件名，绝对禁止
@@ -359,6 +379,8 @@ export class CodeGenerator {
 ## 参考文档
 ${params.skillDocs}
 
+${params.apiContractsPrompt ? `## 天地图接口契约（高优先级）\n${params.apiContractsPrompt}\n` : ''}
+
 ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 
 ## 输出格式
@@ -366,7 +388,7 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 - 如果纯文字回答：直接用中文回答，简洁准确，不要输出 \`\`\`html 代码块`
   }
 
-  private buildFixSystemPrompt(params: { skillDocs: string }): string {
+  private buildFixSystemPrompt(params: { skillDocs: string; apiContractsPrompt?: string }): string {
     return `你是天地图 JS API v5.0 代码修复专家。修复用户代码中的错误。
 
 ## 修复规则
@@ -390,9 +412,15 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
    - 这通常是字体资源请求告警，不一定影响地图主体功能
    - 优先避免新增 \`symbol + text-field\` 常驻文字图层，改为侧边栏/弹窗展示文字
    - 不要因为该告警去重写核心业务逻辑（先确认地图主体与交互是否正常）
+11. 如果报错包含 \`TMapGL is not defined\`：
+   - 先检查并补齐天地图 SDK 引入：
+     \`<script src="https://api.tianditu.gov.cn/api/v5/js?tk=\${TIANDITU_TOKEN}"></script>\`
+   - 确保该脚本位于业务脚本之前执行
 
 ## 参考文档
-${params.skillDocs}`
+${params.skillDocs}
+
+${params.apiContractsPrompt ? `\n## 天地图接口契约（高优先级）\n${params.apiContractsPrompt}` : ''}`
   }
 
   private buildFixUserPrompt(params: {
@@ -557,6 +585,17 @@ ${params.error}
       optionsBody = optionsBody.replace(/^\s*,\s*/, '').replace(/,\s*,/g, ',')
       return `new TMapGL.Map('${containerId}', {${optionsBody}})`
     })
+
+    if (/\bTMapGL\b/.test(next) && !/api\.tianditu\.gov\.cn\/api\/v5\/js\?tk=/.test(next)) {
+      const sdkScript = '<script src="https://api.tianditu.gov.cn/api/v5/js?tk=${TIANDITU_TOKEN}"></script>'
+      if (/<\/head>/i.test(next)) {
+        next = next.replace(/<\/head>/i, `${sdkScript}\n</head>`)
+      } else if (/<body[^>]*>/i.test(next)) {
+        next = next.replace(/<body([^>]*)>/i, `<head>${sdkScript}</head>\n<body$1>`)
+      } else {
+        next = `${sdkScript}\n${next}`
+      }
+    }
 
     return next
   }

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, Link } from 'react-router-dom'
 import { ChatPanel } from '../components/chat/ChatPanel'
 import { MapPreview } from '../components/map/MapPreview'
 import { CodePanel } from '../components/map/CodePanel'
+import { ShareModal } from '../components/share/ShareModal'
 import { useWorkspaceStore } from '../stores/useWorkspaceStore'
 import { useMapStore } from '../stores/useMapStore'
 import { useChatStore } from '../stores/useChatStore'
@@ -12,6 +13,7 @@ export function WorkspacePage() {
   const { currentCode, codeStreaming } = useMapStore()
   const { sendMessage } = useChatStore()
   const location = useLocation()
+  const [shareOpen, setShareOpen] = useState(false)
 
   // 从首页案例卡片跳转时自动发送 prompt
   const sentRef = useRef(false)
@@ -88,6 +90,12 @@ export function WorkspacePage() {
             >
               首页
             </Link>
+            <Link
+              to="/gallery"
+              className="text-[12.5px] text-gray-500 hover:text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-50/60 transition-all no-underline"
+            >
+              公开样例
+            </Link>
             <a
               href="https://www.tianditu.gov.cn/"
               target="_blank"
@@ -111,6 +119,21 @@ export function WorkspacePage() {
 
           {/* 分隔线 */}
           {(currentCode || codeStreaming) && <div className="w-px h-5 bg-gray-200 mr-2" />}
+
+          {/* 分享按钮 */}
+          {currentCode && (
+            <button
+              onClick={() => setShareOpen(true)}
+              className="text-[12px] px-3 py-1.5 rounded-lg border border-blue-200/80 bg-blue-50 text-blue-600 hover:bg-blue-100/70 transition-all duration-200 mr-2"
+            >
+              <span className="flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7.5 12a4.5 4.5 0 014.5-4.5h4.5a4.5 4.5 0 010 9H12M16.5 12a4.5 4.5 0 01-4.5 4.5H7.5a4.5 4.5 0 010-9H12" />
+                </svg>
+                分享地图
+              </span>
+            </button>
+          )}
 
           {/* 代码查看按钮 */}
           {(currentCode || codeStreaming) && (
@@ -155,6 +178,8 @@ export function WorkspacePage() {
           </div>
         )}
       </div>
+
+      <ShareModal open={shareOpen} code={currentCode} onClose={() => setShareOpen(false)} />
     </div>
   )
 }

@@ -11,7 +11,12 @@ interface ChatStore {
   error: string | null
   activeFileContext: string | null
   sendMessage: (content: string, file?: File, syntheticFile?: { name: string; size: number }) => Promise<void>
-  autoFixMapError: (userInputHint?: string) => Promise<void>
+  autoFixMapError: (options?: {
+    userInputHint?: string
+    overrideError?: string
+    source?: 'runtime' | 'visual'
+  }) => Promise<void>
+  addAssistantMessage: (content: string) => void
   clearMessages: () => void
 }
 
@@ -199,7 +204,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
 
-      // 没拿到最终代码且没有可恢复代码时，强制关闭代码流状态，避免 UI 一直“生成中”
+      // 没拿到最终代码且没有可恢复代码时，兜底关闭代码流状态，避免 UI 一直“生成中”
       if (!receivedCode && mapState.codeStreaming) {
         useMapStore.setState({ codeStreaming: false, streamingCode: null })
       }
@@ -276,14 +281,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
-  autoFixMapError: async (userInputHint) => {
+  autoFixMapError: async (options) => {
     const mapState = useMapStore.getState()
-    const { currentCode, execError, fixRetryCount, fixing } = mapState
-    const MAX_FIX_RETRIES = 2
+    const {
+      currentCode,
+      execError,
+      fixing,
+      fixRetryCount,
+      visualFixRetryCount,
+    } = mapState
 
-    if (fixing || !currentCode || !execError || fixRetryCount >= MAX_FIX_RETRIES) return
+    const source = options?.source === 'visual' ? 'visual' : 'runtime'
+    const MAX_RUNTIME_FIX_RETRIES = 2
+    const MAX_VISUAL_FIX_RETRIES = 2
+    const maxRetries = source === 'visual' ? MAX_VISUAL_FIX_RETRIES : MAX_RUNTIME_FIX_RETRIES
+    const currentRetryCount = source === 'visual' ? visualFixRetryCount : fixRetryCount
+    const effectiveError = (options?.overrideError || execError || '').trim()
 
-    const attempt = fixRetryCount + 1
+    if (fixing || !currentCode || !effectiveError || currentRetryCount >= maxRetries) return
+
+    const attempt = currentRetryCount + 1
     const modelSelection = useModelStore.getState().getRequestSelection()
     const assistantId = createId()
     let assistantCreated = false
@@ -295,11 +312,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (assistantCreated) return
       assistantCreated = true
       const prefix = [
-        `检测到地图运行错误，正在自动修复（第 ${attempt}/${MAX_FIX_RETRIES} 次）。`,
+        source === 'visual'
+          ? `检测到视觉巡检异常，正在自动修复（第 ${attempt}/${maxRetries} 次）。`
+          : `检测到地图运行错误，正在自动修复（第 ${attempt}/${maxRetries} 次）。`,
         '',
         '错误信息：',
         '```text',
-        execError,
+        effectiveError,
         '```',
       ].join('\n')
       textContent = prefix
@@ -366,8 +385,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }))
     }
 
-    useMapStore.setState({ fixing: true })
-    console.log(`[AutoFixStream] 第 ${attempt} 次修复尝试:`, execError)
+    useMapStore.setState({ fixing: true, fixingSource: source })
+    console.log(`[AutoFixStream][${source}] 第 ${attempt} 次修复尝试:`, effectiveError)
 
     try {
       const response = await fetch('/api/chat/fix/stream', {
@@ -375,8 +394,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: currentCode,
-          error: execError,
-          userInput: userInputHint || '',
+          error: effectiveError,
+          userInput: options?.userInputHint || '',
           fileContext: get().activeFileContext || undefined,
           provider: modelSelection?.provider,
           model: modelSelection?.model,
@@ -454,7 +473,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               codeStreaming: false,
               execError: null,
               fixing: false,
-              fixRetryCount: attempt,
+              fixingSource: null,
+              ...(source === 'visual'
+                ? { lastVisualCheckedCodeHash: null }
+                : { visualFixRetryCount: 0, lastVisualCheckedCodeHash: null }),
+              ...(source === 'visual'
+                ? { visualFixRetryCount: attempt }
+                : { fixRetryCount: attempt }),
             })
             return
           }
@@ -485,9 +510,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
         useMapStore.setState({
           fixing: false,
-          fixRetryCount: attempt,
+          fixingSource: null,
           codeStreaming: false,
           streamingCode: null,
+          ...(source === 'visual' ? { lastVisualCheckedCodeHash: null } : {}),
+          ...(source === 'visual'
+            ? { visualFixRetryCount: attempt }
+            : { fixRetryCount: attempt }),
         })
       }
       finalizeMessage()
@@ -497,12 +526,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       appendText(`\n\n修复请求失败：${err.message || '未知错误'}`)
       useMapStore.setState({
         fixing: false,
-        fixRetryCount: attempt,
+        fixingSource: null,
         codeStreaming: false,
         streamingCode: null,
+        ...(source === 'visual' ? { lastVisualCheckedCodeHash: null } : {}),
+        ...(source === 'visual'
+          ? { visualFixRetryCount: attempt }
+          : { fixRetryCount: attempt }),
       })
       finalizeMessage()
     }
+  },
+
+  addAssistantMessage: (content) => {
+    const text = String(content || '').trim()
+    if (!text) return
+    set((s) => ({
+      messages: [...s.messages, {
+        id: createId(),
+        role: 'assistant',
+        content: text,
+        timestamp: Date.now(),
+      }],
+    }))
   },
 
   clearMessages: () => set({ messages: [], error: null, activeFileContext: null }),

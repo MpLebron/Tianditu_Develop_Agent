@@ -22,6 +22,41 @@ function resolveSkillsDir(): string {
   return candidates[0] || resolve(import.meta.dirname, '../../skills')
 }
 
+function resolveAdminCodebookPath(): string | undefined {
+  const candidates = [
+    process.env.ADMIN_CODEBOOK_XLSX_PATH,
+    // 本地开发：server/src -> ../assets/admin/xzqh2020-03.xlsx
+    resolve(import.meta.dirname, '../assets/admin/xzqh2020-03.xlsx'),
+    // 兜底（部分运行目录结构）
+    resolve(import.meta.dirname, '../../server/assets/admin/xzqh2020-03.xlsx'),
+    '/app/server/assets/admin/xzqh2020-03.xlsx',
+    '/app/assets/admin/xzqh2020-03.xlsx',
+  ].filter((p): p is string => Boolean(p && p.trim()))
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+
+  return candidates[0]
+}
+
+function resolveShareDir(): string {
+  const candidates = [
+    process.env.SHARE_DIR,
+    // 本地开发：server/src -> ../data/share
+    resolve(import.meta.dirname, '../data/share'),
+    // 容器运行
+    '/app/share',
+    '/share',
+  ].filter((p): p is string => Boolean(p && p.trim()))
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+
+  return candidates[0] || resolve(import.meta.dirname, '../data/share')
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -48,4 +83,31 @@ export const config = {
 
   // Skills 文档目录（支持本地与容器多种目录结构）
   skillsDir: resolveSkillsDir(),
+
+  // 行政区划编码对照表（xlsx）
+  adminCodebookXlsxPath: resolveAdminCodebookPath(),
+
+  // 分享快照目录
+  share: {
+    dir: resolveShareDir(),
+    thumbnail: {
+      enabled: process.env.SHARE_THUMBNAIL_ENABLED !== 'false',
+      baseUrl: process.env.SHARE_THUMBNAIL_BASE_URL || `http://127.0.0.1:${parseInt(process.env.PORT || '3000')}`,
+      chromiumPath: process.env.THUMBNAIL_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '',
+      timeoutMs: parseInt(process.env.SHARE_THUMBNAIL_TIMEOUT_MS || '30000'),
+      waitAfterLoadMs: parseInt(process.env.SHARE_THUMBNAIL_WAIT_MS || '1800'),
+    },
+  },
+
+  visualInspection: {
+    enabled: process.env.VISUAL_INSPECTION_ENABLED !== 'false',
+    baseUrl: process.env.VISUAL_INSPECTION_BASE_URL || `http://127.0.0.1:${parseInt(process.env.PORT || '3000')}`,
+    chromiumPath: process.env.VISUAL_INSPECTION_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '',
+    timeoutMs: parseInt(process.env.VISUAL_INSPECTION_TIMEOUT_MS || '35000'),
+    waitAfterLoadMs: parseInt(process.env.VISUAL_INSPECTION_WAIT_MS || '2200'),
+    viewportWidth: parseInt(process.env.VISUAL_INSPECTION_VIEWPORT_WIDTH || '1440'),
+    viewportHeight: parseInt(process.env.VISUAL_INSPECTION_VIEWPORT_HEIGHT || '900'),
+    maxCodeChars: parseInt(process.env.VISUAL_INSPECTION_MAX_CODE_CHARS || '400000'),
+    llmTimeoutMs: parseInt(process.env.VISUAL_INSPECTION_LLM_TIMEOUT_MS || '20000'),
+  },
 }

@@ -108,6 +108,29 @@ fetch(geojsonUrl)
     .catch(function(err) { console.error('加载失败:', err); });
 ```
 
+## Point / MultiPoint 安全提取模板（避免 reading '0'）
+
+```javascript
+function pickPointFromGeometry(geometry) {
+    if (!geometry || !Array.isArray(geometry.coordinates)) return null;
+    if (geometry.type === 'Point') {
+        var c = geometry.coordinates;
+        return (Array.isArray(c) && c.length >= 2) ? c : null;
+    }
+    if (geometry.type === 'MultiPoint') {
+        var first = geometry.coordinates[0];
+        return (Array.isArray(first) && first.length >= 2) ? first : null;
+    }
+    return null;
+}
+
+// 注意：coordinatesPreview 仅用于文件预览，运行时禁止读取
+var pt = pickPointFromGeometry(feature.geometry);
+if (!pt) return; // 先判空再访问索引
+var lng = pt[0];
+var lat = pt[1];
+```
+
 ## 坐标系检测与转换
 
 如果数据坐标超出 `[-180, -90] ~ [180, 90]` 范围，说明可能是 EPSG:3857 投影坐标，需要转换。详见 `coordinate-transform.md`。
@@ -118,3 +141,4 @@ fetch(geojsonUrl)
 2. GeoJSON 的 Polygon 坐标必须闭合（首尾相同）
 3. 使用 URL 加载时注意 CORS 跨域问题
 4. `addSource` 的 id 必须唯一，重复会报错
+5. 不要在运行时代码中使用 `coordinatesPreview`，统一从 `geometry.coordinates` 提取

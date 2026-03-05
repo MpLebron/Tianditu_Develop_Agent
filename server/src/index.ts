@@ -5,10 +5,15 @@ import { errorHandler } from './middleware/errorHandler.js'
 import chatRouter from './routes/chat.js'
 import uploadRouter from './routes/upload.js'
 import tiandituRouter from './routes/tianditu.js'
+import shareRouter from './routes/share.js'
 import { mkdirSync } from 'fs'
+import { resolve } from 'path'
 
 // 确保上传目录存在
 mkdirSync(config.upload.dir, { recursive: true })
+// 确保分享目录存在
+mkdirSync(config.share.dir, { recursive: true })
+mkdirSync(resolve(config.share.dir, 'snapshots'), { recursive: true })
 
 const app = express()
 
@@ -19,11 +24,22 @@ app.use(express.urlencoded({ extended: true }))
 
 // 静态文件（上传的文件）
 app.use('/uploads', express.static(config.upload.dir))
+// 分享快照静态资源
+app.use('/share-assets', express.static(resolve(config.share.dir, 'snapshots'), {
+  setHeaders: (res, filePath) => {
+    if (/thumbnail\.(png|svg)$/i.test(filePath) || /\/index\.html$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+      res.setHeader('Pragma', 'no-cache')
+      res.setHeader('Expires', '0')
+    }
+  },
+}))
 
 // 路由
 app.use('/api/chat', chatRouter)
 app.use('/api/upload', uploadRouter)
 app.use('/api/tianditu', tiandituRouter)
+app.use('/api/share', shareRouter)
 
 // 健康检查
 app.get('/', (_req, res) => {

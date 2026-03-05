@@ -1,4 +1,4 @@
-export type LlmProviderId = 'claude' | 'openai' | 'qwen' | 'deepseek'
+export type LlmProviderId = 'claude' | 'openai' | 'glm' | 'qwen' | 'deepseek'
 
 export interface ProviderCatalogItem {
   id: LlmProviderId
@@ -33,11 +33,21 @@ const PROVIDER_CATALOG: ProviderCatalogItem[] = [
     id: 'openai',
     label: 'OpenAI',
     models: [
+      'gpt-4.1-nano',
+      'gpt-5-nano',
       'gpt-5.2-codex',
       'gpt-5.2',
       'gpt-5.2-high',
       'gpt-5.1-codex-max',
       'gpt-5.1-codex-mini',
+    ],
+  },
+  {
+    id: 'glm',
+    label: 'GLM',
+    models: [
+      'glm-5',
+      'coding-glm-5',
     ],
   },
   {

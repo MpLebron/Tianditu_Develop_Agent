@@ -4,6 +4,8 @@ import { SkillMatcher } from './SkillMatcher.js'
 import { SkillPlanner } from './SkillPlanner.js'
 import { DocLoader } from './DocLoader.js'
 import { CodeGenerator } from './CodeGenerator.js'
+import { analyzeGeneratedCode, formatGuardIssuesForPrompt, hasBlockingGuardIssue } from './GeneratedCodeGuard.js'
+import { buildApiContractPrompt } from './TiandituApiContractAdvisor.js'
 import type { LlmSelection } from '../provider/index.js'
 
 // ========== 状态定义 ==========
@@ -124,6 +126,7 @@ export class MapAgent {
     const loadedSkills: string[] = []
     const loadedDocsParts: string[] = []
     let plannerStoppedByGenerate = false
+    let fallbackAfterPlannerParseFailure = false
     let iteration = 0
 
     while (true) {
@@ -145,7 +148,13 @@ export class MapAgent {
         },
       }
 
-      let loopDecision: { action: 'read_skill_docs' | 'generate'; skillNames?: string[]; reason: string; source: string }
+      let loopDecision: {
+        action: 'read_skill_docs' | 'generate'
+        skillNames?: string[]
+        reason: string
+        source: string
+        parseFailed?: boolean
+      }
       try {
         const d = await this.skillPlanner.decideNextAction({
           userInput: params.userInput,
@@ -160,6 +169,7 @@ export class MapAgent {
           skillNames: d.skillNames,
           reason: d.reason,
           source: 'llm',
+          parseFailed: d.parseFailed,
         }
 
         yield {
@@ -169,6 +179,7 @@ export class MapAgent {
           result: {
             ...loopDecision,
             mode: 'generate',
+            parseFailed: !!loopDecision.parseFailed,
             decisionSummary:
               loopDecision.action === 'read_skill_docs'
                 ? `读取 skill 文档: ${(loopDecision.skillNames || []).join(', ') || '（未提供）'}`
@@ -188,6 +199,13 @@ export class MapAgent {
       }
 
       if (loopDecision.action === 'generate') {
+        if (
+          loopDecision.parseFailed &&
+          hasLikelyMapIntent(params.userInput, params.fileData) &&
+          !loadedSkills.some((s) => isLikelyCoreMapSkillName(s))
+        ) {
+          fallbackAfterPlannerParseFailure = true
+        }
         plannerStoppedByGenerate = true
         break
       }
@@ -245,7 +263,7 @@ export class MapAgent {
 
     // 仅在循环异常/中断导致未加载任何 skill 时回退；
     // 如果模型明确选择了 generate，则尊重其决策，不做额外 fallback。
-    if (loadedSkills.length === 0 && !plannerStoppedByGenerate) {
+    if ((loadedSkills.length === 0 && !plannerStoppedByGenerate) || fallbackAfterPlannerParseFailure) {
       const fallbackCallId = nextToolCallId('skill_planner.selectSkills')
       yield {
         type: 'tool_execution_start',
@@ -255,6 +273,7 @@ export class MapAgent {
           mode: 'generate',
           userInput: params.userInput.slice(0, 200),
           fallback: true,
+          fallbackReason: fallbackAfterPlannerParseFailure ? 'planner_parse_failed' : 'no_skill_loaded',
           hasConversationHistory: !!params.conversationHistory,
           hasExistingCode: !!params.existingCode,
           hasFileData: !!params.fileData,
@@ -286,6 +305,7 @@ export class MapAgent {
             ...decision,
             mode: 'generate',
             plannerStoppedByGenerate,
+            fallbackAfterPlannerParseFailure,
             selectedSkills: loadedSkills,
           },
           isError: false,
@@ -303,6 +323,12 @@ export class MapAgent {
 
     const matched = loadedSkills
     const docs = loadedDocsParts.join('\n\n---\n\n')
+    const apiContractsPrompt = buildApiContractPrompt({
+      mode: 'generate',
+      userInput: params.userInput,
+      conversationHistory: params.conversationHistory,
+      loadedSkills: matched,
+    })
 
     // 2. 获取完整能力目录
     const catalog = this.skillStore.getCatalog()
@@ -320,6 +346,7 @@ export class MapAgent {
           hasExistingCode: !!params.existingCode,
         selectedSkills: matched,
         skillDocsChars: docs.length,
+        apiContractsChars: apiContractsPrompt.length,
         skillCatalogChars: catalog.length,
       },
     }
@@ -328,12 +355,14 @@ export class MapAgent {
     let textChunks = 0
     let codeChunks = 0
     let hasFinalCode = false
+    let latestFinalCode = ''
 
     try {
       for await (const chunk of this.codeGen.generateStream({
         userInput: params.userInput,
         skillDocs: docs,
         skillCatalog: catalog,
+        apiContractsPrompt,
         conversationHistory: params.conversationHistory,
         existingCode: params.existingCode,
         fileData: params.fileData,
@@ -341,7 +370,10 @@ export class MapAgent {
       })) {
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
-        if (chunk.type === 'code') hasFinalCode = true
+        if (chunk.type === 'code') {
+          hasFinalCode = true
+          latestFinalCode = chunk.content
+        }
         if (chunk.type === 'error') sawError = true
         yield chunk
       }
@@ -358,6 +390,94 @@ export class MapAgent {
           status: sawError ? 'error' : hasFinalCode ? 'ok' : codeChunks > 0 ? 'no_code' : 'text_only',
         },
         isError: sawError || (!hasFinalCode && codeChunks > 0),
+      }
+
+      // 4. 代码守卫：对最终 HTML 做静态契约检查，必要时自动再修一次
+      if (hasFinalCode && latestFinalCode) {
+        const guardCallId = nextToolCallId('code_guard.validate')
+        const issues = analyzeGeneratedCode(latestFinalCode)
+        const blocking = hasBlockingGuardIssue(issues)
+        yield {
+          type: 'tool_execution_start',
+          toolCallId: guardCallId,
+          toolName: 'code_guard.validate',
+          args: {
+            mode: 'generate',
+            issueCount: issues.length,
+            blockingIssueCount: issues.filter((x) => x.severity === 'error').length,
+          },
+        }
+        yield {
+          type: 'tool_execution_end',
+          toolCallId: guardCallId,
+          toolName: 'code_guard.validate',
+          result: {
+            mode: 'generate',
+            issueCount: issues.length,
+            blocking,
+            issues,
+          },
+          isError: blocking,
+        }
+
+        if (blocking) {
+          const repairCallId = nextToolCallId('code_generator.fixError')
+          const guardReport = [
+            '静态守卫检测到高风险接口/调用错误，请只做最小修改修复：',
+            formatGuardIssuesForPrompt(issues),
+          ].join('\n')
+
+          yield {
+            type: 'text',
+            content: '\n\n检测到高风险接口调用问题，正在自动进行一次最小修复。',
+          }
+          yield {
+            type: 'tool_execution_start',
+            toolCallId: repairCallId,
+            toolName: 'code_generator.fixError',
+            args: {
+              mode: 'guard_repair',
+              issueCount: issues.length,
+              errorPreview: guardReport.slice(0, 260),
+            },
+          }
+
+          let repairSawError = false
+          let repairedCode = ''
+
+          for await (const fixChunk of this.codeGen.fixErrorStream({
+            code: latestFinalCode,
+            error: guardReport,
+            skillDocs: docs,
+            apiContractsPrompt,
+            fileData: params.fileData,
+            errorDiagnosis: [
+              '- 错误类别: api',
+              '- 根因判断: 代码守卫命中高风险接口调用/参数格式问题。',
+              '- 修复清单:',
+              '  - 仅修复命中的错误点，保持业务布局与交互不变。',
+              '  - 优先改错接口路径/参数名/返回解析路径。',
+              '  - 修复后必须保留 loading/ready/empty/error 状态收敛。',
+            ].join('\n'),
+            llmSelection: params.llmSelection,
+          })) {
+            if (fixChunk.type === 'error') repairSawError = true
+            if (fixChunk.type === 'code') repairedCode = fixChunk.content
+            yield fixChunk
+          }
+
+          yield {
+            type: 'tool_execution_end',
+            toolCallId: repairCallId,
+            toolName: 'code_generator.fixError',
+            result: {
+              mode: 'guard_repair',
+              fixed: !!repairedCode && !repairSawError,
+              hasFinalCode: !!repairedCode,
+            },
+            isError: repairSawError || !repairedCode,
+          }
+        }
       }
 
       if (!hasFinalCode && !sawError && codeChunks > 0) {
@@ -682,6 +802,12 @@ export class MapAgent {
 
     const matchedSkills = loadedSkills
     const docs = loadedDocsParts.join('\n\n---\n\n')
+    const apiContractsPrompt = buildApiContractPrompt({
+      mode: 'fix',
+      userInput: fixUserInput,
+      runtimeError: params.error,
+      loadedSkills: matchedSkills,
+    })
 
     // 3) 调用修复器
     const fixCallId = nextToolCallId('code_generator.fixError')
@@ -695,6 +821,7 @@ export class MapAgent {
         diagnosisCategory: diagnosis.category,
         matchedSkills,
         docChars: docs.length,
+        apiContractsChars: apiContractsPrompt.length,
         codeChars: params.code.length,
         hasFileData: !!params.fileData,
       },
@@ -706,18 +833,23 @@ export class MapAgent {
       let codeChunks = 0
       let hasFinalCode = false
       let lastErrorChunk: string | null = null
+      let latestFixedCode = ''
 
       for await (const chunk of this.codeGen.fixErrorStream({
         code: params.code,
         error: params.error,
         skillDocs: docs,
+        apiContractsPrompt,
         fileData: params.fileData,
         errorDiagnosis: diagnosisPrompt,
         llmSelection: params.llmSelection,
       })) {
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
-        if (chunk.type === 'code') hasFinalCode = true
+        if (chunk.type === 'code') {
+          hasFinalCode = true
+          latestFixedCode = chunk.content
+        }
         if (chunk.type === 'error') {
           sawError = true
           lastErrorChunk = chunk.content
@@ -739,6 +871,86 @@ export class MapAgent {
           status: sawError ? 'error' : hasFinalCode ? 'ok' : 'no_code',
         },
         isError: sawError || !hasFinalCode,
+      }
+
+      if (hasFinalCode && latestFixedCode) {
+        const guardCallId = nextToolCallId('code_guard.validate')
+        const issues = analyzeGeneratedCode(latestFixedCode)
+        const blocking = hasBlockingGuardIssue(issues)
+        yield {
+          type: 'tool_execution_start',
+          toolCallId: guardCallId,
+          toolName: 'code_guard.validate',
+          args: {
+            mode: 'fix',
+            issueCount: issues.length,
+            blockingIssueCount: issues.filter((x) => x.severity === 'error').length,
+          },
+        }
+        yield {
+          type: 'tool_execution_end',
+          toolCallId: guardCallId,
+          toolName: 'code_guard.validate',
+          result: {
+            mode: 'fix',
+            issueCount: issues.length,
+            blocking,
+            issues,
+          },
+          isError: blocking,
+        }
+
+        if (blocking) {
+          const repairCallId = nextToolCallId('code_generator.fixError')
+          const guardReport = [
+            '修复后代码仍命中高风险静态规则，请继续最小修改：',
+            formatGuardIssuesForPrompt(issues),
+          ].join('\n')
+
+          yield {
+            type: 'text',
+            content: '\n\n修复结果仍存在阻断级风险，正在自动执行第二轮最小修复。',
+          }
+          yield {
+            type: 'tool_execution_start',
+            toolCallId: repairCallId,
+            toolName: 'code_generator.fixError',
+            args: {
+              mode: 'fix_guard_repair',
+              issueCount: issues.length,
+              errorPreview: guardReport.slice(0, 260),
+            },
+          }
+
+          let repairSawError = false
+          let repairedCode = ''
+
+          for await (const fixChunk of this.codeGen.fixErrorStream({
+            code: latestFixedCode,
+            error: guardReport,
+            skillDocs: docs,
+            apiContractsPrompt,
+            fileData: params.fileData,
+            errorDiagnosis: diagnosisPrompt,
+            llmSelection: params.llmSelection,
+          })) {
+            if (fixChunk.type === 'error') repairSawError = true
+            if (fixChunk.type === 'code') repairedCode = fixChunk.content
+            yield fixChunk
+          }
+
+          yield {
+            type: 'tool_execution_end',
+            toolCallId: repairCallId,
+            toolName: 'code_generator.fixError',
+            result: {
+              mode: 'fix_guard_repair',
+              fixed: !!repairedCode && !repairSawError,
+              hasFinalCode: !!repairedCode,
+            },
+            isError: repairSawError || !repairedCode,
+          }
+        }
       }
 
       if (!hasFinalCode && !sawError) {
@@ -783,10 +995,17 @@ export class MapAgent {
       .addNode('generate', async (state: AgentStateType) => {
         try {
           const catalog = self.skillStore.getCatalog()
+          const apiContractsPrompt = buildApiContractPrompt({
+            mode: 'generate',
+            userInput: state.userInput,
+            conversationHistory: state.conversationHistory,
+            loadedSkills: state.matchedSkills,
+          })
           const result = await self.codeGen.generate({
             userInput: state.userInput,
             skillDocs: state.loadedDocs,
             skillCatalog: catalog,
+            apiContractsPrompt,
             conversationHistory: state.conversationHistory,
             existingCode: state.existingCode,
             fileData: state.fileData,
@@ -866,6 +1085,19 @@ function diagnoseRuntimeError(error: string, _code: string): RuntimeDiagnosis {
   const text = String(error || '')
   const lower = text.toLowerCase()
 
+  if (/tmapgl is not defined/.test(lower)) {
+    return {
+      category: 'api',
+      likelyCause: '页面未正确引入天地图 JS SDK，或 SDK 脚本加载顺序晚于业务脚本。',
+      confidence: 0.97,
+      fixChecklist: [
+        '确认存在天地图脚本：<script src="https://api.tianditu.gov.cn/api/v5/js?tk=${TIANDITU_TOKEN}"></script>',
+        '确保 SDK 脚本位于使用 TMapGL 的业务脚本之前。',
+        '若使用模板拼接/修复流程，修复后再次检查脚本是否被意外移除。',
+      ],
+    }
+  }
+
   if (/identifier .* has already been declared|syntaxerror|unexpected token/.test(lower)) {
     return {
       category: 'syntax',
@@ -879,15 +1111,15 @@ function diagnoseRuntimeError(error: string, _code: string): RuntimeDiagnosis {
     }
   }
 
-  if (/cannot read properties of undefined|is not a function|null/.test(lower)) {
+  if (/cannot read properties of undefined|undefined \(reading '0'\)|is not a function|null/.test(lower)) {
     return {
       category: 'runtime',
       likelyCause: '对象/字段未判空即访问，或 API 返回结构与代码假设不一致。',
       confidence: 0.86,
       fixChecklist: [
-        '对 e.features、rawData、rawData.data 等关键路径加判空。',
-        '校验接口返回结构后再读取字段。',
-        '对可选方法调用前做 typeof 判断。',
+        '先对 geometry / coordinates / e.features 做判空，再访问索引 [0]。',
+        '按 geometry.type 提取坐标：Point=coordinates，MultiPoint=coordinates[0]。',
+        '校验接口返回结构后再读取字段，不使用仅用于预览的字段（如 coordinatesPreview）。',
       ],
     }
   }
@@ -950,4 +1182,26 @@ function formatDiagnosisForPrompt(d: RuntimeDiagnosis): string {
     '- 修复清单:',
     ...d.fixChecklist.map((item) => `  - ${item}`),
   ].join('\n')
+}
+
+function hasLikelyMapIntent(userInput: string, fileData?: string): boolean {
+  const text = `${userInput || ''}\n${fileData ? 'has-file-data' : ''}`
+  return /地图|map|geojson|可视化|渲染|图层|标注|坐标|点数据|面数据|路径|行政区|poi|搜索|route|marker|layer/i.test(text)
+}
+
+function isLikelyCoreMapSkillName(name: string): boolean {
+  return [
+    'map-init',
+    'bindGeoJSON',
+    'bindPointLayer',
+    'bindLineLayer',
+    'bindPolygonLayer',
+    'bindEvents',
+    'popup',
+    'marker',
+    'search-poi',
+    'search-route',
+    'search-transit',
+    'search-admin',
+  ].includes(name)
 }

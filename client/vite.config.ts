@@ -10,6 +10,7 @@ export default defineConfig({
       '/api/chat/stream': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        xfwd: true,
         // SSE 专用配置：超长超时 + 关闭缓冲
         timeout: 300000, // 5 分钟
         proxyTimeout: 300000,
@@ -23,10 +24,17 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        xfwd: true,
       },
       '/uploads': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        xfwd: true,
+      },
+      '/share-assets': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        xfwd: true,
       },
     },
   },

@@ -1,92 +1,207 @@
-# POI 搜索
+# POI 搜索（V2，代理优先）
 
-调用天地图搜索 API 查找兴趣点（POI），并在地图上标注。
+基于天地图搜索服务 V2 做 POI 检索。  
+**默认优先后端代理**：`/api/tianditu/search`（避免 token 暴露、参数拼写差异和跨域问题）。
 
-## 天地图搜索 API
+## 推荐接口（代理）
 
-### 普通搜索
-
-```
-GET https://api.tianditu.gov.cn/v2/search?postStr={"keyWord":"医院","level":12,"mapBound":"116.02,39.60,116.78,40.20","queryType":1,"start":0,"count":20}&type=query&tk=${TIANDITU_TOKEN}
-```
-
-### 周边搜索
-
-```
-GET https://api.tianditu.gov.cn/v2/search?postStr={"keyWord":"餐厅","queryType":3,"pointLonlat":"116.40,39.90","queryRadius":5000,"start":0,"count":20}&type=query&tk=${TIANDITU_TOKEN}
+```text
+GET /api/tianditu/search?keyword=医院&type=nearby&lng=116.404&lat=39.915&radius=3000&count=20&show=2
 ```
 
-## 响应结构
+常用 `type`（代理会映射 queryType）：
+
+- `type=normal` -> `queryType=1`（普通搜索）
+- `type=view` -> `queryType=2`（视野内搜索）
+- `type=nearby` -> `queryType=3`（周边搜索）
+- `type=polygon` -> `queryType=10`（多边形搜索）
+
+## 官方直连（仅调试）
+
+```text
+GET https://api.tianditu.gov.cn/v2/search?postStr={...}&type=query&tk=${TIANDITU_TOKEN}
+```
+
+> 生产页面不要优先用直连。
+
+## 参数模板
+
+### A. 普通搜索（queryType=1）
 
 ```json
 {
-    "count": "20",
-    "pois": [
-        {
-            "name": "北京协和医院",
-            "lonlat": "116.42,39.91",
-            "address": "东城区帅府园1号"
-        }
-    ]
+  "keyWord": "北京大学",
+  "level": 12,
+  "mapBound": "116.02524,39.83833,116.65592,39.99185",
+  "queryType": 1,
+  "start": 0,
+  "count": 20,
+  "show": 2
 }
 ```
 
-## 常用模式：搜索并标注
+### B. 视野内搜索（queryType=2）
 
-```javascript
-var poiData = [...]; // 从后端 API 获取的 POI 列表
-
-map.on('load', function() {
-    var bounds = new TMapGL.LngLatBounds();
-
-    poiData.forEach(function(poi) {
-        var coords = poi.lonlat.split(',');
-        var lng = parseFloat(coords[0]);
-        var lat = parseFloat(coords[1]);
-        bounds.extend([lng, lat]);
-
-        // 创建标记
-        var el = document.createElement('div');
-        el.style.backgroundImage = 'url(http://lbs.tianditu.gov.cn/js-api-v5-portal/image/marker.png)';
-        el.style.width = '37px';
-        el.style.height = '33px';
-        el.style.cursor = 'pointer';
-
-        var marker = new TMapGL.Marker({ element: el })
-            .setLngLat([lng, lat])
-            .addTo(map);
-
-        // 点击弹窗
-        var popup = new TMapGL.Popup({ offset: [0, -30] })
-            .setHTML('<b>' + poi.name + '</b><br><span style="color:#666;font-size:12px;">' + (poi.address || '') + '</span>');
-
-        el.addEventListener('click', function() {
-            popup.setLngLat([lng, lat]).addTo(map);
-        });
-    });
-
-    // 自适应视野
-    if (poiData.length > 1) {
-        map.fitBounds(bounds, { padding: 50 });
-    }
-});
+```json
+{
+  "keyWord": "医院",
+  "level": 12,
+  "mapBound": "116.02524,39.83833,116.65592,39.99185",
+  "queryType": 2,
+  "start": 0,
+  "count": 20,
+  "show": 2
+}
 ```
 
-## 搜索参数说明
+### C. 周边搜索（queryType=3）
 
-| 参数 | 说明 |
-|------|------|
-| `keyWord` | 搜索关键词 |
-| `level` | 地图级别 |
-| `mapBound` | 搜索范围 `"西经,南纬,东经,北纬"` |
-| `queryType` | 1=普通搜索, 3=周边搜索, 7=行政区搜索 |
-| `pointLonlat` | 周边搜索中心 `"经度,纬度"` |
-| `queryRadius` | 周边搜索半径（米） |
-| `start` | 分页起始 |
-| `count` | 每页数量（最大 20） |
+```json
+{
+  "keyWord": "公园",
+  "pointLonlat": "116.404,39.915",
+  "queryRadius": 3000,
+  "queryType": 3,
+  "start": 0,
+  "count": 20,
+  "show": 2
+}
+```
 
-## 踩坑提醒
+## 统一状态机（必须）
 
-1. POI 的坐标格式是 `"lng,lat"` 字符串，需要 `split(',')` 解析
-2. 搜索 API 的参数需要 JSON 字符串 + URL 编码
-3. 建议通过后端代理调用，避免前端暴露 token
+必须维护四态：
+
+- `loading`
+- `ready`
+- `empty`
+- `error`
+
+禁止“请求结束后仍显示正在加载”。
+
+## 稳健响应判定（避免“服务正常却报错”）
+
+```javascript
+function unwrapProxyPayload(payload) {
+  if (!payload || payload.success !== true) {
+    throw new Error((payload && payload.error) || '代理请求失败');
+  }
+  return payload.data || {};
+}
+
+function normalizeStatus(status) {
+  // 天地图 status 可能是对象、数组、或缺失
+  if (!status) return { code: 1000, message: 'OK' };
+  if (Array.isArray(status)) {
+    var s0 = status[0] || {};
+    return {
+      code: Number(s0.infocode),
+      message: String(s0.cndesc || ''),
+    };
+  }
+  return {
+    code: Number(status.infocode),
+    message: String(status.cndesc || ''),
+  };
+}
+
+function assertSearchSuccess(data) {
+  var st = normalizeStatus(data && data.status);
+  // 只有 infocode !== 1000 才是错误；"服务正常" 不是错误
+  if (!Number.isFinite(st.code)) return;
+  if (st.code !== 1000) throw new Error(st.message || ('搜索失败，infocode=' + st.code));
+}
+
+function extractPoiList(data) {
+  var resultType = Number(data && data.resultType);
+  if (resultType !== 1) return [];
+  return Array.isArray(data.pois) ? data.pois : [];
+}
+```
+
+## 周边 POI 搜索示例（代理 + 四态）
+
+```javascript
+var state = 'loading'; // loading | ready | empty | error
+
+function setState(next, message) {
+  state = next;
+  var el = document.getElementById('stateBox');
+  if (el) el.textContent = next + (message ? ('：' + message) : '');
+}
+
+function parseLonlat(lonlat) {
+  if (!lonlat || typeof lonlat !== 'string') return null;
+  var parts = lonlat.split(',');
+  if (parts.length !== 2) return null;
+  var lng = Number(parts[0]);
+  var lat = Number(parts[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  return [lng, lat];
+}
+
+function searchNearbyPois(keyword, center, radius) {
+  setState('loading', '正在搜索');
+
+  var url = new URL('/api/tianditu/search', window.location.origin);
+  url.searchParams.set('keyword', keyword);
+  url.searchParams.set('type', 'nearby');
+  url.searchParams.set('lng', String(center[0]));
+  url.searchParams.set('lat', String(center[1]));
+  url.searchParams.set('radius', String(radius));
+  url.searchParams.set('count', '20');
+  url.searchParams.set('show', '2');
+
+  return fetch(url.toString())
+    .then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function(payload) {
+      var data = unwrapProxyPayload(payload);
+      assertSearchSuccess(data);
+      var pois = extractPoiList(data);
+
+      if (!pois.length) {
+        setState('empty', '未找到匹配结果');
+        return [];
+      }
+
+      var features = pois
+        .map(function(p) {
+          var coord = parseLonlat(p.lonlat);
+          if (!coord) return null;
+          return {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: coord },
+            properties: {
+              name: p.name || '',
+              address: p.address || '',
+              distance: p.distance || '',
+            },
+          };
+        })
+        .filter(Boolean);
+
+      if (!features.length) {
+        setState('empty', '结果存在但坐标不可用');
+        return [];
+      }
+
+      setState('ready', '加载完成');
+      return features;
+    })
+    .catch(function(err) {
+      setState('error', err.message);
+      throw err;
+    });
+}
+```
+
+## 红线规则（必须遵守）
+
+1. 优先走 `/api/tianditu/search` 代理，不要默认直连官方接口。
+2. `queryType=3` 必须有 `pointLonlat` + `queryRadius`（或代理的 `lng/lat/radius`）。
+3. `infocode=1000` 视为成功；`cndesc="服务正常"` 不是异常。
+4. `resultType !== 1` 时不要强行按 POI 渲染点图层。
+5. 请求结束必须收敛状态到 `ready/empty/error`，不得卡在 `loading`。

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMapStore } from '../../stores/useMapStore'
 import { useChatStore } from '../../stores/useChatStore'
 import { useCodeRunner } from '../../hooks/useCodeRunner'
+import { visualQaApi } from '../../services/visualQaApi'
 
 /** 默认地图 HTML — 展示中国全景，indigo 主题风格 */
 const DEFAULT_MAP_HTML = `<!DOCTYPE html>
@@ -34,11 +35,35 @@ const DEFAULT_MAP_HTML = `<!DOCTYPE html>
 </html>`
 
 export function MapPreview() {
-  const { currentCode, executing, execError, fixing, fixRetryCount } = useMapStore()
+  const {
+    currentCode,
+    executing,
+    execError,
+    fixing,
+    fixingSource,
+    fixRetryCount,
+    visualChecking,
+    visualFixRetryCount,
+    lastVisualCheckedCodeHash,
+  } = useMapStore()
   const { iframeRef, run } = useCodeRunner()
   const [showError, setShowError] = useState(true)
   const fixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const visualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const visualInFlightRef = useRef(false)
   const defaultLoaded = useRef(false)
+  const MAX_FIX_RETRIES = 2
+  const MAX_VISUAL_FIX_RETRIES = 2
+  const VISUAL_STABLE_DELAY_MS = 1200
+
+  const hashCode = (text: string) => {
+    let hash = 2166136261
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i)
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
+    }
+    return `h${(hash >>> 0).toString(16)}`
+  }
 
   // 加载默认地图或用户代码
   useEffect(() => {
@@ -69,6 +94,8 @@ export function MapPreview() {
           : ''
         const location = src ? `\n来源: ${src}${line ? `:${line}` : ''}${col ? `:${col}` : ''}` : ''
         useMapStore.getState().setExecError(`${e.data.message || '执行错误'}${kindInfo}${requestInfo}${location}`)
+        useMapStore.getState().setVisualChecking(false)
+        visualInFlightRef.current = false
         setShowError(true)
       }
     }
@@ -100,8 +127,120 @@ export function MapPreview() {
     }
   }, [execError, fixing, fixRetryCount])
 
-  const MAX_FIX_RETRIES = 2
+  // 渲染稳定后自动触发视觉巡检
+  useEffect(() => {
+    if (visualTimerRef.current) {
+      clearTimeout(visualTimerRef.current)
+      visualTimerRef.current = null
+    }
+
+    if (!currentCode || executing || fixing || execError) return
+    if (visualFixRetryCount >= MAX_VISUAL_FIX_RETRIES) return
+
+    const codeHash = hashCode(currentCode)
+    if (lastVisualCheckedCodeHash === codeHash) return
+
+    visualTimerRef.current = setTimeout(async () => {
+      const state = useMapStore.getState()
+      if (!state.currentCode || state.executing || state.fixing || state.execError) return
+      if (visualInFlightRef.current) return
+
+      visualInFlightRef.current = true
+      useMapStore.setState({ visualChecking: true, lastVisualCheckedCodeHash: codeHash })
+
+      try {
+        const messages = useChatStore.getState().messages
+        const latestUser = [...messages].reverse().find((m) => m.role === 'user')
+        const hint = latestUser?.content?.trim() || ''
+        const runId = `${Date.now()}-${codeHash.slice(0, 8)}`
+        const result = await visualQaApi.inspect({
+          code: state.currentCode,
+          hint,
+          runId,
+        })
+
+        const latestState = useMapStore.getState()
+        if (latestState.execError || latestState.executing) return
+
+        if (result.status === 'unavailable') {
+          useChatStore.getState().addAssistantMessage([
+            '视觉巡检结果：不可用',
+            `诊断：${result.diagnosis}`,
+            '本轮不会触发自动补修。',
+          ].join('\n'))
+          return
+        }
+
+        if (!result.anomalous) {
+          useChatStore.getState().addAssistantMessage([
+            '视觉巡检结果：通过',
+            `结论：${result.summary}`,
+            `说明：${result.diagnosis}`,
+            `置信度：${Math.round((result.confidence || 0) * 100)}%`,
+          ].join('\n'))
+          return
+        }
+
+        useChatStore.getState().addAssistantMessage([
+          `视觉巡检结果：发现异常（${result.severity}）`,
+          `结论：${result.summary}`,
+          `诊断：${result.diagnosis}`,
+          '系统将自动触发一次视觉回灌补修。',
+        ].join('\n'))
+
+        const retryState = useMapStore.getState()
+        if (retryState.visualFixRetryCount >= MAX_VISUAL_FIX_RETRIES) {
+          useChatStore.getState().addAssistantMessage(`视觉自动补修已达到上限（${MAX_VISUAL_FIX_RETRIES} 轮），本次不再继续。`)
+          return
+        }
+
+        const repairError = [
+          `[视觉巡检异常] 严重级别: ${result.severity}`,
+          `结论: ${result.summary}`,
+          `诊断: ${result.diagnosis}`,
+          `修复建议: ${result.repairHint}`,
+        ].join('\n')
+
+        await useChatStore.getState().autoFixMapError({
+          source: 'visual',
+          overrideError: repairError,
+          userInputHint: '请根据视觉巡检结果做最小改动修复，优先修复渲染异常并保持现有布局与功能。',
+        })
+      } catch (err: any) {
+        useChatStore.getState().addAssistantMessage(`视觉巡检执行失败：${err?.message || '未知错误'}`)
+      } finally {
+        useMapStore.getState().setVisualChecking(false)
+        visualInFlightRef.current = false
+      }
+    }, VISUAL_STABLE_DELAY_MS)
+
+    return () => {
+      if (visualTimerRef.current) {
+        clearTimeout(visualTimerRef.current)
+        visualTimerRef.current = null
+      }
+    }
+  }, [
+    currentCode,
+    executing,
+    fixing,
+    execError,
+    lastVisualCheckedCodeHash,
+    visualFixRetryCount,
+  ])
+
+  useEffect(() => {
+    return () => {
+      if (visualTimerRef.current) {
+        clearTimeout(visualTimerRef.current)
+        visualTimerRef.current = null
+      }
+    }
+  }, [])
+
   const retriesExhausted = !fixing && execError && fixRetryCount >= MAX_FIX_RETRIES
+  const fixingAttempt = fixingSource === 'visual' ? visualFixRetryCount + 1 : fixRetryCount + 1
+  const fixingMax = fixingSource === 'visual' ? MAX_VISUAL_FIX_RETRIES : MAX_FIX_RETRIES
 
   return (
     <div className="relative w-full h-full overflow-hidden">
@@ -123,12 +262,49 @@ export function MapPreview() {
         </div>
       )}
 
+      {/* 视觉巡检阻塞层（按方案要求前台阻塞） */}
+      {visualChecking && !fixing && (
+        <div className="visual-inspect-overlay absolute inset-0 z-[9] pointer-events-auto">
+          <div className="visual-inspect-haze" />
+
+          <div className="visual-inspect-grid visual-inspect-grid-ne" />
+          <div className="visual-inspect-grid visual-inspect-grid-nw" />
+          <div className="visual-inspect-grid visual-inspect-grid-se" />
+          <div className="visual-inspect-grid visual-inspect-grid-sw" />
+
+          <div className="visual-inspect-glow visual-inspect-glow-ne" />
+          <div className="visual-inspect-glow visual-inspect-glow-nw" />
+          <div className="visual-inspect-glow visual-inspect-glow-se" />
+          <div className="visual-inspect-glow visual-inspect-glow-sw" />
+
+          <div className="visual-inspect-scanline" />
+
+          <div className="visual-inspect-center">
+            <div className="visual-inspect-chip">
+              <div className="visual-inspect-chip-title">AI视觉巡检中</div>
+              <div className="visual-inspect-chip-subtitle">正在采样地图画面并进行一致性分析</div>
+              <div className="visual-inspect-progress" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 自动修复中指示器 */}
       {fixing && (
         <div className="absolute top-3 right-3 animate-fade-in z-10">
           <div className="flex items-center gap-2 bg-amber-50/95 backdrop-blur-md shadow-lg shadow-amber-500/10 border border-amber-200/60 text-amber-700 text-xs font-medium px-3 py-2 rounded-xl">
             <div className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-500 rounded-full animate-spin" />
-            正在自动修复 ({fixRetryCount + 1}/{MAX_FIX_RETRIES})...
+            {fixingSource === 'visual' ? '正在视觉回灌补修' : '正在自动修复'} ({fixingAttempt}/{fixingMax})...
+          </div>
+        </div>
+      )}
+
+      {/* 视觉巡检中指示器（前台阻塞） */}
+      {visualChecking && !fixing && (
+        <div className="absolute top-3 right-3 animate-fade-in z-10">
+          <div className="flex items-center gap-2 bg-slate-950/70 backdrop-blur-xl shadow-lg shadow-indigo-900/30 border border-indigo-300/20 text-indigo-100 text-xs font-medium px-3 py-2 rounded-xl">
+            <div className="w-3.5 h-3.5 border-2 border-violet-200 border-t-violet-500 rounded-full animate-spin" />
+            正在进行AI视觉巡检...
           </div>
         </div>
       )}

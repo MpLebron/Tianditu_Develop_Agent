@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
-import * as XLSX from 'xlsx'
+import XLSX, { type WorkBook } from 'xlsx'
 
 export interface ParsedData {
   type: 'csv' | 'excel' | 'geojson' | 'json'
@@ -107,7 +107,7 @@ export class FileParser {
     return this.workbookToData(workbook, 'excel')
   }
 
-  private workbookToData(workbook: XLSX.WorkBook, type: 'csv' | 'excel'): ParsedData {
+  private workbookToData(workbook: WorkBook, type: 'csv' | 'excel'): ParsedData {
     const sheet = workbook.Sheets[workbook.SheetNames[0]]
     const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet)
     const headers = rows.length > 0 ? Object.keys(rows[0]) : []

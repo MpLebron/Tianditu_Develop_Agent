@@ -2,6 +2,21 @@
 
 地址 → 坐标（正向编码）、坐标 → 地址（逆向编码）。
 
+## 推荐调用方式（优先代理）
+
+```text
+GET /api/tianditu/geocode?address=江苏省苏州市吴江区七都镇开弦弓村
+GET /api/tianditu/reverse-geocode?lng=116.40&lat=39.90
+```
+
+代理返回统一结构：
+
+```json
+{ "success": true, "data": { "...": "..." } }
+```
+
+前端应先判断 `success === true`，再读取 `data`。
+
 ## 天地图地理编码 API
 
 ### 正向编码（地址转坐标）
@@ -68,6 +83,9 @@ function reverseGeocode(lng, lat) {
 1. 正向编码（`geocoder?ds=...`）响应只保证有 `location`，不保证有 `addressComponent`
 2. 逆向编码（`geocoder?postStr=...&type=geocode`）响应中的 `result.addressComponent` 才是结构化行政区字段
 3. 禁止在正向编码返回上直接读取 `data.addressComponent.*`（会导致 `Cannot read properties of undefined`）
+4. 禁止使用 `https://api.tianditu.gov.cn/v5/geocoder`
+5. 禁止使用 `https://api.tianditu.gov.cn/geocoder?address=...`（参数格式错误）
+6. 必须维护 `loading / ready / empty / error` 四态，避免界面永久停在 loading
 
 ## 常用模式：地址定位并标注（推荐两步法）
 
