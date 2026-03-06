@@ -81,6 +81,57 @@ export function analyzeGeneratedCode(code: string): CodeGuardIssue[] {
     })
   }
 
+  // 6.1) 搜索接口绕过后端代理（高风险）
+  if (/api\.tianditu\.gov\.cn\/(?:v2\/search|search\/v1\/poi)/i.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'search-proxy-bypassed',
+      message: '检测到直连天地图搜索官方端点，已绕过后端 /api/tianditu/search 代理契约。',
+      suggestion: '统一改为 GET /api/tianditu/search（query string 传参）；禁止前端直连 api.tianditu.gov.cn 搜索端点。',
+    })
+  }
+
+  // 6.2) 搜索代理错误使用 POST + body（高风险）
+  if (
+    /\/api\/tianditu\/search/.test(code) &&
+    /\bmethod\s*:\s*['"]post['"]/i.test(code) &&
+    /JSON\.stringify\(\s*(?:postStr|\{\s*postStr(?:\s*:\s*postStr)?\s*\})\s*\)/.test(code)
+  ) {
+    issues.push({
+      severity: 'error',
+      code: 'search-proxy-post-body',
+      message: '检测到 /api/tianditu/search 使用 POST + body(postStr)，与当前后端 GET 参数契约不一致。',
+      suggestion: '改为 GET + URLSearchParams（keyword/queryType/start/count/pointLonlat/queryRadius/...）。',
+    })
+  }
+
+  // 6.3) 搜索代理未使用绝对 URL（高风险）
+  const hasRelativeSearchProxyLiteral = /['"`]\/api\/tianditu\/search(?:\?|['"`])/.test(code)
+  const hasAbsoluteSearchProxy = /new URL\(\s*['"`]\/api\/tianditu\/search/.test(code)
+  if (hasRelativeSearchProxyLiteral && !hasAbsoluteSearchProxy) {
+    issues.push({
+      severity: 'error',
+      code: 'search-proxy-relative-url',
+      message: '检测到 /api/tianditu/search 使用相对路径，沙箱运行时可能 URL 解析失败。',
+      suggestion: '改为 new URL("/api/tianditu/search", window.location.origin).toString() 构建绝对 URL。',
+    })
+  }
+
+  // 6.4) 搜索代理响应层级处理错误（高风险）
+  const hasSearchProxyFetch = /\/api\/tianditu\/search/.test(code)
+  const likelyReadsTopLevelAsBusiness =
+    /(?:\.then\s*\(\s*function\s*\(\s*data\s*\)|\.then\s*\(\s*\(\s*data\s*\)\s*=>|(?:const|let|var)\s+data\s*=\s*await\s+\w+\.json\(\))[\s\S]{0,1200}\bdata\.(?:resultType|pois|status)\b/.test(code)
+  const hasProxyEnvelopeUnwrap =
+    /\bunwrapProxyPayload\s*\(|\bpayload\.data\b|\b(?:const|let|var)\s+data\s*=\s*payload\.data\b|\b(?:const|let|var)\s+result\s*=\s*payload\.data\b/.test(code)
+  if (hasSearchProxyFetch && likelyReadsTopLevelAsBusiness && !hasProxyEnvelopeUnwrap) {
+    issues.push({
+      severity: 'error',
+      code: 'search-proxy-envelope-mismatch',
+      message: '检测到 /api/tianditu/search 可能把 res.json() 顶层对象当业务结果读取，易导致“有数据却显示无结果”。',
+      suggestion: '先校验 payload.success===true，再使用 payload.data；resultType/pois/status 必须从 payload.data 读取。',
+    })
+  }
+
   // 7) mapbox API 混入（常见于 loadImage/addImage）
   if (/\bmap\.(loadImage|addImage)\s*\(/.test(code)) {
     issues.push({

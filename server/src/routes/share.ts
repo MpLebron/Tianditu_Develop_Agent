@@ -70,6 +70,7 @@ router.post('/maps', async (req, res, next) => {
     const title = typeof req.body?.title === 'string' ? req.body.title : undefined
     const description = typeof req.body?.description === 'string' ? req.body.description : undefined
     const visibility = parseVisibility(req.body?.visibility)
+    const thumbnailBase64 = typeof req.body?.thumbnailBase64 === 'string' ? req.body.thumbnailBase64 : undefined
 
     if (!code.trim()) {
       return res.status(400).json({ success: false, error: '缺少可分享的地图代码' })
@@ -80,6 +81,7 @@ router.post('/maps', async (req, res, next) => {
       title,
       description,
       visibility,
+      thumbnailBase64,
     })
 
     const sharePath = `/share/${created.item.slug}`

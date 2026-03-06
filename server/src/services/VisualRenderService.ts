@@ -26,6 +26,16 @@ export interface VisualRenderResult {
   imageBase64?: string
 }
 
+function normalizeErrText(input: unknown): string {
+  return String(input || '').replace(/\s+/g, ' ').trim()
+}
+
+function isWebGlUnavailableSignal(text: string): boolean {
+  const value = normalizeErrText(text)
+  if (!value) return false
+  return /failed to initialize webgl|webglcontextcreationerror|could not create a webgl context|webgl context/i.test(value)
+}
+
 function pickChromiumExecutablePath(configPath?: string): string | undefined {
   const explicit = String(configPath || '').trim()
   if (explicit) return explicit
@@ -84,6 +94,7 @@ export class VisualRenderService {
     const htmlPath = resolve(targetDir, 'index.html')
     const pageUrl = `${origin}/share-assets/${folderName}/index.html`
     const executablePath = pickChromiumExecutablePath(this.opts.chromiumPath)
+    const expectsTMapGL = /TMapGL|api\.tianditu\.gov\.cn\/api\/v5\/js/i.test(input.code || '')
 
     let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null
     try {
@@ -109,10 +120,24 @@ export class VisualRenderService {
         deviceScaleFactor: 1,
       })
       const page = await context.newPage()
+      const runtimeErrors: string[] = []
+      let mainDocStatus: number | undefined
       page.setDefaultTimeout(timeout)
       page.setDefaultNavigationTimeout(timeout)
+      page.on('pageerror', (err) => {
+        runtimeErrors.push(normalizeErrText((err as any)?.message || err))
+      })
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') {
+          runtimeErrors.push(normalizeErrText(msg.text()))
+        }
+      })
 
-      await page.goto(pageUrl, { waitUntil: 'domcontentloaded' })
+      const nav = await page.goto(pageUrl, { waitUntil: 'domcontentloaded' })
+      mainDocStatus = nav?.status()
+      if (mainDocStatus && mainDocStatus >= 400) {
+        return { ok: false, reason: `visual page load failed: HTTP ${mainDocStatus}` }
+      }
       await page.waitForTimeout(900)
       await page.waitForResponse((res) => {
         const u = res.url()
@@ -129,6 +154,14 @@ export class VisualRenderService {
       await context.close()
       await browser.close()
       browser = null
+
+      const hasWebGlError = runtimeErrors.some(isWebGlUnavailableSignal)
+      if (expectsTMapGL && hasWebGlError) {
+        return {
+          ok: false,
+          reason: '视觉巡检运行环境不支持 WebGL，无法可靠渲染天地图截图。',
+        }
+      }
 
       return {
         ok: true,
@@ -151,4 +184,3 @@ export class VisualRenderService {
     }
   }
 }
-

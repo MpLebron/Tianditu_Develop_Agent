@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>北京到上海驾车路线规划</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        /* 路线信息面板 */
+        .route-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            min-width: 280px;
+        }
+        .route-panel h2 {
+            margin: 0 0 16px;
+            font-size: 18px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .route-panel h2::before {
+            content: "🚗";
+        }
+        .route-info {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 16px;
+        }
+        .info-item {
+            text-align: center;
+        }
+        .info-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1890ff;
+        }
+        .info-label {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+        .route-status {
+            font-size: 13px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 12px;
+        }
+        .status-loading {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
+        .status-ready {
+            background: #f6ffed;
+            color: #52c41a;
+        }
+        .status-error {
+            background: #fff1f0;
+            color: #f5222d;
+        }
+        .status-empty {
+            background: #fffbe6;
+            color: #faad14;
+        }
+        /* 起点终点标记 */
+        .marker-start {
+            background: #52c41a;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .marker-end {
+            background: #f5222d;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        /* 控制按钮 */
+        .control-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 12px;
+            background: #1890ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .control-btn:hover {
+            background: #40a9ff;
+        }
+        .control-btn:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <!-- 路线信息面板 -->
+    <div class="route-panel">
+        <h2>北京 → 上海</h2>
+        <div class="route-info">
+            <div class="info-item">
+                <div id="distanceVal" class="info-value">-</div>
+                <div class="info-label">公里</div>
+            </div>
+            <div class="info-item">
+                <div id="durationVal" class="info-value">-</div>
+                <div class="info-label">小时</div>
+            </div>
+        </div>
+        <div id="routeStatus" class="route-status status-loading">正在规划路线...</div>
+        <button id="planBtn" class="control-btn" onclick="planRoute()">重新规划</button>
+    </div>
+
+    <!-- 天地图 SDK -->
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d" type="text/javascript"></script>
+    
+    <script>
+        // 北京和上海坐标 [经度，纬度]
+        var beijing = [116.404, 39.915];
+        var shanghai = [121.474, 31.230];
+        
+        // 地图实例
+        var map;
+        
+        // 初始化地图
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: beijing,
+                zoom: 5,
+                pitch: 0,
+                bearing: 0
+            });
+            
+            map.on('load', function() {
+                // 添加控件
+                map.addControl(new TMapGL.NavigationControl(), 'top-right');
+                map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+                
+                // 添加起点和终点标记
+                addMarker(beijing, 'marker-start', '北京（起点）');
+                addMarker(shanghai, 'marker-end', '上海（终点）');
+                
+                // 自动规划路线
+                planRoute();
+            });
+        }
+        
+        // 添加标记点
+        function addMarker(lngLat, className, title) {
+            var el = document.createElement('div');
+            el.className = className;
+            el.title = title;
+            
+            new TMapGL.Marker({ element: el })
+                .setLngLat(lngLat)
+                .addTo(map);
+        }
+        
+        // 构建驾车路线代理 URL
+        function buildDriveUrl(orig, dest, style) {
+            var url = new URL('/api/tianditu/drive', window.location.origin);
+            url.searchParams.set('origLng', String(orig[0]));
+            url.searchParams.set('origLat', String(orig[1]));
+            url.searchParams.set('destLng', String(dest[0]));
+            url.searchParams.set('destLat', String(dest[1]));
+            url.searchParams.set('style', String(style || 0));
+            return url.toString();
+        }
+        
+        // 解析经纬度字符串
+        function parseLatLonPairs(raw) {
+            if (!raw) return [];
+            return raw
+                .split(';')
+                .map(function(pair) {
+                    var parts = pair.split(',');
+                    if (parts.length !== 2) return null;
+                    var lng = Number(parts[0]);
+                    var lat = Number(parts[1]);
+                    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+                    return [lng, lat];
+                })
+                .filter(Boolean);
+        }
+        
+        // 更新状态
+        function updateStatus(state, message) {
+            var statusEl = document.getElementById('routeStatus');
+            var btn = document.getElementById('planBtn');
+            
+            statusEl.className = 'route-status status-' + state;
+            statusEl.textContent = message;
+            
+            if (state === 'loading') {
+                btn.disabled = true;
+                btn.textContent = '规划中...';
+            } else {
+                btn.disabled = false;
+                btn.textContent = '重新规划';
+            }
+        }
+        
+        // 规划路线
+        function planRoute() {
+            updateStatus('loading', '正在规划路线...');
+            
+            // 清空旧路线
+            if (map.getSource('route')) {
+                map.removeLayer('route-line');
+                map.removeSource('route');
+            }
+            
+            fetch(buildDriveUrl(beijing, shanghai, 0))
+                .then(function(res) {
+                    if (!res.ok) {
+                        throw new Error('路线请求失败：HTTP ' + res.status);
+                    }
+                    return res.json();
+                })
+                .then(function(payload) {
+                    // 检查代理返回状态
+                    if (!payload || payload.success !== true) {
+                        throw new Error((payload && payload.error) || '代理请求失败');
+                    }
+                    
+                    var route = payload.data || {};
+                    
+                    // 解析路线坐标
+                    var coords = parseLatLonPairs(route.routelatlon || '');
+                    
+                    if (!coords.length) {
+                        throw new Error('未获取到可绘制的路线坐标');
+                    }
+                    
+                    // 添加路线数据源
+                    map.addSource('route', {
+                        type: 'geojson',
+                        data: {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'LineString',
+                                coordinates: coords
+                            }
+                        }
+                    });
+                    
+                    // 添加路线图层
+                    map.addLayer({
+                        id: 'route-line',
+                        type: 'line',
+                        source: 'route',
+                        paint: {
+                            'line-color': '#1890ff',
+                            'line-width': 6,
+                            'line-opacity': 0.85
+                        },
+                        layout: {
+                            'line-cap': 'round',
+                            'line-join': 'round'
+                        }
+                    });
+                    
+                    // 更新距离和时长信息
+                    var distance = route.distance || 0;
+                    var duration = route.duration || 0;
+                    var hours = duration / 3600;
+                    
+                    document.getElementById('distanceVal').textContent = distance.toFixed(1);
+                    document.getElementById('durationVal').textContent = hours.toFixed(1);
+                    
+                    // 调整地图视野适应路线
+                    var bounds = new TMapGL.LngLatBounds();
+                    coords.forEach(function(c) {
+                        bounds.extend(c);
+                    });
+                    map.fitBounds(bounds, { padding: 100, maxZoom: 12 });
+                    
+                    updateStatus('ready', '路线规划成功 ✓');
+                })
+                .catch(function(err) {
+                    console.error('路线规划错误:', err);
+                    document.getElementById('distanceVal').textContent = '-';
+                    document.getElementById('durationVal').textContent = '-';
+                    updateStatus('error', '规划失败：' + err.message);
+                });
+        }
+        
+        // 页面加载完成后初始化地图
+        window.addEventListener('DOMContentLoaded', initMap);
+    </script>
+</body>
+</html>

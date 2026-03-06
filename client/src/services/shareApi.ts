@@ -83,7 +83,13 @@ function normalizeShareCreate(item: ShareCreateResult): ShareCreateResult {
 }
 
 export const shareApi = {
-  async create(payload: { code: string; title?: string; description?: string; visibility?: ShareVisibility }) {
+  async create(payload: {
+    code: string
+    title?: string
+    description?: string
+    visibility?: ShareVisibility
+    thumbnailBase64?: string
+  }) {
     const data = await requestJson<ShareCreateResult>('/api/share/maps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

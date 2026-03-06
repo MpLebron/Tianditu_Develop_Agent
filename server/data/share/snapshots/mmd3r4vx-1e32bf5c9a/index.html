@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全国妇联中心分布可视化</title>
+    <style>
+        :root {
+            /* 颜色变量 */
+            --color-primary: #E84A5F;
+            --color-primary-light: #F8B195;
+            --color-secondary: #355C7D;
+            --color-secondary-light: #6C5B7B;
+            --color-gray-100: #F5F5F5;
+            --color-gray-200: #EEEEEE;
+            --color-gray-300: #E0E0E0;
+            --color-gray-400: #BDBDBD;
+            --color-gray-500: #9E9E9E;
+            --color-gray-600: #757575;
+            --color-gray-700: #616161;
+            --color-gray-800: #424242;
+            --color-gray-900: #212121;
+            
+            /* 间距变量 */
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 16px;
+            --space-lg: 24px;
+            --space-xl: 32px;
+            
+            /* 阴影变量 */
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            --shadow-md: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+            --shadow-lg: 0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23);
+            
+            /* 圆角变量 */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 16px;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: var(--color-gray-800);
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .app-container {
+            display: flex;
+            height: 100vh;
+            width: 100%;
+        }
+        
+        .sidebar {
+            width: 320px;
+            height: 100%;
+            background-color: white;
+            box-shadow: var(--shadow-sm);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+        }
+        
+        .sidebar-header {
+            padding: var(--space-md);
+            border-bottom: 1px solid var(--color-gray-200);
+            background-color: var(--color-primary);
+            color: white;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.25rem;
+            margin-bottom: var(--space-xs);
+        }
+        
+        .sidebar-header p {
+            font-size: 0.875rem;
+            opacity: 0.9;
+        }
+        
+        .filter-container {
+            padding: var(--space-md);
+            border-bottom: 1px solid var(--color-gray-200);
+            background-color: var(--color-gray-100);
+        }
+        
+        .filter-group {
+            margin-bottom: var(--space-sm);
+        }
+        
+        .filter-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: var(--space-xs);
+            color: var(--color-gray-700);
+        }
+        
+        .filter-group select {
+            width: 100%;
+            padding: var(--space-sm);
+            border: 1px solid var(--color-gray-300);
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            background-color: white;
+        }
+        
+        .filter-group select:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 2px rgba(232, 74, 95, 0.2);
+        }
+        
+        .centers-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-sm);
+        }
+        
+        .center-card {
+            background-color: white;
+            border-radius: var(--radius-md);
+            padding: var(--space-md);
+            margin-bottom: var(--space-sm);
+            box-shadow: var(--shadow-sm);
+            border-left: 3px solid var(--color-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .center-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+        
+        .center-card.active {
+            border-left-color: var(--color-secondary);
+            background-color: var(--color-gray-100);
+        }
+        
+        .center-card h3 {
+            font-size: 0.95rem;
+            margin-bottom: var(--space-xs);
+            color: var(--color-gray-900);
+        }
+        
+        .center-card p {
+            font-size: 0.8rem;
+            color: var(--color-gray-600);
+            margin-bottom: var(--space-xs);
+            display: flex;
+            align-items: flex-start;
+        }
+        
+        .center-card p:last-child {
+            margin-bottom: 0;
+        }
+        
+        .center-card p i {
+            margin-right: var(--space-xs);
+            min-width: 16px;
+            color: var(--color-gray-500);
+        }
+        
+        .map-container {
+            flex: 1;
+            height: 100%;
+        }
+        
+        .status-bar {
+            position: absolute;
+            top: var(--space-md);
+            left: 340px;
+            right: var(--space-md);
+            background-color: white;
+            border-radius: var(--radius-md);
+            padding: var(--space-sm) var(--space-md);
+            box-shadow: var(--shadow-sm);
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .status-bar .stats {
+            display: flex;
+            gap: var(--space-lg);
+        }
+        
+        .status-bar .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .status-bar .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--color-primary);
+        }
+        
+        .status-bar .stat-label {
+            font-size: 0.75rem;
+            color: var(--color-gray-600);
+        }
+        
+        .loading-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--color-gray-200);
+            border-top: 4px solid var(--color-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: var(--space-md);
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .empty-state {
+            padding: var(--space-xl);
+            text-align: center;
+            color: var(--color-gray-600);
+        }
+        
+        .empty-state h3 {
+            margin-bottom: var(--space-md);
+            color: var(--color-gray-700);
+        }
+        
+        .empty-state p {
+            margin-bottom: var(--space-md);
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: var(--space-sm) var(--space-md);
+            background-color: var(--color-primary);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn:hover {
+            background-color: #d43a4d;
+        }
+        
+        .btn-secondary {
+            background-color: var(--color-gray-200);
+            color: var(--color-gray-800);
+        }
+        
+        .btn-secondary:hover {
+            background-color: var(--color-gray-300);
+        }
+        
+        .popup-content {
+            max-width: 300px;
+        }
+        
+        .popup-content h3 {
+            font-size: 1rem;
+            margin-bottom: var(--space-sm);
+            color: var(--color-primary);
+            border-bottom: 1px solid var(--color-gray-200);
+            padding-bottom: var(--space-xs);
+        }
+        
+        .popup-content p {
+            font-size: 0.875rem;
+            margin-bottom: var(--space-xs);
+            display: flex;
+        }
+        
+        .popup-content p strong {
+            min-width: 70px;
+            color: var(--color-gray-700);
+        }
+        
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                position: fixed;
+                bottom: 0;
+                width: 100%;
+                height: 60%;
+                transform: translateY(calc(100% - 60px));
+                border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+            }
+            
+            .sidebar.expanded {
+                transform: translateY(0);
+            }
+            
+            .sidebar-header {
+                padding: var(--space-sm) var(--space-md);
+                cursor: pointer;
+            }
+            
+            .sidebar-header::after {
+                content: '';
+                display: block;
+                width: 40px;
+                height: 4px;
+                background-color: rgba(255, 255, 255, 0.5);
+                border-radius: 2px;
+                margin: var(--space-xs) auto 0;
+            }
+            
+            .status-bar {
+                left: var(--space-md);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>全国妇联中心分布</h1>
+                <p>共收录 <span id="total-count">0</span> 个妇联中心</p>
+            </div>
+            <div class="filter-container">
+                <div class="filter-group">
+                    <label for="province-select">选择省份</label>
+                    <select id="province-select">
+                        <option value="">全部省份</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="city-select">选择城市</label>
+                    <select id="city-select">
+                        <option value="">全部城市</option>
+                    </select>
+                </div>
+            </div>
+            <div class="centers-list" id="centers-list">
+                <!-- 中心列表将通过 JS 动态生成 -->
+                <div class="empty-state">
+                    <h3>加载中...</h3>
+                    <div class="loading-spinner"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="map-container" id="map"></div>
+        
+        <div class="status-bar">
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-value" id="province-count">0</span>
+                    <span class="stat-label">省份</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="city-count">0</span>
+                    <span class="stat-label">城市</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="filtered-count">0</span>
+                    <span class="stat-label">当前筛选</span>
+                </div>
+            </div>
+            <button class="btn btn-secondary" id="reset-filters">重置筛选</button>
+        </div>
+        
+        <div class="loading-container" id="loading-container">
+            <div class="loading-spinner"></div>
+            <p>正在加载妇联中心数据...</p>
+        </div>
+    </div>
+
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    <script>
+        // 全局变量
+        var map;
+        var allCenters = [];
+        var filteredCenters = [];
+        var provinces = new Set();
+        var cities = new Map(); // 省份 -> 城市集合
+        var activeMarkerId = null;
+        
+        // 初始化地图
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: [104.5, 38],
+                zoom: 4,
+                pitch: 0,
+                bearing: 0
+            });
+            
+            map.on('load', function() {
+                // 添加导航控件
+                map.addControl(new TMapGL.NavigationControl(), 'top-right');
+                map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+                
+                // 加载数据
+                loadCentersData();
+            });
+        }
+        
+        // 加载妇联中心数据
+        function loadCentersData() {
+            fetch('/share-assets/mmd3r4vx-1e32bf5c9a/assets/asset-1.geojson')
+                .then(response => response.json())
+                .then(rawData => {
+                    // 处理数据
+                    allCenters = rawData.features;
+                    filteredCenters = [...allCenters];
+                    
+                    // 提取省份和城市信息
+                    extractProvinceAndCityInfo();
+                    
+                    // 更新统计信息
+                    updateStats();
+                    
+                    // 填充筛选器选项
+                    populateFilters();
+                    
+                    // 渲染地图点位
+                    renderMapPoints();
+                    
+                    // 渲染列表
+                    renderCentersList();
+                    
+                    // 隐藏加载状态
+                    document.getElementById('loading-container').style.display = 'none';
+                })
+                .catch(error => {
+                    console.error('加载数据失败:', error);
+                    document.getElementById('loading-container').innerHTML = `
+                        <div class="empty-state">
+                            <h3>加载失败</h3>
+                            <p>无法加载妇联中心数据，请稍后重试。</p>
+                            <button class="btn" onclick="location.reload()">重新加载</button>
+                        </div>
+                    `;
+                });
+        }
+        
+        // 提取省份和城市信息
+        function extractProvinceAndCityInfo() {
+            allCenters.forEach(center => {
+                const props = center.properties;
+                const province = props.provName;
+                const city = props.地名 || '未知城市';
+                
+                // 添加省份
+                provinces.add(province);
+                
+                // 添加城市到对应省份
+                if (!cities.has(province)) {
+                    cities.set(province, new Set());
+                }
+                cities.get(province).add(city);
+            });
+        }
+        
+        // 更新统计信息
+        function updateStats() {
+            document.getElementById('total-count').textContent = allCenters.length;
+            document.getElementById('province-count').textContent = provinces.size;
+            
+            // 计算城市总数
+            let totalCities = 0;
+            cities.forEach(citySet => {
+                totalCities += citySet.size;
+            });
+            document.getElementById('city-count').textContent = totalCities;
+            
+            document.getElementById('filtered-count').textContent = filteredCenters.length;
+        }
+        
+        // 填充筛选器选项
+        function populateFilters() {
+            const provinceSelect = document.getElementById('province-select');
+            const citySelect = document.getElementById('city-select');
+            
+            // 清空现有选项
+            provinceSelect.innerHTML = '<option value="">全部省份</option>';
+            citySelect.innerHTML = '<option value="">全部城市</option>';
+            
+            // 添加省份选项
+            Array.from(provinces).sort().forEach(province => {
+                const option = document.createElement('option');
+                option.value = province;
+                option.textContent = province;
+                provinceSelect.appendChild(option);
+            });
+            
+            // 省份选择变化时更新城市选项
+            provinceSelect.addEventListener('change', function() {
+                const selectedProvince = this.value;
+                
+                // 清空城市选项
+                citySelect.innerHTML = '<option value="">全部城市</option>';
+                
+                if (selectedProvince) {
+                    // 添加选中省份的城市
+                    const provinceCities = cities.get(selectedProvince) || new Set();
+                    Array.from(provinceCities).sort().forEach(city => {
+                        const option = document.createElement('option');
+                        option.value = city;
+                        option.textContent = city;
+                        citySelect.appendChild(option);
+                    });
+                }
+                
+                // 触发筛选
+                filterCenters();
+            });
+            
+            // 城市选择变化时触发筛选
+            citySelect.addEventListener('change', filterCenters);
+            
+            // 重置筛选按钮
+            document.getElementById('reset-filters').addEventListener('click', resetFilters);
+        }
+        
+        // 筛选中心
+        function filterCenters() {
+            const selectedProvince = document.getElementById('province-select').value;
+            const selectedCity = document.getElementById('city-select').value;
+            
+            filteredCenters = allCenters.filter(center => {
+                const props = center.properties;
+                const matchProvince = !selectedProvince || props.provName === selectedProvince;
+                const matchCity = !selectedCity || props.地名 === selectedCity;
+                return matchProvince && matchCity;
+            });
+            
+            // 更新统计信息
+            document.getElementById('filtered-count').textContent = filteredCenters.length;
+            
+            // 重新渲染地图和列表
+            renderMapPoints();
+            renderCentersList();
+            
+            // 如果有筛选结果，自动缩放到结果范围
+            if (filteredCenters.length > 0) {
+                fitMapToFilteredCenters();
+            }
+        }
+        
+        // 重置筛选
+        function resetFilters() {
+            document.getElementById('province-select').value = '';
+            document.getElementById('city-select').innerHTML = '<option value="">全部城市</option>';
+            
+            filteredCenters = [...allCenters];
+            
+            // 更新统计信息
+            document.getElementById('filtered-count').textContent = filteredCenters.length;
+            
+            // 重新渲染地图和列表
+            renderMapPoints();
+            renderCentersList();
+            
+            // 重置地图视图
+            map.flyTo({
+                center: [104.5, 38],
+                zoom: 4,
+                duration: 1000
+            });
+        }
+        
+        // 渲染地图点位
+        function renderMapPoints() {
+            // 移除现有图层和数据源
+            if (map.getSource('centers')) {
+                map.removeLayer('centers-points');
+                map.removeSource('centers');
+            }
+            
+            // 添加新数据源
+            map.addSource('centers', {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features: filteredCenters
+                }
+            });
+            
+            // 添加点图层
+            map.addLayer({
+                id: 'centers-points',
+                type: 'circle',
+                source: 'centers',
+                paint: {
+                    'circle-radius': 6,
+                    'circle-color': '#E84A5F',  // 直接使用颜色代码，而不是CSS变量
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': '#ffffff',
+                    'circle-opacity': 0.8
+                }
+            });
+            
+            // 添加点击事件
+            map.on('click', 'centers-points', function(e) {
+                if (!e.features || !e.features.length) return;
+                
+                const feature = e.features[0];
+                const props = feature.properties;
+                const geometry = feature.geometry;
+                
+                // 安全提取坐标
+                let coordinates;
+                if (Array.isArray(geometry.coordinates) && geometry.coordinates.length > 0) {
+                    if (geometry.type === 'Point') {
+                        coordinates = geometry.coordinates;
+                    } else if (geometry.type === 'MultiPoint' && Array.isArray(geometry.coordinates[0])) {
+                        coordinates = geometry.coordinates[0];
+                    }
+                }
+                
+                if (!coordinates) return;
+                
+                // 创建弹窗内容
+                const popupContent = `
+                    <div class="popup-content">
+                        <h3>${props.name}</h3>
+                        <p><strong>地址：</strong>${props.address}</p>
+                        <p><strong>电话：</strong>${props.telephone}</p>
+                        <p><strong>工作时间：</strong>${props.workTime}</p>
+                        <p><strong>所在地：</strong>${props.provName} ${props.地名 || ''}</p>
+                    </div>
+                `;
+                
+                // 显示弹窗
+                new TMapGL.Popup({ maxWidth: '320px', offset: [0, -10] })
+                    .setLngLat(coordinates)
+                    .setHTML(popupContent)
+                    .addTo(map);
+                
+                // 高亮对应列表项
+                highlightListItem(feature.id);
+            });
+            
+            // 鼠标悬停效果
+            map.on('mouseenter', 'centers-points', function() {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+            
+            map.on('mouseleave', 'centers-points', function() {
+                map.getCanvas().style.cursor = '';
+            });
+        }
+        
+        // 渲染中心列表
+        function renderCentersList() {
+            const listContainer = document.getElementById('centers-list');
+            
+            // 清空现有列表
+            listContainer.innerHTML = '';
+            
+            // 检查是否有筛选结果
+            if (filteredCenters.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="empty-state">
+                        <h3>未找到符合条件的妇联中心</h3>
+                        <p>请尝试调整筛选条件</p>
+                        <button class="btn" onclick="resetFilters()">重置筛选</button>
+                    </div>
+                `;
+                return;
+            }
+            
+            // 添加列表项
+            filteredCenters.forEach((center, index) => {
+                const props = center.properties;
+                
+                const listItem = document.createElement('div');
+                listItem.className = 'center-card';
+                listItem.dataset.id = center.id || index;
+                listItem.innerHTML = `
+                    <h3>${props.name}</h3>
+                    <p><i>📍</i> ${props.address}</p>
+                    <p><i>📞</i> ${props.telephone}</p>
+                    <p><i>🕒</i> ${props.workTime}</p>
+                `;
+                
+                // 点击列表项定位到地图
+                listItem.addEventListener('click', function() {
+                    // 安全提取坐标
+                    const geometry = center.geometry;
+                    let coordinates;
+                    
+                    if (Array.isArray(geometry.coordinates) && geometry.coordinates.length > 0) {
+                        if (geometry.type === 'Point') {
+                            coordinates = geometry.coordinates;
+                        } else if (geometry.type === 'MultiPoint' && Array.isArray(geometry.coordinates[0])) {
+                            coordinates = geometry.coordinates[0];
+                        }
+                    }
+                    
+                    if (!coordinates) return;
+                    
+                    // 飞行到点位
+                    map.flyTo({
+                        center: coordinates,
+                        zoom: 14,
+                        duration: 1000
+                    });
+                    
+                    // 显示弹窗
+                    setTimeout(() => {
+                        const popupContent = `
+                            <div class="popup-content">
+                                <h3>${props.name}</h3>
+                                <p><strong>地址：</strong>${props.address}</p>
+                                <p><strong>电话：</strong>${props.telephone}</p>
+                                <p><strong>工作时间：</strong>${props.workTime}</p>
+                                <p><strong>所在地：</strong>${props.provName} ${props.地名 || ''}</p>
+                            </div>
+                        `;
+                        
+                        new TMapGL.Popup({ maxWidth: '320px', offset: [0, -10] })
+                            .setLngLat(coordinates)
+                            .setHTML(popupContent)
+                            .addTo(map);
+                    }, 1000);
+                    
+                    // 高亮当前列表项
+                    highlightListItem(center.id || index);
+                });
+                
+                listContainer.appendChild(listItem);
+            });
+        }
+        
+        // 高亮列表项
+        function highlightListItem(id) {
+            // 移除所有高亮
+            const allItems = document.querySelectorAll('.center-card');
+            allItems.forEach(item => item.classList.remove('active'));
+            
+            // 高亮当前项
+            const targetItem = document.querySelector(`.center-card[data-id="${id}"]`);
+            if (targetItem) {
+                targetItem.classList.add('active');
+                // 滚动到可视区域
+                targetItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            
+            // 更新当前活动标记
+            activeMarkerId = id;
+        }
+        
+        // 缩放地图以适应筛选结果
+        function fitMapToFilteredCenters() {
+            if (filteredCenters.length === 0) return;
+            
+            const bounds = new TMapGL.LngLatBounds();
+            
+            filteredCenters.forEach(center => {
+                const geometry = center.geometry;
+                
+                // 安全提取坐标
+                if (Array.isArray(geometry.coordinates)) {
+                    if (geometry.type === 'Point') {
+                        bounds.extend(geometry.coordinates);
+                    } else if (geometry.type === 'MultiPoint' && 
+                               Array.isArray(geometry.coordinates[0]) && 
+                               geometry.coordinates[0].length >= 2) {
+                        bounds.extend(geometry.coordinates[0]);
+                    }
+                }
+            });
+            
+            // 缩放地图以适应边界
+            map.fitBounds(bounds, {
+                padding: 50,
+                maxZoom: 12,
+                duration: 1000
+            });
+        }
+        
+        // 移动端侧边栏展开/收起
+        function setupMobileInteraction() {
+            const sidebar = document.querySelector('.sidebar');
+            const header = document.querySelector('.sidebar-header');
+            
+            if (window.innerWidth <= 768) {
+                header.addEventListener('click', function() {
+                    sidebar.classList.toggle('expanded');
+                });
+            }
+        }
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            setupMobileInteraction();
+            
+            // 监听窗口大小变化
+            window.addEventListener('resize', function() {
+                setupMobileInteraction();
+            });
+        });
+    </script>
+</body>
+</html>

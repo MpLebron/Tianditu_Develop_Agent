@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>村改项目签约进度可视化</title>
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        :root {
+            --bg-page: #f5f7fb;
+            --bg-card: #ffffff;
+            --text-primary: #16213a;
+            --text-secondary: #5b6780;
+            --text-muted: #8a95ab;
+            
+            --brand-500: #2f6bff;
+            --brand-600: #2558d9;
+            --brand-100: #e8f0ff;
+            
+            --success-500: #12a150;
+            --success-100: #e8f7ef;
+            --warning-500: #e08a00;
+            --warning-100: #fef5e6;
+            --danger-500: #d9363e;
+            --danger-100: #fde8e9;
+            --unknown-500: #8a95ab;
+            --unknown-100: #f0f2f5;
+            
+            --border-soft: #e3e8f2;
+            --shadow-card: 0 8px 24px rgba(22, 33, 58, 0.08);
+            --radius-card: 16px;
+            --radius-control: 12px;
+            
+            --font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: var(--font-family);
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg-page);
+        }
+        
+        #app {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 地图区域 */
+        #map-container {
+            flex: 7;
+            height: 100%;
+            position: relative;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .map-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background: var(--bg-card);
+            padding: 16px 20px;
+            border-radius: var(--radius-card);
+            box-shadow: var(--shadow-card);
+            max-width: 320px;
+        }
+        
+        .map-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        
+        .map-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+        
+        /* 侧边栏 */
+        #sidebar {
+            flex: 3;
+            max-width: 400px;
+            height: 100%;
+            background: var(--bg-card);
+            border-left: 1px solid var(--border-soft);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        
+        .sidebar-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        
+        .sidebar-subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 20px;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        
+        .stat-card {
+            background: var(--bg-page);
+            padding: 16px;
+            border-radius: var(--radius-card);
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .chart-container {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            overflow-y: auto;
+        }
+        
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+        }
+        
+        .chart-wrapper {
+            background: var(--bg-page);
+            border-radius: var(--radius-card);
+            padding: 16px;
+            height: 240px;
+        }
+        
+        #chart-progress, #chart-groups, #chart-area {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .detail-panel {
+            padding: 20px;
+            border-top: 1px solid var(--border-soft);
+            background: var(--bg-page);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .detail-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+        
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        
+        .detail-item {
+            font-size: 14px;
+        }
+        
+        .detail-label {
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        
+        .detail-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        .loading-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+        }
+        
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border-soft);
+            border-top-color: var(--brand-500);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 12px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            #app {
+                flex-direction: column;
+            }
+            
+            #sidebar {
+                max-width: 100%;
+                height: 40%;
+            }
+            
+            .map-overlay {
+                max-width: calc(100% - 40px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 地图区域 -->
+        <div id="map-container">
+            <div id="map"></div>
+            <div class="map-overlay">
+                <div class="map-title">村改项目签约进度</div>
+                <div class="map-subtitle">268个地块 • 点击查看详情</div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--success-500);"></div>
+                        <span>已签约</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--warning-500);"></div>
+                        <span>未签约</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--unknown-500);"></div>
+                        <span>状态未知</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 侧边分析栏 -->
+        <div id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">数据分析面板</div>
+                <div class="sidebar-subtitle">实时统计与图表分析</div>
+            </div>
+            
+            <!-- 统计卡片 -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="total-count">--</div>
+                    <div class="stat-label">总地块数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="signed-count">--</div>
+                    <div class="stat-label">已签约</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="unsigned-count">--</div>
+                    <div class="stat-label">未签约</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="unknown-count">--</div>
+                    <div class="stat-label">状态未知</div>
+                </div>
+            </div>
+            
+            <!-- 图表区域 -->
+            <div class="chart-container">
+                <div>
+                    <div class="chart-title">签约进度</div>
+                    <div class="chart-wrapper">
+                        <div id="chart-progress"></div>
+                    </div>
+                </div>
+                
+                <div>
+                    <div class="chart-title">按经济社分布</div>
+                    <div class="chart-wrapper">
+                        <div id="chart-groups"></div>
+                    </div>
+                </div>
+                
+                <div>
+                    <div class="chart-title">面积分布</div>
+                    <div class="chart-wrapper">
+                        <div id="chart-area"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 详情面板 -->
+            <div class="detail-panel">
+                <div class="detail-title">地块详情</div>
+                <div id="detail-content" class="empty-state">
+                    <div class="empty-icon">📍</div>
+                    <div>点击地图上的地块查看详细信息</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== 共享常量与状态 =====
+        const DATA_URL = '/share-assets/mmc4iz19-3bcc01da99/assets/asset-1.geojson';
+        
+        const STATUS_COLORS = {
+            '已签约': '#12a150',
+            '未签约': '#e08a00',
+            '': '#8a95ab',
+            '未知': '#8a95ab'
+        };
+        
+        const STATUS_BG_COLORS = {
+            '已签约': 'rgba(18, 161, 80, 0.1)',
+            '未签约': 'rgba(224, 138, 0, 0.1)',
+            '': 'rgba(138, 149, 171, 0.1)',
+            '未知': 'rgba(138, 149, 171, 0.1)'
+        };
+        
+        // 图表实例
+        let chartProgress = null;
+        let chartGroups = null;
+        let chartArea = null;
+        
+        // 数据状态
+        let geoData = null;
+        let stats = {
+            total: 0,
+            signed: 0,
+            unsigned: 0,
+            unknown: 0,
+            byEconomic: {},
+            byGroup: {},
+            areaStats: { signed: 0, unsigned: 0, unknown: 0 }
+        };
+        
+        // ===== 初始化函数 =====
+        function initMap() {
+            var map = new TMapGL.Map('map', {
+                center: [113.603, 23.538],
+                zoom: 16,
+                pitch: 45,
+                bearing: 0
+            });
+            
+            // 添加导航控件
+            map.on('load', function() {
+                map.addControl(new TMapGL.NavigationControl(), 'top-right');
+                map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+                
+                // 加载数据
+                loadData(map);
+            });
+            
+            return map;
+        }
+        
+        function initCharts() {
+            const progressDom = document.getElementById('chart-progress');
+            const groupsDom = document.getElementById('chart-groups');
+            const areaDom = document.getElementById('chart-area');
+            
+            if (!progressDom || !groupsDom || !areaDom) {
+                console.error('图表容器未找到');
+                return;
+            }
+            
+            chartProgress = echarts.init(progressDom);
+            chartGroups = echarts.init(groupsDom);
+            chartArea = echarts.init(areaDom);
+            
+            // 初始空状态
+            chartProgress.setOption({
+                title: { text: '加载中...', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } }
+            });
+            
+            chartGroups.setOption({
+                title: { text: '加载中...', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } }
+            });
+            
+            chartArea.setOption({
+                title: { text: '加载中...', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } }
+            });
+        }
+        
+        // ===== 数据加载与处理 =====
+        function loadData(map) {
+            showLoading();
+            
+            fetch(DATA_URL)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.json();
+                })
+                .then(rawData => {
+                    // 根据文件上下文，直接使用 rawData 作为 GeoJSON
+                    geoData = rawData;
+                    
+                    if (!geoData || !geoData.features || !geoData.features.length) {
+                        throw new Error('数据格式错误或为空');
+                    }
+                    
+                    // 计算统计信息
+                    calculateStats();
+                    
+                    // 渲染地图图层
+                    renderMapLayers(map);
+                    
+                    // 更新UI
+                    updateStatsUI();
+                    updateCharts();
+                    
+                    showReady();
+                })
+                .catch(error => {
+                    console.error('数据加载失败:', error);
+                    showError('数据加载失败: ' + error.message);
+                });
+        }
+        
+        function calculateStats() {
+            stats = {
+                total: 0,
+                signed: 0,
+                unsigned: 0,
+                unknown: 0,
+                byEconomic: {},
+                byGroup: {},
+                areaStats: { signed: 0, unsigned: 0, unknown: 0 }
+            };
+            
+            geoData.features.forEach(feature => {
+                const props = feature.properties;
+                const status = props.签约情 || '';
+                const economic = props.经济社 || '未知';
+                const group = props.动迁组 || '未知';
+                const area = props.房屋面 || 0;
+                
+                stats.total++;
+                
+                // 按状态统计
+                if (status === '已签约') {
+                    stats.signed++;
+                    stats.areaStats.signed += area;
+                } else if (status === '未签约') {
+                    stats.unsigned++;
+                    stats.areaStats.unsigned += area;
+                } else {
+                    stats.unknown++;
+                    stats.areaStats.unknown += area;
+                }
+                
+                // 按经济社统计
+                if (!stats.byEconomic[economic]) {
+                    stats.byEconomic[economic] = { total: 0, signed: 0, unsigned: 0, unknown: 0 };
+                }
+                stats.byEconomic[economic].total++;
+                if (status === '已签约') stats.byEconomic[economic].signed++;
+                else if (status === '未签约') stats.byEconomic[economic].unsigned++;
+                else stats.byEconomic[economic].unknown++;
+                
+                // 按动迁组统计
+                if (!stats.byGroup[group]) {
+                    stats.byGroup[group] = { total: 0, signed: 0, unsigned: 0, unknown: 0 };
+                }
+                stats.byGroup[group].total++;
+                if (status === '已签约') stats.byGroup[group].signed++;
+                else if (status === '未签约') stats.byGroup[group].unsigned++;
+                else stats.byGroup[group].unknown++;
+            });
+        }
+        
+        // ===== 地图渲染 =====
+        function renderMapLayers(map) {
+            // 移除旧图层（如果存在）
+            if (map.getSource('village-data')) {
+                map.removeLayer('village-fill');
+                map.removeLayer('village-outline');
+                map.removeSource('village-data');
+            }
+            
+            // 添加数据源
+            map.addSource('village-data', {
+                type: 'geojson',
+                data: geoData
+            });
+            
+            // 面填充图层（按状态着色）
+            map.addLayer({
+                id: 'village-fill',
+                type: 'fill',
+                source: 'village-data',
+                paint: {
+                    'fill-color': [
+                        'case',
+                        ['==', ['get', '签约情'], '已签约'], STATUS_COLORS['已签约'],
+                        ['==', ['get', '签约情'], '未签约'], STATUS_COLORS['未签约'],
+                        STATUS_COLORS['']
+                    ],
+                    'fill-opacity': 0.6
+                }
+            });
+            
+            // 边框图层
+            map.addLayer({
+                id: 'village-outline',
+                type: 'line',
+                source: 'village-data',
+                paint: {
+                    'line-color': '#ffffff',
+                    'line-width': 2,
+                    'line-opacity': 0.8
+                }
+            });
+            
+            // 悬停效果
+            map.on('mouseenter', 'village-fill', function() {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+            
+            map.on('mouseleave', 'village-fill', function() {
+                map.getCanvas().style.cursor = '';
+            });
+            
+            // 点击事件
+            map.on('click', 'village-fill', function(e) {
+                if (!e.features || e.features.length === 0) return;
+                
+                const feature = e.features[0];
+                showFeatureDetails(feature);
+                
+                // 高亮选中地块
+                map.setFilter('village-fill-highlight', null);
+                map.addLayer({
+                    id: 'village-fill-highlight',
+                    type: 'fill',
+                    source: 'village-data',
+                    paint: {
+                        'fill-color': '#2f6bff',
+                        'fill-opacity': 0.3
+                    },
+                    filter: ['==', ['get', '编号'], feature.properties.编号]
+                }, 'village-fill');
+            });
+            
+            // 自动定位到数据范围
+            fitToBounds(map);
+        }
+        
+        function fitToBounds(map) {
+            if (!geoData || !geoData.features.length) return;
+            
+            const bounds = new TMapGL.LngLatBounds();
+            
+            geoData.features.forEach(feature => {
+                if (feature.geometry && feature.geometry.coordinates) {
+                    processCoordinates(feature.geometry.coordinates, bounds);
+                }
+            });
+            
+            if (bounds.isEmpty()) {
+                map.setCenter([113.603, 23.538]);
+                map.setZoom(16);
+            } else {
+                map.fitBounds(bounds, { padding: 50, maxZoom: 18 });
+            }
+        }
+        
+        function processCoordinates(coords, bounds) {
+            if (typeof coords[0] === 'number') {
+                bounds.extend(coords);
+            } else {
+                coords.forEach(c => processCoordinates(c, bounds));
+            }
+        }
+        
+        // ===== UI更新函数 =====
+        function updateStatsUI() {
+            document.getElementById('total-count').textContent = stats.total;
+            document.getElementById('signed-count').textContent = stats.signed;
+            document.getElementById('unsigned-count').textContent = stats.unsigned;
+            document.getElementById('unknown-count').textContent = stats.unknown;
+        }
+        
+        function updateCharts() {
+            if (!chartProgress || !chartGroups || !chartArea) return;
+            
+            // 1. 签约进度饼图
+            chartProgress.setOption({
+                tooltip: {
+                    trigger: 'item',
+                    formatter: '{a} <br/>{b}: {c} ({d}%)'
+                },
+                legend: {
+                    orient: 'horizontal',
+                    bottom: 0,
+                    data: ['已签约', '未签约', '状态未知']
+                },
+                series: [{
+                    name: '签约状态',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '45%'],
+                    avoidLabelOverlap: false,
+                    itemStyle: {
+                        borderRadius: 8,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    },
+                    label: {
+                        show: false
+                    },
+                    emphasis: {
+                        label: {
+                            show: true,
+                            fontSize: 14,
+                            fontWeight: 'bold'
+                        }
+                    },
+                    data: [
+                        { value: stats.signed, name: '已签约', itemStyle: { color: STATUS_COLORS['已签约'] } },
+                        { value: stats.unsigned, name: '未签约', itemStyle: { color: STATUS_COLORS['未签约'] } },
+                        { value: stats.unknown, name: '状态未知', itemStyle: { color: STATUS_COLORS[''] } }
+                    ]
+                }]
+            });
+            
+            // 2. 经济社分布柱状图
+            const economicData = Object.entries(stats.byEconomic)
+                .filter(([name]) => name && name !== '')
+                .sort((a, b) => b[1].total - a[1].total)
+                .slice(0, 8);
+            
+            chartGroups.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'shadow' }
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '12%',
+                    top: '8%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: economicData.map(d => d[0]),
+                    axisLabel: {
+                        rotate: 30,
+                        fontSize: 11
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '地块数'
+                },
+                series: [{
+                    name: '已签约',
+                    type: 'bar',
+                    stack: 'total',
+                    data: economicData.map(d => d[1].signed),
+                    itemStyle: { color: STATUS_COLORS['已签约'] }
+                }, {
+                    name: '未签约',
+                    type: 'bar',
+                    stack: 'total',
+                    data: economicData.map(d => d[1].unsigned),
+                    itemStyle: { color: STATUS_COLORS['未签约'] }
+                }, {
+                    name: '未知',
+                    type: 'bar',
+                    stack: 'total',
+                    data: economicData.map(d => d[1].unknown),
+                    itemStyle: { color: STATUS_COLORS[''] }
+                }]
+            });
+            
+            // 3. 面积分布饼图
+            const totalArea = stats.areaStats.signed + stats.areaStats.unsigned + stats.areaStats.unknown;
+            
+            chartArea.setOption({
+                tooltip: {
+                    trigger: 'item',
+                    formatter: function(params) {
+                        const percent = totalArea > 0 ? ((params.value / totalArea) * 100).toFixed(1) : '0';
+                        return `${params.name}<br/>面积: ${params.value.toFixed(0)}㎡<br/>占比: ${percent}%`;
+                    }
+                },
+                series: [{
+                    name: '房屋面积',
+                    type: 'pie',
+                    radius: '65%',
+                    center: ['50%', '50%'],
+                    roseType: 'radius',
+                    label: {
+                        formatter: '{b}: {c}㎡'
+                    },
+                    data: [
+                        { value: stats.areaStats.signed, name: '已签约面积', itemStyle: { color: STATUS_COLORS['已签约'] } },
+                        { value: stats.areaStats.unsigned, name: '未签约面积', itemStyle: { color: STATUS_COLORS['未签约'] } },
+                        { value: stats.areaStats.unknown, name: '未知面积', itemStyle: { color: STATUS_COLORS[''] } }
+                    ]
+                }]
+            });
+        }
+        
+        function showFeatureDetails(feature) {
+            const props = feature.properties;
+            const detailContent = document.getElementById('detail-content');
+            
+            const html = `
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">编号</div>
+                        <div class="detail-value">${props.编号 || '--'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">签约状态</div>
+                        <div class="detail-value" style="color: ${STATUS_COLORS[props.签约情] || STATUS_COLORS['']}">
+                            ${props.签约情 || '未知'}
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">权属人</div>
+                        <div class="detail-value">${props.权属人 || '--'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">经济社</div>
+                        <div class="detail-value">${props.经济社 || '--'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">动迁组</div>
+                        <div class="detail-value">${props.动迁组 || '--'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">房屋面积</div>
+                        <div class="detail-value">${(props.房屋面 || 0).toFixed(1)}㎡</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">宗地面积</div>
+                        <div class="detail-value">${(props.宗地面 || 0).toFixed(1)}㎡</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">清拆情况</div>
+                        <div class="detail-value">${props.清拆情 || '--'}</div>
+                    </div>
+                </div>
+            `;
+            
+            detailContent.innerHTML = html;
+            detailContent.className = 'detail-grid';
+        }
+        
+        // ===== 状态管理 =====
+        function showLoading() {
+            const detailContent = document.getElementById('detail-content');
+            detailContent.innerHTML = `
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <div>加载数据中...</div>
+                </div>
+            `;
+            detailContent.className = 'loading-state';
+        }
+        
+        function showReady() {
+            // 状态已通过其他UI更新
+        }
+        
+        function showError(message) {
+            const detailContent = document.getElementById('detail-content');
+            detailContent.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <div>${message}</div>
+                </div>
+            `;
+            detailContent.className = 'empty-state';
+            
+            // 图表也显示错误
+            if (chartProgress) {
+                chartProgress.setOption({
+                    title: { text: '数据加载失败', left: 'center', top: 'center', textStyle: { color: '#d9363e', fontSize: 14 } }
+                });
+            }
+        }
+        
+        // ===== 初始化执行 =====
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化图表
+            initCharts();
+            
+            // 初始化地图
+            var map = initMap();
+            
+            // 窗口resize时重绘图表
+            window.addEventListener('resize', function() {
+                if (chartProgress) chartProgress.resize();
+                if (chartGroups) chartGroups.resize();
+                if (chartArea) chartArea.resize();
+            });
+        });
+    </script>
+</body>
+</html>

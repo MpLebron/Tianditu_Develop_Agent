@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>公交地铁路线规划 - 天地图</title>
+    <style>
+        /* ===== CSS 视觉变量 ===== */
+        :root {
+            --primary-color: #1890ff;
+            --primary-hover: #40a9ff;
+            --primary-active: #096dd9;
+            --success-color: #52c41a;
+            --warning-color: #faad14;
+            --error-color: #ff4d4f;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --text-placeholder: #999999;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-hover: #e6f7ff;
+            --border-color: #d9d9d9;
+            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.15);
+            --radius: 8px;
+            --radius-sm: 4px;
+            --sidebar-width: 360px;
+            --transition: all 0.2s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ===== 主布局 ===== */
+        .app-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* ===== 左侧控制面板 ===== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-primary);
+            box-shadow: var(--shadow);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: linear-gradient(135deg, var(--primary-color), #096dd9);
+            color: white;
+        }
+
+        .sidebar-header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        /* ===== 输入区域 ===== */
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        .input-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .input-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .input-icon.start {
+            background: #e6f7ff;
+            color: var(--primary-color);
+        }
+
+        .input-icon.end {
+            background: #fff7e6;
+            color: #fa8c16;
+        }
+
+        .location-input {
+            flex: 1;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            font-size: 14px;
+            transition: var(--transition);
+            background: var(--bg-primary);
+        }
+
+        .location-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+        }
+
+        .location-input::placeholder {
+            color: var(--text-placeholder);
+        }
+
+        .location-input.readonly {
+            background: var(--bg-secondary);
+            cursor: pointer;
+        }
+
+        .location-input.readonly:hover {
+            background: var(--bg-hover);
+        }
+
+        /* ===== 策略选择 ===== */
+        .strategy-group {
+            margin-bottom: 20px;
+        }
+
+        .strategy-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .strategy-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .strategy-btn {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            background: var(--bg-primary);
+            font-size: 12px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: var(--transition);
+            text-align: center;
+        }
+
+        .strategy-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            background: var(--bg-hover);
+        }
+
+        .strategy-btn.active {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        .strategy-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ===== 搜索按钮 ===== */
+        .search-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .search-btn:hover:not(:disabled) {
+            background: var(--primary-hover);
+            box-shadow: var(--shadow-hover);
+        }
+
+        .search-btn:active:not(:disabled) {
+            background: var(--primary-active);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* ===== 方案列表 ===== */
+        .results-section {
+            margin-top: 20px;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .results-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .results-count {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .plan-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .plan-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 14px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .plan-card:hover {
+            border-color: var(--primary-color);
+            box-shadow: var(--shadow);
+            transform: translateY(-1px);
+        }
+
+        .plan-card.active {
+            border-color: var(--primary-color);
+            background: var(--bg-hover);
+        }
+
+        .plan-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .plan-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .plan-stats {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .plan-stat {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .plan-stat-icon {
+            font-size: 14px;
+        }
+
+        .plan-detail {
+            border-top: 1px dashed var(--border-color);
+            padding-top: 10px;
+            margin-top: 10px;
+        }
+
+        .plan-segment {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .segment-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        .segment-icon.bus {
+            background: #e6f7ff;
+            color: var(--primary-color);
+        }
+
+        .segment-icon.subway {
+            background: #f9f0ff;
+            color: #722ed1;
+        }
+
+        .segment-icon.walk {
+            background: #fff7e6;
+            color: #fa8c16;
+        }
+
+        .segment-info {
+            flex: 1;
+            color: var(--text-secondary);
+        }
+
+        .segment-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        /* ===== 状态提示 ===== */
+        .state-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .state-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .state-title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .state-desc {
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        /* Loading 动画 */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ===== 右侧地图 ===== */
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 地图提示覆盖层 */
+        .map-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: var(--bg-primary);
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            font-size: 12px;
+            color: var(--text-secondary);
+            z-index: 10;
+            max-width: 280px;
+        }
+
+        .map-overlay strong {
+            color: var(--primary-color);
+        }
+
+        /* ===== 移动端适配 ===== */
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: 50%;
+                order: 2;
+            }
+
+            .map-container {
+                height: 50%;
+                order: 1;
+            }
+
+            .strategy-options {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 左侧控制面板 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>🚌 公交地铁规划</h1>
+                <p>输入起终点或点击地图选择位置</p>
+            </div>
+            <div class="sidebar-content">
+                <!-- 起终点输入 -->
+                <div class="input-group">
+                    <div class="input-row">
+                        <div class="input-icon start">🟢</div>
+                        <input type="text" class="location-input" id="startInput" 
+                               placeholder="输入起点或点击地图选择" readonly>
+                    </div>
+                    <div class="input-row">
+                        <div class="input-icon end">🔴</div>
+                        <input type="text" class="location-input" id="endInput" 
+                               placeholder="输入终点或点击地图选择" readonly>
+                    </div>
+                </div>
+
+                <!-- 策略选择 -->
+                <div class="strategy-group">
+                    <div class="strategy-label">规划策略</div>
+                    <div class="strategy-options">
+                        <button class="strategy-btn active" data-type="1">较快捷</button>
+                        <button class="strategy-btn" data-type="2">少换乘</button>
+                        <button class="strategy-btn" data-type="3">少步行</button>
+                        <button class="strategy-btn" data-type="4">不坐地铁</button>
+                    </div>
+                </div>
+
+                <!-- 搜索按钮 -->
+                <button class="search-btn" id="searchBtn" disabled>
+                    <span>开始规划</span>
+                </button>
+
+                <!-- 结果区域 -->
+                <div class="results-section" id="resultsSection" style="display: none;">
+                    <div class="results-header">
+                        <span class="results-title">推荐方案</span>
+                        <span class="results-count" id="resultsCount"></span>
+                    </div>
+                    <div class="plan-list" id="planList"></div>
+                </div>
+
+                <!-- 空状态 -->
+                <div class="state-message" id="emptyState" style="display: none;">
+                    <div class="state-icon">📭</div>
+                    <div class="state-title">暂无规划方案</div>
+                    <div class="state-desc">该区域可能没有公共交通覆盖<br>或起终点距离过近</div>
+                </div>
+
+                <!-- 错误状态 -->
+                <div class="state-message" id="errorState" style="display: none;">
+                    <div class="state-icon">⚠️</div>
+                    <div class="state-title">规划失败</div>
+                    <div class="state-desc" id="errorDesc"></div>
+                    <button class="search-btn" id="retryBtn" style="margin-top: 16px;">重试</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧地图 -->
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-overlay">
+                <strong>提示：</strong>点击地图可选择起点或终点位置
+            </div>
+        </div>
+    </div>
+
+    <!-- 天地图 API -->
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d" type="text/javascript"></script>
+    
+    <script>
+        // ===== 全局变量 =====
+        var map;
+        var startMarker = null;
+        var endMarker = null;
+        var startPoint = null; // {lng, lat, name}
+        var endPoint = null;
+        var currentLineType = '1'; // 默认较快捷
+        var isLoading = false;
+        var selectionMode = 'start'; // 'start' 或 'end'
+
+        // 路线图层 ID
+        var routeSourceId = 'transit-line';
+        var routeLayerId = 'route-main';
+        var routeGlowLayerId = 'route-glow';
+
+        // ===== 初始化地图 =====
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: [116.407526, 39.90403], // 北京中心
+                zoom: 12,
+                minZoom: 3,
+                maxZoom: 18
+            });
+
+            map.on('load', function() {
+                // 添加地图控件
+                map.addControl(new TMapGL.NavigationControl());
+                map.addControl(new TMapGL.ScaleControl());
+                map.addControl(new TMapGL.FullscreenControl());
+
+                // 绑定地图点击事件
+                map.on('click', function(e) {
+                    handleMapClick(e.lngLat);
+                });
+            });
+        }
+
+        // ===== 处理地图点击 =====
+        function handleMapClick(lngLat) {
+            if (isLoading) return;
+
+            var coords = [lngLat.lng, lngLat.lat];
+            
+            if (selectionMode === 'start') {
+                startPoint = { lng: lngLat.lng, lat: lngLat.lat };
+                if (startMarker) startMarker.remove();
+                startMarker = createMarker(coords, 'start');
+                document.getElementById('startInput').value = '已选择地图位置';
+                selectionMode = 'end';
+                updateInputPlaceholder();
+            } else {
+                endPoint = { lng: lngLat.lng, lat: lngLat.lat };
+                if (endMarker) endMarker.remove();
+                endMarker = createMarker(coords, 'end');
+                document.getElementById('endInput').value = '已选择地图位置';
+                selectionMode = 'start';
+                updateInputPlaceholder();
+            }
+
+            updateSearchButton();
+        }
+
+        // ===== 创建标记 =====
+        function createMarker(coords, type) {
+            var el = document.createElement('div');
+            el.style.width = '28px';
+            el.style.height = '28px';
+            el.style.borderRadius = '50%';
+            el.style.background = type === 'start' ? '#52c41a' : '#ff4d4f';
+            el.style.border = '3px solid white';
+            el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
+            el.style.cursor = 'pointer';
+
+            var marker = new TMapGL.Marker({ element: el })
+                .setLngLat(coords)
+                .addTo(map);
+
+            return marker;
+        }
+
+        // ===== 更新输入框提示 =====
+        function updateInputPlaceholder() {
+            var startInput = document.getElementById('startInput');
+            var endInput = document.getElementById('endInput');
+            
+            if (!startPoint) {
+                startInput.placeholder = selectionMode === 'start' ? '点击地图选择起点' : '输入起点或点击地图选择';
+            }
+            if (!endPoint) {
+                endInput.placeholder = selectionMode === 'end' ? '点击地图选择终点' : '输入终点或点击地图选择';
+            }
+        }
+
+        // ===== 更新搜索按钮状态 =====
+        function updateSearchButton() {
+            var btn = document.getElementById('searchBtn');
+            btn.disabled = !(startPoint && endPoint);
+        }
+
+        // ===== 策略选择 =====
+        function initStrategyButtons() {
+            var buttons = document.querySelectorAll('.strategy-btn');
+            buttons.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    if (isLoading) return;
+                    
+                    buttons.forEach(function(b) { b.classList.remove('active'); });
+                    this.classList.add('active');
+                    currentLineType = this.getAttribute('data-type');
+                });
+            });
+        }
+
+        // ===== 搜索规划 =====
+        function searchTransit() {
+            if (!startPoint || !endPoint || isLoading) return;
+
+            setLoading(true);
+            hideAllStates();
+
+            var url = new URL('/api/tianditu/transit', window.location.origin);
+            url.searchParams.set('startLng', startPoint.lng);
+            url.searchParams.set('startLat', startPoint.lat);
+            url.searchParams.set('endLng', endPoint.lng);
+            url.searchParams.set('endLat', endPoint.lat);
+            url.searchParams.set('lineType', currentLineType);
+
+            fetch(url)
+                .then(function(res) { return res.json(); })
+                .then(function(payload) {
+                    // 检查代理返回
+                    if (!payload || payload.success !== true) {
+                        throw new Error(payload?.error || '代理请求失败');
+                    }
+
+                    // 检查业务返回
+                    var data = payload.data;
+                    if (Number(data?.resultCode) !== 0) {
+                        throw new Error('公交规划服务返回失败');
+                    }
+
+                    // 获取方案列表
+                    var typeResult = (data.results && data.results[0]) || null;
+                    var lines = (typeResult && typeResult.lines) || [];
+
+                    if (!lines.length) {
+                        showEmptyState();
+                        return;
+                    }
+
+                    // 渲染方案列表
+                    renderPlanList(lines);
+                    showResultsSection();
+
+                    // 默认选中第一个方案
+                    selectPlan(lines[0]);
+                })
+                .catch(function(err) {
+                    console.error('规划失败:', err);
+                    showErrorState(err.message);
+                })
+                .finally(function() {
+                    setLoading(false);
+                });
+        }
+
+        // ===== 渲染方案列表 =====
+        function renderPlanList(lines) {
+            var container = document.getElementById('planList');
+            container.innerHTML = '';
+
+            document.getElementById('resultsCount').textContent = lines.length + ' 个方案';
+
+            lines.forEach(function(line, index) {
+                var stats = calcLineStats(line);
+                var card = document.createElement('div');
+                card.className = 'plan-card';
+                card.dataset.index = index;
+                line._index = index; // 保存索引供详情使用
+                card.innerHTML = 
+                    '<div class="plan-header">' +
+                        '<span class="plan-name">' + escapeHtml(line.lineName || '公交方案 ' + (index + 1)) + '</span>' +
+                    '</div>' +
+                    '<div class="plan-stats">' +
+                        '<span class="plan-stat"><span class="plan-stat-icon">⏱️</span> ' + formatTime(stats.totalMinutes) + '</span>' +
+                        '<span class="plan-stat"><span class="plan-stat-icon">📍</span> ' + formatDistance(stats.totalMeters) + '</span>' +
+                        '<span class="plan-stat"><span class="plan-stat-icon">🚶</span> ' + formatDistance(stats.walkMeters) + '</span>' +
+                    '</div>' +
+                    '<div class="plan-detail" id="planDetail-' + index + '" style="display: none;"></div>';
+                
+                card.addEventListener('click', function() {
+                    document.querySelectorAll('.plan-card').forEach(function(c) { c.classList.remove('active'); });
+                    card.classList.add('active');
+                    selectPlan(line);
+                });
+
+                container.appendChild(card);
+            });
+        }
+
+        // ===== 选择方案 =====
+        function selectPlan(line) {
+            // 清理旧图层
+            cleanupRouteLayers();
+
+            // 解析路线坐标
+            var coords = flattenRouteCoords(line);
+            
+            if (coords.length < 2) {
+                console.warn('路线坐标不足，无法绘制');
+                return;
+            }
+
+            // 添加路线数据源
+            map.addSource(routeSourceId, {
+                type: 'geojson',
+                data: {
+                    type: 'Feature',
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: coords
+                    }
+                }
+            });
+
+            // 添加发光底层（移除 before 参数，避免引用不存在的图层）
+            map.addLayer({
+                id: routeGlowLayerId,
+                type: 'line',
+                source: routeSourceId,
+                paint: {
+                    'line-color': '#1890ff',
+                    'line-width': 10,
+                    'line-opacity': 0.3,
+                    'line-blur': 4
+                }
+            });
+
+            // 添加主路线层（移除 before 参数，避免引用不存在的图层）
+            map.addLayer({
+                id: routeLayerId,
+                type: 'line',
+                source: routeSourceId,
+                paint: {
+                    'line-color': '#1890ff',
+                    'line-width': 4,
+                    'line-opacity': 1
+                },
+                layout: {
+                    'line-cap': 'round',
+                    'line-join': 'round'
+                }
+            });
+
+            // 适应路线范围
+            var bounds = new TMapGL.LngLatBounds();
+            coords.forEach(function(coord) {
+                bounds.extend(coord);
+            });
+            // 加入起终点
+            if (startPoint) bounds.extend([startPoint.lng, startPoint.lat]);
+            if (endPoint) bounds.extend([endPoint.lng, endPoint.lat]);
+            
+            map.fitBounds(bounds, { padding: 50, duration: 1000 });
+
+            // 显示换乘详情
+            showPlanDetail(line);
+        }
+
+        // ===== 显示换乘详情 =====
+        function showPlanDetail(line) {
+            var segments = (line && line.segments) || [];
+            var detailHtml = '';
+
+            segments.forEach(function(seg) {
+                var sl = pickSegmentLine(seg);
+                if (!sl) return;
+
+                var segType = Number(seg.segmentType);
+                var iconClass = 'bus';
+                var iconChar = '🚌';
+                var typeName = '公交';
+
+                if (segType === 1) {
+                    iconClass = 'walk';
+                    iconChar = '🚶';
+                    typeName = '步行';
+                } else if (segType === 3 || segType === 4) {
+                    iconClass = 'subway';
+                    iconChar = '🚇';
+                    typeName = '地铁';
+                }
+
+                var timeInfo = sl.segmentTime ? formatTime(Number(sl.segmentTime)) : '';
+                var distInfo = sl.segmentDistance ? formatDistance(Number(sl.segmentDistance)) : '';
+
+                detailHtml += 
+                    '<div class="plan-segment">' +
+                        '<div class="segment-icon ' + iconClass + '">' + iconChar + '</div>' +
+                        '<div class="segment-info">' +
+                            '<div class="segment-name">' + typeName + (sl.lineName ? ' · ' + escapeHtml(sl.lineName) : '') + '</div>' +
+                            '<div>' + (timeInfo ? timeInfo + ' · ' : '') + distInfo + '</div>' +
+                        '</div>' +
+                    '</div>';
+            });
+
+            var detailEl = document.getElementById('planDetail-' + (line._index || 0));
+            if (detailEl) {
+                detailEl.innerHTML = detailHtml;
+                detailEl.style.display = 'block';
+            }
+        }
+
+        // ===== 清理路线图层 =====
+        function cleanupRouteLayers() {
+            if (map.getLayer(routeLayerId)) map.removeLayer(routeLayerId);
+            if (map.getLayer(routeGlowLayerId)) map.removeLayer(routeGlowLayerId);
+            if (map.getSource(routeSourceId)) map.removeSource(routeSourceId);
+        }
+
+        // ===== 计算路线统计 =====
+        function calcLineStats(line) {
+            var segments = (line && line.segments) || [];
+            var totalMinutes = 0;
+            var totalMeters = 0;
+            var walkMeters = 0;
+
+            segments.forEach(function(seg) {
+                var sl = pickSegmentLine(seg);
+                if (!sl) return;
+
+                var minutes = Number(sl.segmentTime) || 0;
+                var meters = Number(sl.segmentDistance) || 0;
+                totalMinutes += minutes;
+                totalMeters += meters;
+
+                var segType = Number(seg.segmentType);
+                if (segType === 1) walkMeters += meters;
+            });
+
+            return {
+                totalMinutes: totalMinutes,
+                totalMeters: totalMeters,
+                walkMeters: walkMeters
+            };
+        }
+
+        // ===== 工具函数：获取分段线路 =====
+        function getSegmentLines(seg) {
+            if (!seg) return [];
+            if (Array.isArray(seg.segmentLine)) return seg.segmentLine;
+            if (seg.segmentLine) return [seg.segmentLine];
+            return [];
+        }
+
+        function pickSegmentLine(seg) {
+            var lines = getSegmentLines(seg);
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i] && lines[i].linePoint) return lines[i];
+            }
+            return lines[0] || null;
+        }
+
+        // ===== 工具函数：解析坐标串 =====
+        function parseLinePoint(raw) {
+            if (!raw) return [];
+            return raw
+                .split(';')
+                .map(function(pair) {
+                    var parts = pair.split(',');
+                    if (parts.length !== 2) return null;
+                    var lng = Number(parts[0]);
+                    var lat = Number(parts[1]);
+                    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+                    return [lng, lat];
+                })
+                .filter(Boolean);
+        }
+
+        // ===== 工具函数：扁平化路线坐标 =====
+        function flattenRouteCoords(line) {
+            var segments = (line && line.segments) || [];
+            var merged = [];
+
+            segments.forEach(function(seg) {
+                var sl = pickSegmentLine(seg);
+                if (!sl) return;
+                var coords = parseLinePoint(sl.linePoint);
+                if (!coords.length) return;
+
+                if (merged.length) {
+                    var last = merged[merged.length - 1];
+                    var first = coords[0];
+                    if (last[0] === first[0] && last[1] === first[1]) {
+                        coords = coords.slice(1);
+                    }
+                }
+                merged = merged.concat(coords);
+            });
+
+            return merged;
+        }
+
+        // ===== 工具函数：格式化时间 =====
+        function formatTime(minutes) {
+            if (minutes < 60) return minutes + '分钟';
+            var h = Math.floor(minutes / 60);
+            var m = minutes % 60;
+            return h + '小时' + (m > 0 ? m + '分钟' : '');
+        }
+
+        // ===== 工具函数：格式化距离 =====
+        function formatDistance(meters) {
+            if (meters < 1000) return Math.round(meters) + '米';
+            return (meters / 1000).toFixed(1) + '公里';
+        }
+
+        // ===== 工具函数：HTML 转义 =====
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>"']/g, function(m) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+            });
+        }
+
+        // ===== 状态管理 =====
+        function setLoading(loading) {
+            isLoading = loading;
+            var btn = document.getElementById('searchBtn');
+            if (loading) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading-spinner"></span> 规划中...';
+            } else {
+                btn.disabled = !(startPoint && endPoint);
+                btn.innerHTML = '<span>开始规划</span>';
+            }
+        }
+
+        function hideAllStates() {
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('errorState').style.display = 'none';
+        }
+
+        function showResultsSection() {
+            document.getElementById('resultsSection').style.display = 'block';
+        }
+
+        function showEmptyState() {
+            hideAllStates();
+            document.getElementById('emptyState').style.display = 'block';
+        }
+
+        function showErrorState(message) {
+            hideAllStates();
+            document.getElementById('errorDesc').textContent = message;
+            document.getElementById('errorState').style.display = 'block';
+        }
+
+        // ===== 事件绑定 =====
+        function initEvents() {
+            // 搜索按钮
+            document.getElementById('searchBtn').addEventListener('click', searchTransit);
+            
+            // 重试按钮
+            document.getElementById('retryBtn').addEventListener('click', function() {
+                searchTransit();
+            });
+
+            // 策略按钮
+            initStrategyButtons();
+        }
+
+        // ===== 页面加载完成 =====
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            initEvents();
+        });
+    </script>
+</body>
+</html>

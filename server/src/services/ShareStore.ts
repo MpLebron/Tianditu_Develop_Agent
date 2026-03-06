@@ -34,6 +34,7 @@ export interface CreateShareInput {
   title?: string
   description?: string
   visibility?: ShareVisibility
+  thumbnailBase64?: string
 }
 
 export interface UpdateShareInput {
@@ -91,6 +92,32 @@ function sanitizeTitle(input?: string): string {
 function sanitizeDescription(input?: string): string {
   const raw = String(input || '').trim()
   return raw.slice(0, 240)
+}
+
+const MAX_THUMBNAIL_IMAGE_BYTES = 6 * 1024 * 1024
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+
+function decodeThumbnailBase64(raw?: string): Buffer | null {
+  const input = String(raw || '').trim()
+  if (!input) return null
+
+  const normalized = input
+    .replace(/^data:image\/png;base64,/i, '')
+    .replace(/\s+/g, '')
+    .trim()
+  if (!normalized) return null
+
+  try {
+    const buf = Buffer.from(normalized, 'base64')
+    if (!buf.length || buf.length > MAX_THUMBNAIL_IMAGE_BYTES) return null
+    if (buf.length < PNG_SIGNATURE.length) return null
+    for (let i = 0; i < PNG_SIGNATURE.length; i += 1) {
+      if (buf[i] !== PNG_SIGNATURE[i]) return null
+    }
+    return buf
+  } catch {
+    return null
+  }
 }
 
 function safeSlug(): string {
@@ -323,6 +350,7 @@ export class ShareStore {
 
       const normalizedHtml = this.normalizeHtml(rawCode)
       const rewritten = await this.rewriteUploadReferences(normalizedHtml, slug, snapshotDir)
+      const uploadedThumbnail = decodeThumbnailBase64(input.thumbnailBase64)
 
       const htmlRelativePath = `${slug}/index.html`
       const htmlPath = resolve(this.snapshotsDir, htmlRelativePath)
@@ -330,14 +358,27 @@ export class ShareStore {
 
       let thumbnailRelativePath = `${slug}/thumbnail.png`
       let thumbnailPath = resolve(this.snapshotsDir, thumbnailRelativePath)
-      const rendered = await this.thumbnailRenderer.render({
-        slug,
-        title: safeTitle,
-        visibility,
-        outputPath: thumbnailPath,
-      })
+      let usedUploadedThumbnail = false
+      if (uploadedThumbnail) {
+        try {
+          await writeFile(thumbnailPath, uploadedThumbnail)
+          usedUploadedThumbnail = true
+        } catch (err: any) {
+          console.warn(`[ShareStore] 前端缩略图写入失败，改用后端渲染 (${slug}): ${err?.message || 'unknown reason'}`)
+        }
+      }
 
-      if (!rendered.ok) {
+      let rendered: { ok: boolean; reason?: string } = { ok: true }
+      if (!usedUploadedThumbnail) {
+        rendered = await this.thumbnailRenderer.render({
+          slug,
+          title: safeTitle,
+          visibility,
+          outputPath: thumbnailPath,
+        })
+      }
+
+      if (!usedUploadedThumbnail && !rendered.ok) {
         thumbnailRelativePath = `${slug}/thumbnail.svg`
         thumbnailPath = resolve(this.snapshotsDir, thumbnailRelativePath)
         const thumbnailSvg = buildThumbnailSvg(safeTitle, visibility, createdAt)

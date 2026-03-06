@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>村庄改造项目可视化</title>
+    <style>
+        :root {
+            /* 背景色 */
+            --bg-page: #f5f7fb;
+            --bg-card: #ffffff;
+            --bg-panel: rgba(255, 255, 255, 0.95);
+            
+            /* 文字色 */
+            --text-primary: #16213a;
+            --text-secondary: #5b6780;
+            --text-muted: #8a95ab;
+            --text-inverse: #ffffff;
+            
+            /* 品牌色 */
+            --brand-500: #2f6bff;
+            --brand-600: #2558d9;
+            --brand-100: #e8f0ff;
+            
+            /* 状态色 - 签约情况 */
+            --signed-500: #12a150;      /* 已签约 - 绿色 */
+            --signed-100: #e6f9ed;
+            --partial-500: #e08a00;     /* 部分签约 - 橙色 */
+            --partial-100: #fff4e0;
+            --unsigned-500: #8a95ab;    /* 未签约 - 灰色 */
+            --unsigned-100: #f0f2f5;
+            
+            /* 状态色 - 清拆情况 */
+            --demolished-500: #d9363e;  /* 已清拆 - 红色 */
+            --demolished-100: #fde8e9;
+            
+            /* 边框与阴影 */
+            --border-soft: #e3e8f2;
+            --shadow-card: 0 8px 24px rgba(22, 33, 58, 0.08);
+            --shadow-float: 0 12px 32px rgba(22, 33, 58, 0.12);
+            
+            /* 圆角 */
+            --radius-card: 16px;
+            --radius-control: 12px;
+            --radius-sm: 8px;
+            
+            /* 间距 */
+            --spacing-xs: 8px;
+            --spacing-sm: 12px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+        
+        /* 主容器 */
+        .app-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        /* 左侧面板 */
+        .side-panel {
+            width: 360px;
+            min-width: 360px;
+            background: var(--bg-card);
+            box-shadow: var(--shadow-card);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+        }
+        
+        .panel-header {
+            padding: var(--spacing-lg);
+            border-bottom: 1px solid var(--border-soft);
+            background: linear-gradient(135deg, var(--brand-500), var(--brand-600));
+            color: var(--text-inverse);
+        }
+        
+        .panel-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: var(--spacing-xs);
+        }
+        
+        .panel-subtitle {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-lg);
+        }
+        
+        /* 统计卡片 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-lg);
+        }
+        
+        .stat-card {
+            background: var(--bg-page);
+            border-radius: var(--radius-card);
+            padding: var(--spacing-md);
+            text-align: center;
+            border: 1px solid var(--border-soft);
+        }
+        
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--brand-500);
+            line-height: 1.2;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: var(--spacing-xs);
+        }
+        
+        /* 图例 */
+        .legend-section {
+            margin-bottom: var(--spacing-lg);
+        }
+        
+        .legend-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: var(--spacing-sm);
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            padding: var(--spacing-xs) 0;
+            font-size: 13px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: var(--radius-sm);
+            margin-right: var(--spacing-sm);
+            border: 1px solid var(--border-soft);
+        }
+        
+        .legend-count {
+            margin-left: auto;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        
+        /* 状态颜色类 */
+        .legend-signed { background: var(--signed-500); }
+        .legend-partial { background: var(--partial-500); }
+        .legend-unsigned { background: var(--unsigned-500); }
+        .legend-demolished { 
+            background: transparent; 
+            border: 3px solid var(--demolished-500);
+        }
+        
+        /* 加载状态 */
+        .loading-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: var(--spacing-xl);
+            color: var(--text-secondary);
+        }
+        
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-soft);
+            border-top-color: var(--brand-500);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: var(--spacing-md);
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* 错误状态 */
+        .error-state {
+            padding: var(--spacing-lg);
+            background: var(--demolished-100);
+            border-radius: var(--radius-card);
+            color: var(--demolished-500);
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        /* 地图容器 */
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 地图上的浮动信息卡片 */
+        .map-info-card {
+            position: absolute;
+            top: var(--spacing-lg);
+            right: var(--spacing-lg);
+            background: var(--bg-panel);
+            backdrop-filter: blur(10px);
+            border-radius: var(--radius-card);
+            padding: var(--spacing-md);
+            box-shadow: var(--shadow-float);
+            max-width: 280px;
+            z-index: 5;
+            display: none;
+        }
+        
+        .map-info-card.show {
+            display: block;
+        }
+        
+        .info-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: var(--spacing-sm);
+            padding-bottom: var(--spacing-sm);
+            border-bottom: 1px solid var(--border-soft);
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: var(--spacing-xs) 0;
+        }
+        
+        .info-label {
+            color: var(--text-secondary);
+        }
+        
+        .info-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        
+        /* 关闭按钮 */
+        .info-close {
+            position: absolute;
+            top: var(--spacing-sm);
+            right: var(--spacing-sm);
+            background: none;
+            border: none;
+            font-size: 18px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+        }
+        
+        .info-close:hover {
+            color: var(--text-primary);
+        }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .side-panel {
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                transform: translateX(-100%);
+            }
+            
+            .side-panel.open {
+                transform: translateX(0);
+            }
+            
+            .mobile-toggle {
+                display: block;
+                position: absolute;
+                top: var(--spacing-lg);
+                left: var(--spacing-lg);
+                z-index: 20;
+                background: var(--bg-card);
+                border: none;
+                border-radius: var(--radius-control);
+                padding: var(--spacing-sm);
+                box-shadow: var(--shadow-card);
+                cursor: pointer;
+            }
+        }
+        
+        @media (min-width: 769px) {
+            .mobile-toggle {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 左侧面板 -->
+        <aside class="side-panel" id="sidePanel">
+            <div class="panel-header">
+                <h1 class="panel-title">村庄改造项目</h1>
+                <p class="panel-subtitle">地块分布与进度可视化</p>
+            </div>
+            <div class="panel-content" id="panelContent">
+                <!-- 加载状态 -->
+                <div class="loading-state" id="loadingState">
+                    <div class="loading-spinner"></div>
+                    <p>正在加载地块数据...</p>
+                </div>
+                
+                <!-- 错误状态 -->
+                <div class="error-state" id="errorState" style="display: none;">
+                    <p>数据加载失败，请检查网络连接</p>
+                </div>
+                
+                <!-- 统计内容（加载完成后显示） -->
+                <div id="statsContent" style="display: none;">
+                    <!-- 统计卡片 -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="totalCount">0</div>
+                            <div class="stat-label">总地块数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="signedRate">0%</div>
+                            <div class="stat-label">签约率</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="demolishedRate">0%</div>
+                            <div class="stat-label">清拆率</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="totalArea">0</div>
+                            <div class="stat-label">总面积 (㎡)</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 签约情况图例 -->
+                    <div class="legend-section">
+                        <h3 class="legend-title">签约情况</h3>
+                        <div class="legend-item">
+                            <div class="legend-color legend-signed"></div>
+                            <span>已签约</span>
+                            <span class="legend-count" id="signedCount">0</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color legend-partial"></div>
+                            <span>部分签约</span>
+                            <span class="legend-count" id="partialCount">0</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color legend-unsigned"></div>
+                            <span>未签约</span>
+                            <span class="legend-count" id="unsignedCount">0</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 清拆情况图例 -->
+                    <div class="legend-section">
+                        <h3 class="legend-title">清拆情况</h3>
+                        <div class="legend-item">
+                            <div class="legend-color legend-demolished"></div>
+                            <span>已清拆</span>
+                            <span class="legend-count" id="demolishedCount">0</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 经济社分布 -->
+                    <div class="legend-section">
+                        <h3 class="legend-title">经济社分布</h3>
+                        <div id="communityList"></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- 地图区域 -->
+        <main class="map-container">
+            <button class="mobile-toggle" id="mobileToggle">☰ 面板</button>
+            <div id="map"></div>
+            
+            <!-- 浮动信息卡片 -->
+            <div class="map-info-card" id="mapInfoCard">
+                <button class="info-close" id="infoClose">×</button>
+                <h4 class="info-title" id="infoTitle">地块信息</h4>
+                <div id="infoContent"></div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- 天地图 API -->
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    
+    <script>
+        // 全局变量
+        var map;
+        var geojsonData = null;
+        
+        // 文件 URL（必须原样使用用户上传的文件链接）
+        var DATA_URL = '/share-assets/mmc0hyna-69db353de7/assets/asset-1.geojson';
+        
+        // 状态统计
+        var stats = {
+            total: 0,
+            signed: 0,
+            partial: 0,
+            unsigned: 0,
+            demolished: 0,
+            totalArea: 0,
+            communities: {}
+        };
+        
+        // 初始化地图
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: [113.599, 23.538],  // 根据数据坐标范围估算中心点
+                zoom: 15,
+                minZoom: 10,
+                maxZoom: 18
+            });
+            
+            map.on('load', function() {
+                // 添加底图控件
+                map.addControl(new TMapGL.NavigationControl(), 'top-right');
+                map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+                
+                // 加载 GeoJSON 数据
+                loadGeoJSON();
+            });
+        }
+        
+        // 加载 GeoJSON 数据
+        function loadGeoJSON() {
+            fetch(DATA_URL)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('网络响应失败：' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // 根据文件上下文，返回结构是标准 GeoJSON FeatureCollection
+                    // 如果是包装对象，提取 data 字段
+                    geojsonData = data.data || data;
+                    
+                    // 验证是否为有效的 GeoJSON
+                    if (!geojsonData || geojsonData.type !== 'FeatureCollection') {
+                        throw new Error('无效的 GeoJSON 格式');
+                    }
+                    
+                    // 分析数据统计
+                    analyzeData(geojsonData);
+                    
+                    // 添加到地图
+                    addGeoJSONToMap(geojsonData);
+                    
+                    // 更新 UI 状态
+                    updateUIState('ready');
+                    
+                    // 自动适应数据范围
+                    fitToGeoJSON(geojsonData);
+                })
+                .catch(function(error) {
+                    console.error('加载失败:', error);
+                    updateUIState('error');
+                });
+        }
+        
+        // 分析数据统计
+        function analyzeData(geojson) {
+            stats = {
+                total: 0,
+                signed: 0,
+                partial: 0,
+                unsigned: 0,
+                demolished: 0,
+                totalArea: 0,
+                communities: {}
+            };
+            
+            geojson.features.forEach(function(feature) {
+                stats.total++;
+                var props = feature.properties || {};
+                
+                // 签约情况统计
+                var signedStatus = props['签约情'] || '';
+                if (signedStatus === '已签约' || signedStatus === '已签') {
+                    stats.signed++;
+                } else if (signedStatus === '部分签约' || signedStatus === '部分') {
+                    stats.partial++;
+                } else {
+                    stats.unsigned++;
+                }
+                
+                // 清拆情况统计
+                var demolishedStatus = props['清拆情'] || '';
+                if (demolishedStatus === '已清拆' || demolishedStatus === '已拆') {
+                    stats.demolished++;
+                }
+                
+                // 面积统计
+                var area = props['房屋面'] || props['宗地面'] || 0;
+                if (typeof area === 'number') {
+                    stats.totalArea += area;
+                }
+                
+                // 经济社统计
+                var community = props['经济社'] || '未分配';
+                if (community) {
+                    stats.communities[community] = (stats.communities[community] || 0) + 1;
+                }
+            });
+        }
+        
+        // 添加 GeoJSON 到地图
+        function addGeoJSONToMap(geojson) {
+            // 添加数据源
+            map.addSource('village-data', {
+                type: 'geojson',
+                data: geojson
+            });
+            
+            // 面填充图层 - 根据签约情况着色
+            map.addLayer({
+                id: 'village-fill',
+                type: 'fill',
+                source: 'village-data',
+                paint: {
+                    'fill-color': [
+                        'case',
+                        ['==', ['get', '签约情'], '已签约'], '#12a150',
+                        ['==', ['get', '签约情'], '已签'], '#12a150',
+                        ['==', ['get', '签约情'], '部分签约'], '#e08a00',
+                        ['==', ['get', '签约情'], '部分'], '#e08a00',
+                        '#8a95ab'  // 默认未签约颜色
+                    ],
+                    'fill-opacity': 0.7,
+                    'fill-outline-color': '#ffffff'
+                }
+            });
+            
+            // 清拆状态边框图层
+            map.addLayer({
+                id: 'village-demolished-border',
+                type: 'line',
+                source: 'village-data',
+                filter: [
+                    'any',
+                    ['==', ['get', '清拆情'], '已清拆'],
+                    ['==', ['get', '清拆情'], '已拆']
+                ],
+                paint: {
+                    'line-color': '#d9363e',
+                    'line-width': 3,
+                    'line-dasharray': [2, 2]
+                }
+            });
+            
+            // 普通边框图层
+            map.addLayer({
+                id: 'village-border',
+                type: 'line',
+                source: 'village-data',
+                paint: {
+                    'line-color': '#ffffff',
+                    'line-width': 1
+                }
+            });
+            
+            // 绑定点击事件
+            bindClickEvents();
+        }
+        
+        // 绑定点击事件
+        function bindClickEvents() {
+            // 鼠标悬停效果
+            map.on('mouseenter', 'village-fill', function() {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+            
+            map.on('mouseleave', 'village-fill', function() {
+                map.getCanvas().style.cursor = '';
+            });
+            
+            // 点击显示信息
+            map.on('click', 'village-fill', function(e) {
+                if (!e.features || !e.features.length) return;
+                
+                var props = e.features[0].properties;
+                showInfoCard(e.lngLat, props);
+            });
+        }
+        
+        // 显示信息卡片
+        function showInfoCard(lngLat, props) {
+            var card = document.getElementById('mapInfoCard');
+            var title = document.getElementById('infoTitle');
+            var content = document.getElementById('infoContent');
+            
+            title.textContent = props['编号'] || '地块信息';
+            
+            var html = '';
+            var fields = [
+                ['编号', props['编号']],
+                ['权属人', props['权属人'] || '—'],
+                ['经济社', props['经济社'] || '—'],
+                ['动迁组', props['动迁组'] || '—'],
+                ['宗地面 (㎡)', props['宗地面'] || 0],
+                ['房屋面 (㎡)', props['房屋面'] || 0],
+                ['签约情况', props['签约情'] || '未签约'],
+                ['清拆情况', props['清拆情'] || '未清拆']
+            ];
+            
+            fields.forEach(function(field) {
+                if (field[1] !== null && field[1] !== '' && field[1] !== undefined) {
+                    html += '<div class="info-row">';
+                    html += '<span class="info-label">' + field[0] + '</span>';
+                    html += '<span class="info-value">' + field[1] + '</span>';
+                    html += '</div>';
+                }
+            });
+            
+            content.innerHTML = html;
+            card.classList.add('show');
+            
+            // 定位到点击位置
+            map.flyTo({
+                center: lngLat,
+                zoom: Math.max(map.getZoom(), 16),
+                duration: 800
+            });
+        }
+        
+        // 隐藏信息卡片
+        function hideInfoCard() {
+            document.getElementById('mapInfoCard').classList.remove('show');
+        }
+        
+        // 自动适应数据范围
+        function fitToGeoJSON(geojson) {
+            var bounds = new TMapGL.LngLatBounds();
+            
+            function processCoords(coords) {
+                if (typeof coords[0] === 'number') {
+                    bounds.extend(coords);
+                } else {
+                    coords.forEach(processCoords);
+                }
+            }
+            
+            geojson.features.forEach(function(feature) {
+                if (feature.geometry && feature.geometry.coordinates) {
+                    processCoords(feature.geometry.coordinates);
+                }
+            });
+            
+            // 修复：TMapGL.LngLatBounds 没有 isValid() 方法
+            // 改用检查 getSouthWest() 和 getNorthEast() 返回值
+            var sw = bounds.getSouthWest();
+            var ne = bounds.getNorthEast();
+            if (sw && ne && sw.lng !== undefined && ne.lng !== undefined) {
+                map.fitBounds(bounds, {
+                    padding: 50,
+                    maxZoom: 16
+                });
+            }
+        }
+        
+        // 更新 UI 状态
+        function updateUIState(state) {
+            var loadingState = document.getElementById('loadingState');
+            var errorState = document.getElementById('errorState');
+            var statsContent = document.getElementById('statsContent');
+            
+            loadingState.style.display = 'none';
+            errorState.style.display = 'none';
+            statsContent.style.display = 'none';
+            
+            if (state === 'loading') {
+                loadingState.style.display = 'flex';
+            } else if (state === 'error') {
+                errorState.style.display = 'block';
+            } else if (state === 'ready') {
+                statsContent.style.display = 'block';
+                updateStatsDisplay();
+            }
+        }
+        
+        // 更新统计显示
+        function updateStatsDisplay() {
+            document.getElementById('totalCount').textContent = stats.total;
+            document.getElementById('signedCount').textContent = stats.signed;
+            document.getElementById('partialCount').textContent = stats.partial;
+            document.getElementById('unsignedCount').textContent = stats.unsigned;
+            document.getElementById('demolishedCount').textContent = stats.demolished;
+            document.getElementById('totalArea').textContent = stats.totalArea.toLocaleString();
+            
+            // 计算比率
+            var signedRate = stats.total > 0 ? Math.round((stats.signed / stats.total) * 100) : 0;
+            var demolishedRate = stats.total > 0 ? Math.round((stats.demolished / stats.total) * 100) : 0;
+            document.getElementById('signedRate').textContent = signedRate + '%';
+            document.getElementById('demolishedRate').textContent = demolishedRate + '%';
+            
+            // 经济社列表
+            var communityList = document.getElementById('communityList');
+            var communityHtml = '';
+            for (var community in stats.communities) {
+                if (stats.communities.hasOwnProperty(community)) {
+                    communityHtml += '<div class="legend-item">';
+                    communityHtml += '<span>' + community + '</span>';
+                    communityHtml += '<span class="legend-count">' + stats.communities[community] + '</span>';
+                    communityHtml += '</div>';
+                }
+            }
+            communityList.innerHTML = communityHtml;
+        }
+        
+        // 移动端面板切换
+        document.getElementById('mobileToggle').addEventListener('click', function() {
+            document.getElementById('sidePanel').classList.toggle('open');
+        });
+        
+        // 关闭信息卡片
+        document.getElementById('infoClose').addEventListener('click', hideInfoCard);
+        
+        // 点击地图其他区域关闭信息卡片
+        document.addEventListener('click', function(e) {
+            var card = document.getElementById('mapInfoCard');
+            var toggle = document.getElementById('mobileToggle');
+            if (!card.contains(e.target) && !toggle.contains(e.target) && card.classList.contains('show')) {
+                hideInfoCard();
+            }
+        });
+        
+        // 页面加载完成后初始化地图
+        window.addEventListener('load', initMap);
+    </script>
+</body>
+</html>

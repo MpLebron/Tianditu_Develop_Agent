@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>江苏省美丽乡村地点展示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 左侧列表面板 */
+        .sidebar {
+            width: 380px;
+            background: #ffffff;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+            color: white;
+        }
+
+        .sidebar-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .sidebar-header .stats {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .sidebar-header .stats span {
+            margin-right: 12px;
+        }
+
+        .status-success {
+            color: #95de64;
+            font-weight: 600;
+        }
+
+        .status-error {
+            color: #ff7875;
+            font-weight: 600;
+        }
+
+        /* 列表容器 */
+        .location-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            background: #f5f7fa;
+        }
+
+        .location-item {
+            background: white;
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        .location-item:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+            transform: translateY(-1px);
+        }
+
+        .location-item.active {
+            border-color: #1890ff;
+            background: #e6f7ff;
+        }
+
+        .location-item.failed {
+            border-left: 4px solid #ff7875;
+        }
+
+        .location-item.success {
+            border-left: 4px solid #52c41a;
+        }
+
+        .location-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #262626;
+            margin-bottom: 6px;
+            line-height: 1.4;
+        }
+
+        .location-coords {
+            font-size: 12px;
+            color: #8c8c8c;
+            margin-bottom: 6px;
+        }
+
+        .location-status {
+            font-size: 12px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .location-status.success {
+            background: #f6ffed;
+            color: #52c41a;
+        }
+
+        .location-status.error {
+            background: #fff2f0;
+            color: #ff4d4f;
+        }
+
+        .location-status.loading {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
+
+        /* 右侧地图 */
+        #map {
+            flex: 1;
+            height: 100%;
+        }
+
+        /* 加载状态 */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .loading-spinner {
+            text-align: center;
+        }
+
+        .loading-spinner .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e6f7ff;
+            border-top-color: #1890ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 弹窗样式 */
+        .popup-content {
+            padding: 8px;
+            min-width: 200px;
+        }
+
+        .popup-content h3 {
+            font-size: 15px;
+            margin: 0 0 8px;
+            color: #262626;
+        }
+
+        .popup-content p {
+            font-size: 13px;
+            color: #595959;
+            margin: 4px 0;
+        }
+
+        /* 滚动条样式 */
+        .location-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .location-list::-webkit-scrollbar-track {
+            background: #f0f0f0;
+        }
+
+        .location-list::-webkit-scrollbar-thumb {
+            background: #bfbfbf;
+            border-radius: 3px;
+        }
+
+        .location-list::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧列表面板 -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>📍 江苏省美丽乡村地点</h2>
+            <div class="stats">
+                <span>总计：<strong id="total-count">0</strong></span>
+                <span>成功：<strong class="status-success" id="success-count">0</strong></span>
+                <span>失败：<strong class="status-error" id="error-count">0</strong></span>
+            </div>
+        </div>
+        <div class="location-list" id="location-list">
+            <!-- 地点列表将动态生成 -->
+        </div>
+    </div>
+
+    <!-- 右侧地图 -->
+    <div id="map"></div>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>正在加载地点数据...</p>
+        </div>
+    </div>
+
+    <!-- 引入天地图 API -->
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+
+    <script>
+        // 地点清单
+        const locations = [
+            "江苏省苏州市吴江区七都镇开弦弓村",
+            "江苏省苏州市昆山市张浦镇姜杭村",
+            "江苏省苏州市昆山市周庄镇东浜村",
+            "江苏省镇江市丹阳市曲阿街道建山村",
+            "江苏省盐城市盐都区学富镇蒋河村",
+            "江苏省镇江市丹阳县曲阿街道祈钦村",
+            "江苏省泰州市姜堰区溱潼镇湖南村",
+            "江苏省苏州市张家港市塘桥镇金村村",
+            "江苏省盐城市盐都区楼王镇丁马港村",
+            "江苏省盐城市盐都区龙冈镇张本村",
+            "江苏省苏州市昆山市周市镇东方村",
+            "江苏省苏州市吴中区光福镇冲山村",
+            "江苏省镇江市丹阳市曲阿街道张巷村",
+            "江苏省苏州市昆山市锦溪镇朱浜村",
+            "江苏省苏州市常熟市碧溪街道李袁村",
+            "江苏省苏州市太仓市浮桥镇方桥村",
+            "江苏省徐州市铜山区柳泉镇北村",
+            "江苏省无锡市宜兴市张渚镇祝陵村",
+            "江苏省南京市溧水区白马镇石头寨村",
+            "江苏省镇江市丹徒区宝堰镇宝堰村",
+            "江苏省无锡市宜兴市徐舍镇芳庄村",
+            "江苏省无锡市宜兴市周铁镇洋溪村",
+            "江苏省徐州市睢宁县姚集镇黄山前村",
+            "江苏省徐州市新沂市棋盘镇花厅村",
+            "江苏省无锡市锡山区东港镇黄土塘村"
+        ];
+
+        // 存储地点数据
+        const locationData = [];
+        var map = null;
+        const markers = {};
+
+        // 初始化地图
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: [120.5, 32.5],
+                zoom: 7,
+                pitch: 0,
+                bearing: 0
+            });
+
+            map.on("load", function() {
+                // 添加控件
+                map.addControl(new TMapGL.NavigationControl(), "top-right");
+                map.addControl(new TMapGL.ScaleControl(), "bottom-left");
+                map.addControl(new TMapGL.FullscreenControl(), "top-right");
+                
+                // 加载江苏省行政区边界
+                loadJiangsuBoundary();
+                
+                // 确保地图加载完成后再处理地点数据
+                processLocations();
+            });
+        }
+
+        // 加载江苏省行政区边界
+        function loadJiangsuBoundary() {
+            const url = new URL('/api/tianditu/administrative', window.location.origin);
+            url.searchParams.append('keyword', '江苏省');
+            url.searchParams.append('childLevel', '0');
+            url.searchParams.append('extensions', 'true');
+            url.searchParams.append('boundaryFormat', 'geojson');
+
+            fetch(url.toString())
+                .then(response => response.json())
+                .then(data => {
+                    if (data && data.success && data.data && data.data.data && data.data.data.district) {
+                        const boundaryGeoJSON = data.data.data.district[0].boundaryGeoJSON;
+                        if (boundaryGeoJSON) {
+                            // 添加边界数据源
+                            map.addSource('jiangsu-boundary', {
+                                type: 'geojson',
+                                data: boundaryGeoJSON
+                            });
+
+                            // 添加填充图层
+                            map.addLayer({
+                                id: 'jiangsu-fill',
+                                type: 'fill',
+                                source: 'jiangsu-boundary',
+                                paint: {
+                                    'fill-color': '#1890ff',
+                                    'fill-opacity': 0.08
+                                }
+                            });
+
+                            // 添加边界线图层
+                            map.addLayer({
+                                id: 'jiangsu-line',
+                                type: 'line',
+                                source: 'jiangsu-boundary',
+                                paint: {
+                                    'line-color': '#1454d8',
+                                    'line-width': 2,
+                                    'line-opacity': 0.8
+                                }
+                            });
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('加载江苏省边界失败:', error);
+                });
+        }
+
+        // 地理编码函数（使用代理优先）
+        function geocode(address) {
+            return new Promise(function(resolve) {
+                // 使用代理接口
+                const url = new URL('/api/tianditu/geocode', window.location.origin);
+                url.searchParams.append('address', address);
+
+                fetch(url.toString())
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('网络响应不正常');
+                        }
+                        return response.json();
+                    })
+                    .then(function(res) {
+                        if (res && res.success && res.data && String(res.data.status) === "0" && res.data.location) {
+                            resolve({
+                                success: true,
+                                lng: Number(res.data.location.lon),
+                                lat: Number(res.data.location.lat),
+                                address: address
+                            });
+                        } else {
+                            resolve({
+                                success: false,
+                                error: res?.data?.status === "1" ? "地址无法识别" : "编码失败",
+                                address: address
+                            });
+                        }
+                    })
+                    .catch(function(err) {
+                        console.error('地理编码失败:', err);
+                        resolve({
+                            success: false,
+                            error: '网络错误',
+                            address: address
+                        });
+                    });
+            });
+        }
+
+        // 创建列表项
+        function createListItem(index, data) {
+            const item = document.createElement('div');
+            item.className = 'location-item ' + (data.success ? 'success' : 'failed');
+            item.id = 'item-' + index;
+            item.onclick = function() {
+                onListItemClick(index);
+            };
+
+            let html = '<div class="location-name">' + data.address + '</div>';
+
+            if (data.loading) {
+                html += '<span class="location-status loading">⏳ 编码中...</span>';
+            } else if (data.success) {
+                html += '<div class="location-coords">📍 ' + data.lng.toFixed(4) + ', ' + data.lat.toFixed(4) + '</div>';
+                html += '<span class="location-status success">✓ 成功</span>';
+            } else {
+                html += '<span class="location-status error">✗ ' + (data.error || '失败') + '</span>';
+            }
+
+            item.innerHTML = html;
+            return item;
+        }
+
+        // 更新列表项状态
+        function updateListItem(index, data) {
+            const item = document.getElementById('item-' + index);
+            if (item) {
+                item.className = 'location-item ' + (data.success ? 'success' : 'failed');
+                let html = '<div class="location-name">' + data.address + '</div>';
+
+                if (data.success) {
+                    html += '<div class="location-coords">📍 ' + data.lng.toFixed(4) + ', ' + data.lat.toFixed(4) + '</div>';
+                    html += '<span class="location-status success">✓ 成功</span>';
+                } else {
+                    html += '<span class="location-status error">✗ ' + (data.error || '失败') + '</span>';
+                }
+
+                item.innerHTML = html;
+            }
+        }
+
+        // 添加地图标记
+        function addMarker(index, data) {
+            if (!data.success || !map) return;
+
+            const marker = new TMapGL.Marker({ color: '#1890ff' })
+                .setLngLat([data.lng, data.lat])
+                .setPopup(new TMapGL.Popup({ offset: [0, -30], maxWidth: '300px' })
+                    .setHTML(
+                        '<div class="popup-content">' +
+                        '<h3>' + data.address + '</h3>' +
+                        '<p>📍 经度：' + data.lng.toFixed(6) + '</p>' +
+                        '<p>📍 纬度：' + data.lat.toFixed(6) + '</p>' +
+                        '</div>'
+                    )
+                )
+                .addTo(map);
+
+            // 绑定点击事件
+            marker.getElement().onclick = function() {
+                onMarkerClick(index);
+            };
+
+            markers[index] = marker;
+        }
+
+        // 列表项点击
+        function onListItemClick(index) {
+            const data = locationData[index];
+
+            // 高亮列表项
+            document.querySelectorAll('.location-item').forEach(function(item) {
+                item.classList.remove('active');
+            });
+            const activeItem = document.getElementById('item-' + index);
+            if (activeItem) {
+                activeItem.classList.add('active');
+                activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            // 如果编码成功，飞到该点并打开弹窗
+            if (data.success && markers[index]) {
+                map.flyTo({
+                    center: [data.lng, data.lat],
+                    zoom: 15,
+                    pitch: 0,
+                    bearing: 0,
+                    duration: 1500
+                });
+
+                // 打开弹窗
+                markers[index].getPopup().addTo(map);
+            }
+        }
+
+        // 地图标记点击
+        function onMarkerClick(index) {
+            // 高亮对应列表项
+            document.querySelectorAll('.location-item').forEach(function(item) {
+                item.classList.remove('active');
+            });
+            const activeItem = document.getElementById('item-' + index);
+            if (activeItem) {
+                activeItem.classList.add('active');
+                activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        // 更新统计信息
+        function updateStats() {
+            const total = locationData.length;
+            const success = locationData.filter(function(d) { return d.success; }).length;
+            const error = total - success;
+
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('success-count').textContent = success;
+            document.getElementById('error-count').textContent = error;
+        }
+
+        // 适配所有成功点位
+        function fitAllPoints() {
+            if (!map) return;
+            
+            const successPoints = locationData.filter(function(d) { return d.success; });
+            if (successPoints.length === 0) return;
+
+            const bounds = new TMapGL.LngLatBounds();
+            successPoints.forEach(function(d) {
+                bounds.extend([d.lng, d.lat]);
+            });
+
+            map.fitBounds(bounds, {
+                padding: 80,
+                maxZoom: 12,
+                duration: 1000
+            });
+        }
+
+        // 主流程：处理所有地点
+        async function processLocations() {
+            const listContainer = document.getElementById('location-list');
+
+            // 初始化所有地点数据
+            locations.forEach(function(addr, index) {
+                locationData[index] = {
+                    address: addr,
+                    loading: true,
+                    success: false
+                };
+                listContainer.appendChild(createListItem(index, locationData[index]));
+            });
+
+            // 逐个进行地理编码
+            for (let i = 0; i < locations.length; i++) {
+                try {
+                    const result = await geocode(locations[i]);
+                    locationData[i].loading = false;
+                    locationData[i].success = result.success;
+
+                    if (result.success) {
+                        locationData[i].lng = result.lng;
+                        locationData[i].lat = result.lat;
+                        addMarker(i, locationData[i]);
+                    } else {
+                        locationData[i].error = result.error;
+                    }
+
+                    updateListItem(i, locationData[i]);
+                    updateStats();
+                } catch (error) {
+                    console.error('处理地点时出错:', error);
+                    locationData[i].loading = false;
+                    locationData[i].success = false;
+                    locationData[i].error = '处理失败';
+                    updateListItem(i, locationData[i]);
+                    updateStats();
+                }
+            }
+
+            // 隐藏加载遮罩
+            document.getElementById('loading-overlay').style.display = 'none';
+
+            // 适配所有点位
+            setTimeout(function() {
+                fitAllPoints();
+            }, 500);
+        }
+
+        // 页面加载完成后初始化
+        window.onload = function() {
+            initMap();
+        };
+    </script>
+</body>
+</html>

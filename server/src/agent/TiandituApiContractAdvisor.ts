@@ -133,16 +133,23 @@ const CONTRACTS: ApiContractRule[] = [
     ],
     required: [
       '优先调用代理：GET /api/tianditu/search?...',
+      '必须使用 GET + query string 传参（不要 POST body postStr）',
+      '运行沙箱中 URL 必须使用绝对地址：new URL("/api/tianditu/search", window.location.origin).toString()',
       '按场景设置 queryType：视野内=2、周边=3、多边形=10、行政区=12、分类=13、统计=14',
       '医疗急救场景建议用 queryType=3 + pointLonlat + queryRadius',
     ],
     responseChecks: [
       '代理返回成功条件：res.success === true',
-      'POI 成功条件：resultType===1 且 pois 为数组',
+      '必须先解包代理层：const data = res.data || {}；禁止直接把 res 当业务结果读取 resultType/pois',
+      'POI 成功条件：Number(data.resultType)===1 且 Array.isArray(data.pois)',
+      '服务状态判定：以 data.status.infocode===1000 为成功（status 可能是对象或数组）',
+      'distance 字段按字符串处理（如 "319m"/"1.1km"），不要默认当数字做 /1000',
       '空结果分支：展示“无结果”状态并关闭 loading',
     ],
     forbidden: [
       '禁止 queryType 与参数组合不匹配（例如 queryType=3 但缺少 pointLonlat）',
+      '禁止前端直连 https://api.tianditu.gov.cn/v2/search 或 /search/v1/poi',
+      '禁止 /api/tianditu/search 使用 POST + JSON.stringify(postStr)',
     ],
   },
 ]

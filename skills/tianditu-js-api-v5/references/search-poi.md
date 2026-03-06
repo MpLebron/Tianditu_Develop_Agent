@@ -81,6 +81,13 @@ GET https://api.tianditu.gov.cn/v2/search?postStr={...}&type=query&tk=${TIANDITU
 
 ## 稳健响应判定（避免“服务正常却报错”）
 
+代理响应是两层结构：
+
+- 第一层：`payload.success / payload.error`
+- 第二层：`payload.data.resultType / payload.data.pois / payload.data.status`
+
+禁止直接用 `res.json()` 顶层对象读取 `resultType/pois`。
+
 ```javascript
 function unwrapProxyPayload(payload) {
   if (!payload || payload.success !== true) {
@@ -205,3 +212,4 @@ function searchNearbyPois(keyword, center, radius) {
 3. `infocode=1000` 视为成功；`cndesc="服务正常"` 不是异常。
 4. `resultType !== 1` 时不要强行按 POI 渲染点图层。
 5. 请求结束必须收敛状态到 `ready/empty/error`，不得卡在 `loading`。
+6. 代理返回必须先解包 `payload.data`，严禁把 `res.json()` 顶层对象直接当 `resultType/pois` 读取。

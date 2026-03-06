@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>江苏省地级市边界</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        /* 状态提示面板 */
+        #status-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+            max-width: 300px;
+        }
+        #status-panel h3 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        #status-panel p {
+            font-size: 13px;
+            color: #666;
+            margin: 0;
+        }
+        #status-panel .loading {
+            color: #1890ff;
+        }
+        #status-panel .ready {
+            color: #52c41a;
+        }
+        #status-panel .empty {
+            color: #faad14;
+        }
+        #status-panel .error {
+            color: #ff4d4f;
+        }
+        #status-panel button {
+            margin-top: 10px;
+            padding: 6px 12px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        #status-panel button:hover {
+            background: #40a9ff;
+        }
+        #status-panel.hidden {
+            display: none;
+        }
+        /* 图例 */
+        #legend {
+            position: absolute;
+            bottom: 30px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        #legend h4 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        #legend ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        #legend li {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        #legend li span {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            margin-right: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <!-- 状态提示面板 -->
+    <div id="status-panel">
+        <h3>数据加载状态</h3>
+        <p id="status-text" class="loading">正在加载江苏省地级市边界...</p>
+        <button id="retry-btn" class="hidden">重试</button>
+    </div>
+    
+    <!-- 图例 -->
+    <div id="legend" class="hidden">
+        <h4>地级市</h4>
+        <ul id="legend-list"></ul>
+    </div>
+
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    <script>
+        // 全局变量
+        var map;
+        var cityColors = {};
+        var cityNames = [];
+
+        // 生成柔和的分色配色方案
+        function generateColorPalette(count) {
+            var colors = [];
+            var baseHues = [
+                210, 150, 30, 330, 270, 180, 90, 20, 250, 120,
+                300, 60, 230, 100, 350, 200, 140, 20, 280, 160
+            ];
+            for (var i = 0; i < count; i++) {
+                var hue = baseHues[i % baseHues.length];
+                var saturation = 60 + (i % 3) * 10;
+                var lightness = 55 + (i % 4) * 5;
+                colors.push('hsl(' + hue + ', ' + saturation + '%, ' + lightness + '%)');
+            }
+            return colors;
+        }
+
+        // 构建 API URL（使用绝对路径）
+        function buildApiUrl(path, params) {
+            var origin = '';
+            try {
+                if (window.location && /^https?:/.test(window.location.origin)) {
+                    origin = window.location.origin;
+                }
+            } catch (_) {}
+            if (!origin) {
+                origin = window.location.protocol + '//' + window.location.host;
+            }
+            var url = new URL(path, origin);
+            Object.keys(params || {}).forEach(function (k) {
+                var v = params[k];
+                if (v !== undefined && v !== null && String(v) !== '') {
+                    url.searchParams.set(k, String(v));
+                }
+            });
+            return url.toString();
+        }
+
+        // 更新状态面板
+        function updateStatus(state, message, showRetry) {
+            var panel = document.getElementById('status-panel');
+            var text = document.getElementById('status-text');
+            var retryBtn = document.getElementById('retry-btn');
+            
+            panel.classList.remove('hidden');
+            text.className = state;
+            text.textContent = message;
+            
+            if (showRetry) {
+                retryBtn.classList.remove('hidden');
+            } else {
+                retryBtn.classList.add('hidden');
+            }
+            
+            // ready 状态 3 秒后隐藏面板
+            if (state === 'ready') {
+                setTimeout(function() {
+                    panel.classList.add('hidden');
+                }, 3000);
+            }
+        }
+
+        // 更新图例
+        function updateLegend() {
+            var legend = document.getElementById('legend');
+            var list = document.getElementById('legend-list');
+            list.innerHTML = '';
+            
+            cityNames.forEach(function(name) {
+                var li = document.createElement('li');
+                var span = document.createElement('span');
+                span.style.backgroundColor = cityColors[name];
+                li.appendChild(span);
+                li.appendChild(document.createTextNode(name));
+                list.appendChild(li);
+            });
+            
+            legend.classList.remove('hidden');
+        }
+
+        // 加载行政区划数据
+        async function loadAdministrative(keyword) {
+            updateStatus('loading', '正在加载 ' + keyword + ' 地级市边界...', false);
+            
+            var requestUrl = buildApiUrl('/api/tianditu/administrative', {
+                keyword: keyword,
+                childLevel: 1,
+                extensions: true,
+                autoResolveCodebook: true,
+                expandChildrenBoundary: true,
+                outputScope: 'children',
+                boundaryFormat: 'geojson'
+            });
+
+            try {
+                var res = await fetch(requestUrl);
+                var json = await res.json();
+
+                // 检查代理请求是否成功
+                if (!json || !json.success) {
+                    throw new Error((json && json.error) || '行政区划代理请求失败');
+                }
+
+                var result = json.data;
+                // 检查业务状态码
+                if (!result || Number(result.status) !== 200) {
+                    throw new Error((result && result.message) || '行政区划查询失败');
+                }
+
+                var districts = (result.data && result.data.district) || [];
+                
+                // 空数据处理
+                if (!districts.length) {
+                    updateStatus('empty', '未找到 ' + keyword + ' 的地级市数据', true);
+                    return;
+                }
+
+                // 提取 boundaryGeoJSON
+                var features = districts
+                    .map(function (d) {
+                        // 记录城市名称用于图例
+                        if (d.name) {
+                            cityNames.push(d.name);
+                        }
+                        return d.boundaryGeoJSON;
+                    })
+                    .filter(Boolean);
+
+                // 仍然没有边界数据
+                if (!features.length) {
+                    var c = districts[0].center;
+                    if (c && Number.isFinite(Number(c.lng)) && Number.isFinite(Number(c.lat))) {
+                        map.flyTo({ center: [Number(c.lng), Number(c.lat)], zoom: 8 });
+                    }
+                    updateStatus('empty', '未获取到边界数据，已定位到中心点', false);
+                    return;
+                }
+
+                // 清理旧数据
+                if (map.getSource('admin-boundary')) {
+                    if (map.getLayer('admin-fill')) map.removeLayer('admin-fill');
+                    if (map.getLayer('admin-line')) map.removeLayer('admin-line');
+                    map.removeSource('admin-boundary');
+                }
+
+                // 为每个城市分配颜色
+                var palette = generateColorPalette(cityNames.length);
+                cityNames.forEach(function(name, index) {
+                    cityColors[name] = palette[index];
+                });
+
+                // 添加数据源
+                map.addSource('admin-boundary', {
+                    type: 'geojson',
+                    data: {
+                        type: 'FeatureCollection',
+                        features: features
+                    }
+                });
+
+                // 构建颜色匹配表达式
+                var colorMatch = ['match', ['get', 'name']];
+                cityNames.forEach(function(name) {
+                    colorMatch.push(name);
+                    colorMatch.push(cityColors[name]);
+                });
+                colorMatch.push('#cccccc'); // 默认色
+
+                // 添加面填充图层
+                map.addLayer({
+                    id: 'admin-fill',
+                    type: 'fill',
+                    source: 'admin-boundary',
+                    paint: {
+                        'fill-color': colorMatch,
+                        'fill-opacity': 0.5,
+                        'fill-outline-color': 'rgba(0, 0, 0, 0.3)'
+                    }
+                });
+
+                // 添加边界线图层（更清晰的边界）
+                map.addLayer({
+                    id: 'admin-line',
+                    type: 'line',
+                    source: 'admin-boundary',
+                    paint: {
+                        'line-color': '#333333',
+                        'line-width': 1.5,
+                        'line-opacity': 0.8
+                    }
+                });
+
+                // 计算边界范围并适配视野
+                var bounds = new TMapGL.LngLatBounds();
+                features.forEach(function (f) {
+                    var g = f.geometry;
+                    if (!g) return;
+                    if (g.type === 'Polygon') {
+                        g.coordinates.forEach(function (ring) {
+                            ring.forEach(function (pt) {
+                                if (Number.isFinite(pt[0]) && Number.isFinite(pt[1])) {
+                                    bounds.extend(pt);
+                                }
+                            });
+                        });
+                    } else if (g.type === 'MultiPolygon') {
+                        g.coordinates.forEach(function (poly) {
+                            poly.forEach(function (ring) {
+                                ring.forEach(function (pt) {
+                                    if (Number.isFinite(pt[0]) && Number.isFinite(pt[1])) {
+                                        bounds.extend(pt);
+                                    }
+                                });
+                            });
+                        });
+                    }
+                });
+                
+                map.fitBounds(bounds, { padding: 50, maxZoom: 10 });
+
+                // 更新状态和图例
+                updateStatus('ready', '已加载 ' + cityNames.length + ' 个地级市边界', false);
+                updateLegend();
+
+                // 绑定点击事件显示城市信息
+                bindClickEvent();
+
+            } catch (err) {
+                console.error('加载失败:', err);
+                updateStatus('error', '加载失败：' + err.message, true);
+            }
+        }
+
+        // 绑定点击事件
+        function bindClickEvent() {
+            map.on('click', 'admin-fill', function(e) {
+                if (!e.features || !e.features.length) return;
+                var props = e.features[0].properties;
+                var name = props.name || '未知区域';
+                var adcode = props.adcode || '-';
+                var center = props.center;
+                
+                var html = '<div style="padding: 5px 0;">' +
+                    '<h4 style="margin: 0 0 10px 0; font-size: 16px;">' + name + '</h4>' +
+                    '<p style="margin: 5px 0; font-size: 13px; color: #666;">行政区划代码：' + adcode + '</p>';
+                
+                if (center && center.lng && center.lat) {
+                    html += '<p style="margin: 5px 0; font-size: 13px; color: #666;">' +
+                        '中心点：[' + center.lng.toFixed(4) + ', ' + center.lat.toFixed(4) + ']</p>';
+                }
+                html += '</div>';
+
+                new TMapGL.Popup({ maxWidth: '250px' })
+                    .setLngLat(e.lngLat)
+                    .setHTML(html)
+                    .addTo(map);
+            });
+
+            map.on('mouseenter', 'admin-fill', function() {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+
+            map.on('mouseleave', 'admin-fill', function() {
+                map.getCanvas().style.cursor = '';
+            });
+        }
+
+        // 重试按钮事件
+        document.getElementById('retry-btn').addEventListener('click', function() {
+            loadAdministrative('江苏省');
+        });
+
+        // 初始化地图
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: [118.7969, 32.0603], // 南京市中心
+                zoom: 7,
+                pitch: 0,
+                bearing: 0
+            });
+
+            map.on('load', function() {
+                // 添加基础控件
+                map.addControl(new TMapGL.NavigationControl(), 'top-right');
+                map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+                map.addControl(new TMapGL.FullscreenControl(), 'top-right');
+
+                // 加载江苏省地级市边界
+                loadAdministrative('江苏省');
+            });
+        }
+
+        // 启动
+        initMap();
+    </script>
+</body>
+</html>

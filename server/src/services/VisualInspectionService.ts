@@ -16,6 +16,7 @@ export interface VisualInspectionInput {
 export interface VisualInspectionResult {
   status: VisualInspectStatus
   anomalous: boolean
+  shouldRepair: boolean
   severity: VisualSeverity
   summary: string
   diagnosis: string
@@ -87,54 +88,8 @@ function normalizeConfidence(value: unknown): number {
   return Number(n.toFixed(2))
 }
 
-function hasNegationNear(text: string, index: number): boolean {
-  const start = Math.max(0, index - 8)
-  const prefix = text.slice(start, index)
-  return /(没有|无|未见|并无|并未|not\s|no\s|without)/i.test(prefix)
-}
-
-function inferAnomalousFromText(summary: string, diagnosis: string, repairHint: string): boolean {
-  const text = `${summary}\n${diagnosis}\n${repairHint}`.toLowerCase()
-
-  const strongSignals = [
-    '地图区域为空',
-    '黑屏',
-    '全黑',
-    '图层错位',
-    '文字溢出',
-    '加载失败',
-    'failed to load',
-    'not rendered',
-    'render failed',
-  ]
-  if (strongSignals.some((term) => text.includes(term))) return true
-
-  const weakSignals = ['空白', '缺失', '未加载', '无数据', '未渲染', 'blank', 'empty', 'no data', 'missing', 'error', 'failed']
-  for (const term of weakSignals) {
-    let idx = text.indexOf(term)
-    while (idx !== -1) {
-      if (!hasNegationNear(text, idx)) return true
-      idx = text.indexOf(term, idx + term.length)
-    }
-  }
-  return false
-}
-
-function inferSeverityFromText(summary: string, diagnosis: string, current: VisualSeverity): VisualSeverity {
-  const text = `${summary}\n${diagnosis}`.toLowerCase()
-  if (/黑屏|全黑|加载失败|failed|error/.test(text)) return 'high'
-  if (/空白|未加载|无数据|未渲染|blank|empty|no data/.test(text)) return 'medium'
-  return current
-}
-
-function summaryLooksPass(summary: string): boolean {
-  const text = String(summary || '').toLowerCase()
-  return /通过|正常|无明显异常|未发现异常|looks normal|no obvious issue/.test(text)
-}
-
-function diagnosisLooksPass(diagnosis: string): boolean {
-  const text = String(diagnosis || '').toLowerCase()
-  return /内容完整|均已渲染|已渲染|渲染正常|页面正常|无明显异常|未发现异常|没有空白|无空白|没有缺失|无缺失|looks normal|content complete|fully rendered|no missing|no blank/.test(text)
+function normalizeShouldRepair(value: unknown): boolean {
+  return value === true
 }
 
 function parseJsonCandidate(text: string): Record<string, unknown> | null {
@@ -157,6 +112,7 @@ function unavailableResult(reason: string): VisualInspectionResult {
   return {
     status: 'unavailable',
     anomalous: false,
+    shouldRepair: false,
     severity: 'low',
     summary: '视觉巡检不可用',
     diagnosis,
@@ -188,14 +144,17 @@ export class VisualInspectionService {
       '你是地图页面视觉质检助手。',
       '你会收到一张地图应用页面截图。',
       '请只基于截图判断页面是否存在异常或错误迹象，并给出简洁诊断。',
-      '如果地图区域空白、图层缺失、点位未显示、页面仅有加载态但数据未渲染，这些都必须判为异常（anomalous=true）。',
+      '你必须独立判断是否需要进入自动修复链路（shouldRepair），不要把这项交给规则推断。',
+      '先观察后结论：先描述可见元素（道路/地名/控件/面板/点位等），再判断异常与是否需要修复。',
       '不要输出 Markdown，不要解释过程，只输出 JSON。',
       '输出 JSON schema:',
-      '{"anomalous":boolean,"severity":"low|medium|high","summary":"...","diagnosis":"...","repairHint":"...","confidence":0-1}',
+      '{"anomalous":boolean,"shouldRepair":boolean,"severity":"low|medium|high","summary":"...","diagnosis":"...","repairHint":"...","confidence":0-1}',
       '要求：',
-      '1) 若无法确认异常，anomalous=false，severity=low。',
-      '2) diagnosis 描述可观察到的现象，不要编造未见事实。',
-      '3) repairHint 用于代码修复输入，1~3 句即可。',
+      '1) 若无法确认异常，anomalous=false，shouldRepair=false，severity=low。',
+      '2) 如果页面内容完整、可正常交互，仅存在轻微视觉差异，shouldRepair=false。',
+      '3) 仅当确实需要代码修复（空白/黑屏/错位/关键功能失效）时，shouldRepair=true。',
+      '4) diagnosis 描述可观察到的现象，不要编造未见事实。',
+      '5) repairHint 用于代码修复输入，1~3 句即可；shouldRepair=false 时可填“无”。',
     ].join('\n')
 
     const userPrompt = [
@@ -205,15 +164,12 @@ export class VisualInspectionService {
     ].join('\n')
 
     try {
-      const llmBase = createLLM({
+      const llm = createLLM({
         llmSelection: this.llmSelection,
         temperature: 0.1,
         maxTokens: 500,
         timeoutMs: this.timeoutMs,
       })
-      const llm = (llmBase as any).bind?.({
-        response_format: { type: 'json_object' },
-      }) || llmBase
 
       const response = await llm.invoke([
         new SystemMessage(systemPrompt),
@@ -236,32 +192,23 @@ export class VisualInspectionService {
       const summary = normalizeSummary(parsed.summary)
       const diagnosis = normalizeDiagnosis(parsed.diagnosis)
       const repairHint = normalizeRepairHint(parsed.repairHint)
-
       let anomalous = parsed.anomalous === true
-      const impliedAnomaly = inferAnomalousFromText(summary, diagnosis, repairHint)
-      const impliedPass = summaryLooksPass(summary) || diagnosisLooksPass(diagnosis)
-      if (!anomalous && impliedAnomaly) {
+      let shouldRepair = normalizeShouldRepair(parsed.shouldRepair)
+      if (shouldRepair && !anomalous) {
         anomalous = true
       }
-      if (anomalous && impliedPass && !impliedAnomaly) {
-        anomalous = false
+      if (!anomalous) {
+        shouldRepair = false
       }
 
-      let severity = anomalous ? normalizeSeverity(parsed.severity) : 'low'
-      if (anomalous) {
-        severity = inferSeverityFromText(summary, diagnosis, severity)
-        if (severity === 'low') severity = 'medium'
-      }
-
-      const normalizedSummary = anomalous && summaryLooksPass(summary) && impliedAnomaly
-        ? '检测到视觉异常（模型结论已纠偏）'
-        : summary
+      const severity = anomalous ? normalizeSeverity(parsed.severity) : 'low'
 
       return {
         status: 'ok',
         anomalous,
+        shouldRepair,
         severity,
-        summary: normalizedSummary,
+        summary,
         diagnosis,
         repairHint,
         confidence: normalizeConfidence(parsed.confidence),

@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全国妇联中心可视化地图</title>
+    <style>
+        :root {
+            --primary-color: #1890ff;
+            --bg-color: #f5f5f5;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --border-radius: 8px;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08);
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+
+        body { display: flex; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+
+        /* 左侧栏 */
+        #sidebar {
+            width: 360px;
+            height: 100%;
+            background: var(--card-bg);
+            border-right: 1px solid #e8e8e8;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        .sidebar-header {
+            padding: var(--spacing-lg);
+            border-bottom: 1px solid #e8e8e8;
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .sidebar-header h1 { font-size: 20px; font-weight: 600; }
+
+        .filter-section {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        .filter-section label {
+            display: block;
+            margin-bottom: var(--spacing-sm);
+            font-weight: 500;
+            color: var(--text-color);
+        }
+
+        .filter-section select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: var(--border-radius);
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .filter-section select:hover { border-color: var(--primary-color); }
+
+        .result-section {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-md);
+        }
+
+        .result-section h2 {
+            font-size: 16px;
+            margin-bottom: var(--spacing-md);
+            color: var(--text-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: var(--spacing-sm);
+        }
+
+        .center-item {
+            background: var(--bg-color);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-md);
+            margin-bottom: var(--spacing-sm);
+            transition: all 0.2s;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .center-item:hover {
+            background: #e6f7ff;
+            border-color: var(--primary-color);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+        }
+
+        .center-item h3 {
+            font-size: 15px;
+            color: var(--primary-color);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .center-item p {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 4px;
+            line-height: 1.5;
+        }
+
+        .center-item .contact {
+            font-size: 12px;
+            color: #999;
+            margin-top: var(--spacing-sm);
+            padding-top: var(--spacing-sm);
+            border-top: 1px dashed #ddd;
+        }
+
+        /* 地图区 */
+        #map-container {
+            flex: 1;
+            height: 100%;
+            position: relative;
+        }
+
+        #map { width: 100%; height: 100%; }
+
+        /* 弹窗样式 */
+        .custom-popup {
+            max-width: 300px;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .popup-header {
+            background: var(--primary-color);
+            color: white;
+            padding: var(--spacing-md);
+            font-weight: 600;
+        }
+
+        .popup-content {
+            padding: var(--spacing-md);
+        }
+
+        .popup-content p {
+            margin-bottom: 8px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .popup-content .contact {
+            font-size: 13px;
+            color: #666;
+            margin-top: var(--spacing-sm);
+        }
+
+        /* 加载与空状态 */
+        .loading-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: var(--spacing-md);
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .empty-state {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 2000;
+            background: white;
+            padding: var(--spacing-lg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+
+        .error-state {
+            position: absolute;
+            top: 20px; right: 20px;
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            color: #ff4d4f;
+            padding: var(--spacing-md);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            z-index: 2000;
+            max-width: 300px;
+        }
+
+        /* 移动端适配 */
+        @media (max-width: 1024px) {
+            #sidebar { width: 300px; }
+        }
+
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            #sidebar {
+                width: 100%;
+                height: 40%;
+                position: absolute;
+                bottom: 0;
+                transform: translateY(100%);
+            }
+            #sidebar.open { transform: translateY(0); }
+            #map-container { height: 60%; }
+            
+            .mobile-toggle {
+                position: absolute;
+                bottom: 20px; right: 20px;
+                background: var(--primary-color);
+                color: white;
+                width: 50px; height: 50px;
+                border-radius: 50%;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                box-shadow: var(--shadow);
+                z-index: 3000;
+                cursor: pointer;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 左侧栏 -->
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <h1>全国妇联中心地图</h1>
+            <p style="font-size: 13px; opacity: 0.9;">点击地图点位查看详情</p>
+        </div>
+        
+        <div class="filter-section">
+            <label for="province-select">选择省份</label>
+            <select id="province-select">
+                <option value="">全部省份</option>
+            </select>
+            
+            <label for="city-select" style="margin-top: var(--spacing-sm);">选择城市</label>
+            <select id="city-select" disabled>
+                <option value="">请选择省份</option>
+            </select>
+        </div>
+        
+        <div class="result-section">
+            <h2 id="result-title">当前筛选结果 (0)</h2>
+            <div id="center-list">
+                <p style="text-align: center; color: #999; margin-top: var(--spacing-lg);">请选择省份和城市查看结果</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 地图区 -->
+    <div id="map-container">
+        <div id="map"></div>
+        
+        <!-- 加载状态 -->
+        <div class="loading-overlay" id="loading-overlay">
+            <div class="spinner"></div>
+            <p>正在加载妇联中心数据...</p>
+        </div>
+        
+        <!-- 空状态 -->
+        <div class="empty-state" id="empty-state" style="display: none;">
+            <h3 style="color: var(--primary-color); margin-bottom: var(--spacing-sm);">暂无数据</h3>
+            <p>请尝试选择其他省份或城市</p>
+        </div>
+        
+        <!-- 错误状态 -->
+        <div class="error-state" id="error-state" style="display: none;">
+            <strong>加载失败</strong>
+            <p id="error-message">无法加载数据，请检查网络连接</p>
+            <button onclick="retryLoad()" style="margin-top: var(--spacing-sm); padding: 4px 12px; background: #ff4d4f; color: white; border: none; border-radius: 4px; cursor: pointer;">重试</button>
+        </div>
+        
+        <!-- 移动端切换按钮 -->
+        <div class="mobile-toggle" id="mobile-toggle" style="display: none;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+            </svg>
+        </div>
+    </div>
+
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    <script>
+        // ===== 全局变量 =====
+        var map = null;
+        let geojsonFeatures = [];
+        let provinceMap = new Map();
+        let cityMap = new Map();
+        let markers = [];
+        let popup = null;
+
+        // ===== 初始化地图 =====
+        function initMap() {
+            map = new TMapGL.Map("map", {
+                center: [104.195397, 35.861660], // 中国中心点
+                zoom: 4,
+                pitch: 0,
+                bearing: 0
+            });
+
+            map.on("load", function() {
+                // 添加控件
+                map.addControl(new TMapGL.NavigationControl(), "top-right");
+                map.addControl(new TMapGL.ScaleControl(), "bottom-left");
+                
+                // 加载数据
+                loadData();
+            });
+
+            // 地图点击事件
+            map.on('click', function(e) {
+                if (popup) {
+                    popup.remove();
+                    popup = null;
+                }
+            });
+
+            // 移动端适配
+            updateMobileLayout();
+            window.addEventListener('resize', updateMobileLayout);
+        }
+
+        // ===== 数据加载 =====
+        async function loadData() {
+            try {
+                const response = await fetch('/share-assets/mme7sis6-0dfb3fe5d2/assets/asset-1.geojson');
+                if (!response.ok) throw new Error('网络响应失败');
+                
+                const rawData = await response.json();
+                
+                // 按契约提取 GeoJSON
+                if (!rawData || !Array.isArray(rawData.features)) {
+                    throw new Error('数据格式不正确');
+                }
+                
+                geojsonFeatures = rawData.features;
+                processAndRenderData();
+                
+            } catch (error) {
+                console.error('数据加载失败:', error);
+                showLoading(false);
+                showError(true, error.message);
+            }
+        }
+
+        // ===== 数据处理与渲染 =====
+        function processAndRenderData() {
+            // 提取省份和城市
+            const provinces = new Set();
+            const citiesByProvince = new Map();
+            
+            // 遍历所有要素，按契约提取数据
+            geojsonFeatures.forEach(feature => {
+                // 安全检查
+                if (!feature || !feature.properties) return;
+                
+                const props = feature.properties;
+                const provName = props.provName || '未知省份';
+                const city = props['地名'] || '未知城市';
+                
+                // 提取坐标（按契约：MultiPoint 用 geometry.coordinates[0]）
+                const coords = feature.geometry.coordinates;
+                if (!Array.isArray(coords) || !coords.length) return;
+                
+                let lngLat = null;
+                if (feature.geometry.type === 'Point') {
+                    if (Array.isArray(coords) && coords.length >= 2) {
+                        lngLat = coords;
+                    }
+                } else if (feature.geometry.type === 'MultiPoint') {
+                    // MultiPoint: geometry.coordinates[0]
+                    if (Array.isArray(coords) && coords.length > 0 && Array.isArray(coords[0]) && coords[0].length >= 2) {
+                        lngLat = coords[0];
+                    }
+                }
+                
+                // 如果坐标有效，添加到地图数据
+                if (lngLat) {
+                    // 存储坐标信息到 properties 供后续使用
+                    props._lngLat = lngLat;
+                }
+                
+                // 添加到省份和城市集合
+                provinces.add(provName);
+                
+                if (!citiesByProvince.has(provName)) {
+                    citiesByProvince.set(provName, new Set());
+                }
+                citiesByProvince.get(provName).add(city);
+            });
+            
+            // 构建 cityMap 供后续使用
+            citiesByProvince.forEach((cities, prov) => {
+                cityMap.set(prov, Array.from(cities).sort());
+            });
+            
+            // 更新省份下拉框
+            const provinceSelect = document.getElementById('province-select');
+            provinceSelect.innerHTML = '<option value="">全部省份</option>';
+            Array.from(provinces).sort().forEach(prov => {
+                const option = document.createElement('option');
+                option.value = prov;
+                option.textContent = prov;
+                provinceSelect.appendChild(option);
+            });
+            
+            // 绑定省份选择事件
+            provinceSelect.addEventListener('change', function() {
+                updateCitySelect(this.value);
+                updateResultList(this.value, document.getElementById('city-select').value);
+            });
+            
+            // 绑定城市选择事件
+            document.getElementById('city-select').addEventListener('change', function() {
+                updateResultList(document.getElementById('province-select').value, this.value);
+            });
+            
+            // 渲染所有点位
+            renderMarkers();
+            showLoading(false);
+            
+            // 默认显示全部数据
+            updateResultList('', '');
+        }
+
+        // ===== 更新城市下拉框 =====
+        function updateCitySelect(province) {
+            const citySelect = document.getElementById('city-select');
+            
+            // 清空并设置默认选项
+            citySelect.innerHTML = '<option value="">全部城市</option>';
+            
+            // 如果选择了省份，填充对应城市
+            if (province && cityMap.has(province)) {
+                const cities = cityMap.get(province);
+                if (Array.isArray(cities) && cities.length > 0) {
+                    cities.forEach(city => {
+                        const option = document.createElement('option');
+                        option.value = city;
+                        option.textContent = city;
+                        citySelect.appendChild(option);
+                    });
+                }
+            }
+            
+            // 启用/禁用城市下拉框
+            citySelect.disabled = !province;
+            
+            // 更新结果列表
+            updateResultList(province, '');
+        }
+
+        // ===== 渲染点位 =====
+        function renderMarkers() {
+            // 清除旧点位
+            markers.forEach(marker => marker.remove());
+            markers = [];
+            
+            // 渲染新点位
+            geojsonFeatures.forEach((feature, index) => {
+                const props = feature.properties || {};
+                const name = props.name || '未知中心';
+                const provName = props.provName || '未知省份';
+                const city = props['地名'] || '未知城市';
+                const address = props.address || '';
+                const telephone = props.telephone || '';
+                const workTime = props.workTime || '';
+                
+                // 从之前存储的坐标信息获取坐标
+                let lngLat = props._lngLat;
+                if (!lngLat) {
+                    // 备用提取逻辑（按契约）
+                    const coords = feature.geometry.coordinates;
+                    if (feature.geometry.type === 'Point') {
+                        if (Array.isArray(coords) && coords.length >= 2) {
+                            lngLat = coords;
+                        }
+                    } else if (feature.geometry.type === 'MultiPoint') {
+                        if (Array.isArray(coords) && coords.length > 0 && Array.isArray(coords[0]) && coords[0].length >= 2) {
+                            lngLat = coords[0];
+                        }
+                    }
+                }
+                
+                if (!lngLat || lngLat.length < 2) return;
+                
+                // 创建点位
+                const el = document.createElement('div');
+                el.innerHTML = `
+                    <div style="
+                        width: 32px; 
+                        height: 32px; 
+                        border-radius: 50%; 
+                        background: var(--primary-color); 
+                        border: 3px solid white;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        cursor: pointer;
+                        transition: transform 0.2s;
+                    ">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                        </svg>
+                    </div>
+                `;
+                
+                const marker = new TMapGL.Marker({ element: el }).setLngLat(lngLat);
+                marker.addTo(map);
+                
+                // 绑定点击事件
+                el.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    showPopup(marker.getLngLat(), {
+                        name, provName, city, address, telephone, workTime
+                    });
+                });
+                
+                markers.push(marker);
+            });
+        }
+
+        // ===== 显示弹窗 =====
+        function showPopup(lngLat, data) {
+            if (popup) popup.remove();
+            
+            const html = `
+                <div class="custom-popup">
+                    <div class="popup-header">${data.name}</div>
+                    <div class="popup-content">
+                        <p><strong>省份：</strong>${data.provName}</p>
+                        <p><strong>城市：</strong>${data.city}</p>
+                        <p><strong>地址：</strong>${data.address}</p>
+                        <p><strong>电话：</strong>${data.telephone}</p>
+                        <p><strong>工作时间：</strong>${data.workTime}</p>
+                    </div>
+                </div>
+            `;
+            
+            popup = new TMapGL.Popup({ 
+                maxWidth: '300px',
+                offset: [0, -30]
+            })
+            .setLngLat(lngLat)
+            .setHTML(html)
+            .addTo(map);
+        }
+
+        // ===== 更新结果列表 =====
+        function updateResultList(provinceFilter, cityFilter) {
+            const listContainer = document.getElementById('center-list');
+            const resultTitle = document.getElementById('result-title');
+            
+            // 过滤数据
+            let filtered = geojsonFeatures.filter(feature => {
+                const props = feature.properties || {};
+                const provName = props.provName || '';
+                const city = props['地名'] || '';
+                
+                if (provinceFilter && provName !== provinceFilter) return false;
+                if (cityFilter && city !== cityFilter) return false;
+                
+                return true;
+            });
+            
+            // 更新标题
+            resultTitle.textContent = `当前筛选结果 (${filtered.length})`;
+            
+            // 渲染列表
+            if (filtered.length === 0) {
+                listContainer.innerHTML = '<p style="text-align: center; color: #999; margin-top: var(--spacing-lg);">暂无符合条件的数据</p>';
+                showEmptyState(true);
+            } else {
+                showEmptyState(false);
+                
+                listContainer.innerHTML = filtered.map((feature, index) => {
+                    const props = feature.properties || {};
+                    return `
+                        <div class="center-item" onclick="jumpToMarker(${index})">
+                            <h3>${props.name || '未知中心'}</h3>
+                            <p>${props.provName || ''} ${props['地名'] || ''}</p>
+                            <p>${props.address || ''}</p>
+                            <div class="contact">
+                                <span>📞 ${props.telephone || ''}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        // ===== 跳转到点位 =====
+        function jumpToMarker(index) {
+            if (index < 0 || index >= geojsonFeatures.length) return;
+            
+            const feature = geojsonFeatures[index];
+            const props = feature.properties || {};
+            
+            // 从之前存储的坐标信息获取坐标
+            let lngLat = props._lngLat;
+            if (!lngLat) {
+                // 备用提取逻辑（按契约）
+                const coords = feature.geometry.coordinates;
+                if (feature.geometry.type === 'Point') {
+                    if (Array.isArray(coords) && coords.length >= 2) {
+                        lngLat = coords;
+                    }
+                } else if (feature.geometry.type === 'MultiPoint') {
+                    if (Array.isArray(coords) && coords.length > 0 && Array.isArray(coords[0]) && coords[0].length >= 2) {
+                        lngLat = coords[0];
+                    }
+                }
+            }
+            
+            if (!lngLat || lngLat.length < 2) return;
+            
+            // 飞行到点位
+            map.flyTo({
+                center: lngLat,
+                zoom: 12,
+                duration: 1000
+            });
+            
+            // 显示弹窗
+            setTimeout(() => {
+                showPopup(lngLat, {
+                    name: props.name || '未知中心',
+                    provName: props.provName || '',
+                    city: props['地名'] || '',
+                    address: props.address || '',
+                    telephone: props.telephone || '',
+                    workTime: props.workTime || ''
+                });
+            }, 1000);
+        }
+
+        // ===== 状态管理 =====
+        function showLoading(show) {
+            const overlay = document.getElementById('loading-overlay');
+            overlay.style.display = show ? 'flex' : 'none';
+        }
+
+        function showEmptyState(show) {
+            const emptyState = document.getElementById('empty-state');
+            emptyState.style.display = show ? 'block' : 'none';
+        }
+
+        function showError(show, message) {
+            const errorState = document.getElementById('error-state');
+            const errorMessage = document.getElementById('error-message');
+            
+            if (show) {
+                errorState.style.display = 'block';
+                errorMessage.textContent = message || '加载失败，请重试';
+            } else {
+                errorState.style.display = 'none';
+            }
+        }
+
+        function retryLoad() {
+            showError(false);
+            showLoading(true);
+            loadData();
+        }
+
+        // ===== 移动端适配 =====
+        function updateMobileLayout() {
+            const sidebar = document.getElementById('sidebar');
+            const mobileToggle = document.getElementById('mobile-toggle');
+            
+            if (window.innerWidth <= 768) {
+                mobileToggle.style.display = 'flex';
+                
+                // 重新绑定移动端切换
+                mobileToggle.onclick = function() {
+                    sidebar.classList.toggle('open');
+                };
+            } else {
+                mobileToggle.style.display = 'none';
+                sidebar.classList.remove('open');
+            }
+        }
+
+        // ===== 初始化 =====
+        window.onload = function() {
+            initMap();
+        };
+    </script>
+</body>
+</html>

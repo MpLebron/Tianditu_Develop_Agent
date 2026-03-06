@@ -29,7 +29,7 @@ cd Tianditu_Develop_Agent
 
 ## 3. 配置环境变量
 
-复制并编辑 `.env`（必须包含 `TIANDITU_TOKEN` 与 `LLM_API_KEY`）：
+复制并编辑 `.env`（必须包含 `TIANDITU_TOKEN`，且至少配置一个模型密钥）：
 
 ```bash
 cp .env.example .env
@@ -46,6 +46,9 @@ LLM_API_KEY=your_aihubmix_key
 LLM_BASE_URL=https://aihubmix.com/v1
 LLM_PROVIDER=qwen
 LLM_MODEL=qwen3.5-plus
+# Qwen 走阿里云百炼时建议配置（provider=qwen 时优先使用）
+DASHSCOPE_API_KEY=your_dashscope_api_key
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 MAX_FILE_SIZE=52428800
 UPLOAD_DIR=/app/uploads
 SHARE_DIR=/app/share

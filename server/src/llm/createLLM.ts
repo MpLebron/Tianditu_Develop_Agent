@@ -32,13 +32,23 @@ export function createLLM(options: {
 
   const modelName = selection.model
   const modelLower = modelName.toLowerCase()
+  const useQwenDedicatedEndpoint = selection.providerId === 'qwen'
+  const resolvedApiKey = useQwenDedicatedEndpoint ? config.llm.qwenApiKey : config.llm.apiKey
+  const resolvedBaseUrl = useQwenDedicatedEndpoint
+    ? config.llm.qwenBaseUrl
+    : config.llm.baseUrl
   const isOpenAIGpt5Family = selection.providerId === 'openai' && /^gpt-5(?:[.-]|$)/i.test(modelName)
   const isCodexFamily = /codex/i.test(modelLower)
   const supportsTemperature = !(isOpenAIGpt5Family || isCodexFamily)
 
+  if (!resolvedApiKey) {
+    const missingKeyHint = useQwenDedicatedEndpoint ? 'DASHSCOPE_API_KEY' : 'LLM_API_KEY'
+    throw new Error(`缺少模型调用密钥，请配置环境变量 ${missingKeyHint}`)
+  }
+
   const llmParams: Record<string, unknown> = {
-    openAIApiKey: config.llm.apiKey,
-    configuration: { baseURL: config.llm.baseUrl },
+    openAIApiKey: resolvedApiKey,
+    configuration: { baseURL: resolvedBaseUrl },
     modelName,
     maxTokens: options.maxTokens ?? config.llm.maxOutputTokens,
     timeout: options.timeoutMs ?? config.llm.requestTimeoutMs,

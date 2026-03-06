@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>天地图 POI 搜索功能演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+
+        /* 页面布局 */
+        .container {
+            display: flex;
+            height: 100vh;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* 左侧控制面板 */
+        .sidebar {
+            width: 400px;
+            background: #fff;
+            box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+
+        .sidebar-header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .sidebar-header p {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        /* 搜索区域 */
+        .search-panel {
+            padding: 20px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 6px;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        }
+
+        .search-type-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .search-type-btn {
+            flex: 1;
+            min-width: 80px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: #fff;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .search-type-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .search-type-btn.active {
+            background: #667eea;
+            border-color: #667eea;
+            color: #fff;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 状态提示 */
+        .status-bar {
+            padding: 12px 20px;
+            font-size: 13px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        .status-bar.loading {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
+
+        .status-bar.ready {
+            background: #f6ffed;
+            color: #52c41a;
+        }
+
+        .status-bar.empty {
+            background: #fff7e6;
+            color: #fa8c16;
+        }
+
+        .status-bar.error {
+            background: #fff1f0;
+            color: #f5222d;
+        }
+
+        /* 结果列表 */
+        .result-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding: 0 5px;
+        }
+
+        .result-header h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .result-count {
+            font-size: 12px;
+            color: #999;
+            background: #f5f5f5;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .poi-item {
+            padding: 15px;
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .poi-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .poi-item .poi-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .poi-item .poi-address {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .poi-item .poi-distance {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .poi-item .poi-tag {
+            display: inline-block;
+            font-size: 11px;
+            padding: 2px 6px;
+            background: #e6f7ff;
+            color: #1890ff;
+            border-radius: 4px;
+            margin-top: 6px;
+        }
+
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        /* 地图区域 */
+        .map-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 地图信息卡片 */
+        .map-info-card {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #fff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+            z-index: 5;
+            max-width: 280px;
+        }
+
+        .map-info-card h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .map-info-card p {
+            font-size: 12px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        /* 响应式 */
+        @media (max-width: 1024px) {
+            .container {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 50vh;
+            }
+            .map-wrapper {
+                height: 50vh;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧控制面板 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>🔍 POI 搜索功能演示</h1>
+                <p>天地图 V5.0 · 支持多种搜索类型</p>
+            </div>
+
+            <!-- 搜索表单 -->
+            <div class="search-panel">
+                <div class="form-group">
+                    <label>搜索关键词</label>
+                    <input type="text" id="keyword" class="form-control" placeholder="例如：医院、学校、餐厅" value="医院">
+                </div>
+
+                <div class="form-group">
+                    <label>搜索类型</label>
+                    <div class="search-type-group">
+                        <button class="search-type-btn active" data-type="nearby">周边搜索</button>
+                        <button class="search-type-btn" data-type="view">视野搜索</button>
+                        <button class="search-type-btn" data-type="normal">普通搜索</button>
+                    </div>
+                </div>
+
+                <div class="form-group" id="radiusGroup">
+                    <label>搜索半径（米）</label>
+                    <input type="number" id="radius" class="form-control" value="3000" min="500" max="10000">
+                </div>
+
+                <button class="btn" id="searchBtn">
+                    <span id="btnText">🔍 开始搜索</span>
+                </button>
+            </div>
+
+            <!-- 状态栏 -->
+            <div class="status-bar ready" id="statusBar">
+                ✅ 就绪 - 请输入关键词并选择搜索类型
+            </div>
+
+            <!-- 结果列表 -->
+            <div class="result-panel">
+                <div class="result-header">
+                    <h3>搜索结果</h3>
+                    <span class="result-count" id="resultCount">0 条</span>
+                </div>
+                <div id="resultList">
+                    <div class="empty-state">
+                        <div class="icon">📍</div>
+                        <p>暂无搜索结果<br>请输入关键词开始搜索</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 地图区域 -->
+        <div class="map-wrapper">
+            <div id="map"></div>
+            <div class="map-info-card">
+                <h4>📌 当前位置</h4>
+                <p id="centerInfo">清华大学<br>经度：116.326°E<br>纬度：39.999°N</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 天地图 SDK -->
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+
+    <script>
+        // ==================== 全局变量 ====================
+        var map;
+        var markers = [];
+        var popup = null;
+        var currentSearchType = 'nearby';
+        var searchState = 'ready'; // loading / ready / empty / error
+
+        // 清华大学坐标
+        var centerLocation = [116.326, 39.999];
+
+        // ==================== 初始化地图 ====================
+        function initMap() {
+            map = new TMapGL.Map('map', {
+                center: centerLocation,
+                zoom: 14,
+                pitch: 0,
+                bearing: 0
+            });
+
+            map.on('load', function() {
+                // 添加地图控件
+                map.addControl(new TMapGL.NavigationControl(), 'top-right');
+                map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+                map.addControl(new TMapGL.FullscreenControl(), 'top-right');
+
+                // 添加中心点标记
+                addCenterMarker(centerLocation);
+
+                console.log('地图加载完成');
+            });
+        }
+
+        // ==================== 添加中心点标记 ====================
+        function addCenterMarker(lngLat) {
+            var marker = new TMapGL.Marker({
+                color: '#667eea'
+            })
+            .setLngLat(lngLat)
+            .addTo(map);
+
+            var centerPopup = new TMapGL.Popup({ offset: [0, -30], closeButton: false })
+                .setHTML('<div style="padding:5px;"><b>📍 搜索中心点</b><br>清华大学</div>');
+
+            marker.setPopup(centerPopup);
+            markers.push(marker);
+        }
+
+        // ==================== 状态管理 ====================
+        function setState(state, message) {
+            searchState = state;
+            var statusBar = document.getElementById('statusBar');
+            var btn = document.getElementById('searchBtn');
+            var btnText = document.getElementById('btnText');
+
+            // 移除所有状态类
+            statusBar.classList.remove('loading', 'ready', 'empty', 'error');
+
+            switch(state) {
+                case 'loading':
+                    statusBar.classList.add('loading');
+                    statusBar.innerHTML = '⏳ 正在搜索：' + message;
+                    btn.disabled = true;
+                    btnText.innerHTML = '⏳ 搜索中...';
+                    break;
+                case 'ready':
+                    statusBar.classList.add('ready');
+                    statusBar.innerHTML = '✅ ' + message;
+                    btn.disabled = false;
+                    btnText.innerHTML = '🔍 开始搜索';
+                    break;
+                case 'empty':
+                    statusBar.classList.add('empty');
+                    statusBar.innerHTML = '⚠️ ' + message;
+                    btn.disabled = false;
+                    btnText.innerHTML = '🔍 开始搜索';
+                    break;
+                case 'error':
+                    statusBar.classList.add('error');
+                    statusBar.innerHTML = '❌ ' + message;
+                    btn.disabled = false;
+                    btnText.innerHTML = '🔍 开始搜索';
+                    break;
+            }
+        }
+
+        // ==================== 搜索功能 ====================
+        function searchPois() {
+            var keyword = document.getElementById('keyword').value.trim();
+            var radius = parseInt(document.getElementById('radius').value) || 3000;
+
+            if (!keyword) {
+                setState('error', '请输入搜索关键词');
+                return;
+            }
+
+            setState('loading', '正在搜索 "' + keyword + '"');
+
+            // 清除之前的标记
+            clearMarkers();
+
+            // 构建代理请求 URL
+            var url = new URL('/api/tianditu/search', window.location.origin);
+            url.searchParams.set('keyword', keyword);
+            url.searchParams.set('type', currentSearchType);
+            url.searchParams.set('lng', String(centerLocation[0]));
+            url.searchParams.set('lat', String(centerLocation[1]));
+            url.searchParams.set('radius', String(radius));
+            url.searchParams.set('count', '20');
+            url.searchParams.set('show', '2');
+
+            fetch(url.toString())
+                .then(function(res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(function(payload) {
+                    // 检查代理响应
+                    if (!payload || payload.success !== true) {
+                        throw new Error((payload && payload.error) || '请求失败');
+                    }
+
+                    var data = payload.data || {};
+                    
+                    // 检查业务状态
+                    var status = data.status || {};
+                    var infocode = Number(status.infocode);
+                    if (infocode !== 1000) {
+                        throw new Error(status.cndesc || ('搜索失败，代码：' + infocode));
+                    }
+
+                    // 检查结果类型
+                    if (Number(data.resultType) !== 1) {
+                        setState('empty', '未找到匹配的 POI 结果');
+                        renderEmptyResult();
+                        return;
+                    }
+
+                    var pois = Array.isArray(data.pois) ? data.pois : [];
+
+                    if (!pois.length) {
+                        setState('empty', '未找到 "' + keyword + '" 相关的结果');
+                        renderEmptyResult();
+                        return;
+                    }
+
+                    // 渲染结果
+                    renderResults(pois);
+                    renderMarkers(pois);
+                    setState('ready', '找到 ' + pois.length + ' 个结果');
+
+                })
+                .catch(function(err) {
+                    console.error('搜索错误:', err);
+                    setState('error', err.message || '搜索失败，请重试');
+                    renderEmptyResult();
+                });
+        }
+
+        // ==================== 渲染结果列表 ====================
+        function renderResults(pois) {
+            var resultList = document.getElementById('resultList');
+            var resultCount = document.getElementById('resultCount');
+
+            resultCount.textContent = pois.length + ' 条';
+
+            var html = pois.map(function(poi, index) {
+                var coords = parseLonlat(poi.lonlat);
+                if (!coords) return '';
+
+                return '<div class="poi-item" data-index="' + index + '">' +
+                    '<div class="poi-name">' + escapeHtml(poi.name || '未知') + '</div>' +
+                    '<div class="poi-address">📍 ' + escapeHtml(poi.address || '') + '</div>' +
+                    (poi.distance ? '<div class="poi-distance">📏 距离：' + poi.distance + '米</div>' : '') +
+                    '<span class="poi-tag">' + escapeHtml(poi.type || 'POI') + '</span>' +
+                    '</div>';
+            }).join('');
+
+            resultList.innerHTML = html;
+
+            // 绑定点击事件
+            var items = resultList.querySelectorAll('.poi-item');
+            items.forEach(function(item) {
+                item.addEventListener('click', function() {
+                    var index = parseInt(this.getAttribute('data-index'));
+                    var poi = pois[index];
+                    var coords = parseLonlat(poi.lonlat);
+                    if (coords) {
+                        flyToLocation(coords, poi.name);
+                        showPopup(coords, poi);
+                    }
+                });
+            });
+        }
+
+        // ==================== 渲染空结果 ====================
+        function renderEmptyResult() {
+            var resultList = document.getElementById('resultList');
+            var resultCount = document.getElementById('resultCount');
+
+            resultCount.textContent = '0 条';
+            resultList.innerHTML = '<div class="empty-state">' +
+                '<div class="icon">🔍</div>' +
+                '<p>未找到搜索结果<br>请尝试其他关键词或调整搜索范围</p>' +
+                '</div>';
+        }
+
+        // ==================== 添加标记到地图 ====================
+        function renderMarkers(pois) {
+            pois.forEach(function(poi, index) {
+                var coords = parseLonlat(poi.lonlat);
+                if (!coords) return;
+
+                var marker = new TMapGL.Marker({
+                    color: index === 0 ? '#f5222d' : '#667eea'
+                })
+                .setLngLat(coords)
+                .addTo(map);
+
+                var popupContent = '<div style="padding:5px;min-width:150px;">' +
+                    '<b style="font-size:14px;">' + escapeHtml(poi.name || '未知') + '</b><br>' +
+                    '<span style="color:#666;font-size:12px;">' + escapeHtml(poi.address || '') + '</span>' +
+                    (poi.distance ? '<br><span style="color:#999;font-size:11px;">距离：' + poi.distance + '米</span>' : '') +
+                    '</div>';
+
+                var markerPopup = new TMapGL.Popup({ 
+                    offset: [0, -30], 
+                    maxWidth: '250px',
+                    closeButton: true 
+                })
+                .setHTML(popupContent);
+
+                marker.setPopup(markerPopup);
+                markers.push(marker);
+            });
+
+            // 如果有结果，适配视图
+            if (pois.length > 0) {
+                var firstCoords = parseLonlat(pois[0].lonlat);
+                if (firstCoords && markers.length > 0) {
+                    map.flyTo({
+                        center: firstCoords,
+                        zoom: 15,
+                        duration: 1000
+                    });
+                }
+            }
+        }
+
+        // ==================== 清除标记 ====================
+        function clearMarkers() {
+            markers.forEach(function(marker) {
+                marker.remove();
+            });
+            markers = [];
+        }
+
+        // ==================== 飞行到指定位置 ====================
+        function flyToLocation(lngLat, name) {
+            map.flyTo({
+                center: lngLat,
+                zoom: 16,
+                duration: 800
+            });
+        }
+
+        // ==================== 显示弹窗 ====================
+        function showPopup(lngLat, poi) {
+            if (popup) {
+                popup.remove();
+            }
+
+            popup = new TMapGL.Popup({ 
+                offset: [0, -30],
+                maxWidth: '280px',
+                closeButton: true 
+            })
+            .setLngLat(lngLat)
+            .setHTML(
+                '<div style="padding:8px;">' +
+                '<h4 style="margin:0 0 8px;font-size:15px;">' + escapeHtml(poi.name || '未知') + '</h4>' +
+                '<p style="margin:4px 0;color:#666;font-size:13px;">📍 ' + escapeHtml(poi.address || '') + '</p>' +
+                (poi.distance ? '<p style="margin:4px 0;color:#999;font-size:12px;">📏 距离：' + poi.distance + '米</p>' : '') +
+                (poi.tel ? '<p style="margin:4px 0;color:#999;font-size:12px;">📞 ' + escapeHtml(poi.tel) + '</p>' : '') +
+                '</div>'
+            )
+            .addTo(map);
+        }
+
+        // ==================== 工具函数 ====================
+        function parseLonlat(lonlat) {
+            if (!lonlat || typeof lonlat !== 'string') return null;
+            var parts = lonlat.split(',');
+            if (parts.length !== 2) return null;
+            var lng = Number(parts[0]);
+            var lat = Number(parts[1]);
+            if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+            return [lng, lat];
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ==================== 事件绑定 ====================
+        function bindEvents() {
+            // 搜索类型切换
+            var typeBtns = document.querySelectorAll('.search-type-btn');
+            var radiusGroup = document.getElementById('radiusGroup');
+
+            typeBtns.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    typeBtns.forEach(function(b) { b.classList.remove('active'); });
+                    this.classList.add('active');
+                    currentSearchType = this.getAttribute('data-type');
+
+                    // 周边搜索显示半径，其他隐藏
+                    if (currentSearchType === 'nearby') {
+                        radiusGroup.style.display = 'block';
+                    } else {
+                        radiusGroup.style.display = 'none';
+                    }
+                });
+            });
+
+            // 搜索按钮
+            document.getElementById('searchBtn').addEventListener('click', searchPois);
+
+            // 回车搜索
+            document.getElementById('keyword').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    searchPois();
+                }
+            });
+
+            // 地图点击关闭弹窗
+            map.on('click', function() {
+                if (popup) {
+                    popup.remove();
+                    popup = null;
+                }
+            });
+        }
+
+        // ==================== 页面加载完成 ====================
+        window.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            bindEvents();
+            console.log('POI 搜索演示页面初始化完成');
+        });
+    </script>
+</body>
+</html>

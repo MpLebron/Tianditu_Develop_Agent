@@ -12,6 +12,13 @@ GET /api/tianditu/search?...（由后端映射 queryType 与参数）
 
 前端只在调试时直连官方接口。
 
+若走代理 `/api/tianditu/search`，返回结构为：
+
+- `payload.success`（代理层成功标记）
+- `payload.data`（天地图 V2 原始业务结果）
+
+因此必须先判 `payload.success===true`，再从 `payload.data.resultType / payload.data.pois / payload.data.status` 读取业务字段。
+
 ## 统一接口
 
 ```text

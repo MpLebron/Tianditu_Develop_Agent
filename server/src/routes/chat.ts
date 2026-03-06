@@ -415,6 +415,7 @@ function visualInspectUnavailable(reason: string) {
   return {
     status: 'unavailable' as const,
     anomalous: false,
+    shouldRepair: false,
     severity: 'low' as const,
     summary: '视觉巡检不可用',
     diagnosis: reason || '视觉巡检暂时不可用。',
@@ -422,6 +423,32 @@ function visualInspectUnavailable(reason: string) {
     confidence: 0,
     model: 'gpt-4.1-nano',
   }
+}
+
+function isBlankLikeDiagnosis(text: string): boolean {
+  const value = String(text || '').toLowerCase()
+  return /空白|未显示|没有显示|无内容|未渲染|blank|empty|not rendered|no data/.test(value)
+}
+
+function normalizeVisualInspectByCaptureMeta(
+  inspected: any,
+  captureMeta: {
+    mode?: string
+    canvasCount?: number
+    largestCanvasArea?: number
+    canvasReadable?: boolean
+    canvasTainted?: boolean
+  } | null,
+) {
+  if (!captureMeta) return inspected
+  if (inspected.status !== 'ok' || inspected.anomalous !== true) return inspected
+
+  const likelyCanvasMap = Number(captureMeta.canvasCount || 0) > 0 && Number(captureMeta.largestCanvasArea || 0) >= 120000
+  const tainted = captureMeta.canvasTainted === true && captureMeta.canvasReadable !== true
+  const blankLike = isBlankLikeDiagnosis(`${inspected.summary}\n${inspected.diagnosis}`)
+  if (!(likelyCanvasMap && tainted && blankLike)) return inspected
+
+  return visualInspectUnavailable('前端截图受跨域画布限制影响，当前截图无法可靠反映地图渲染内容。')
 }
 
 // GET /api/chat/models — 多模型提供商与模型列表
@@ -439,11 +466,21 @@ router.get('/models', (_req, res) => {
 // POST /api/chat/visual-inspect — 地图视觉巡检
 router.post('/visual-inspect', async (req, res) => {
   const rawCode = typeof req.body?.code === 'string' ? req.body.code : ''
+  const rawImageBase64 = typeof req.body?.imageBase64 === 'string' ? req.body.imageBase64 : ''
   const hint = typeof req.body?.hint === 'string' ? req.body.hint : ''
   const runId = typeof req.body?.runId === 'string' ? req.body.runId : ''
+  const captureMeta = typeof req.body?.captureMeta === 'object' && req.body.captureMeta
+    ? req.body.captureMeta as {
+        mode?: string
+        canvasCount?: number
+        largestCanvasArea?: number
+        canvasReadable?: boolean
+        canvasTainted?: boolean
+      }
+    : null
 
-  if (!rawCode.trim()) {
-    res.status(400).json({ success: false, error: '缺少可巡检的地图代码' })
+  if (!rawCode.trim() && !rawImageBase64.trim()) {
+    res.status(400).json({ success: false, error: '缺少可巡检内容（代码或截图）' })
     return
   }
 
@@ -451,25 +488,30 @@ router.post('/visual-inspect', async (req, res) => {
     ? Math.max(10000, config.visualInspection.maxCodeChars)
     : 400000
   const code = injectToken(rawCode.length > maxCodeChars ? rawCode.slice(0, maxCodeChars) : rawCode)
+  const imageBase64 = rawImageBase64.trim()
 
   try {
-    const rendered = await visualRenderService.render({ code, runId })
-    if (!rendered.ok || !rendered.imageBase64) {
-      res.json({
-        success: true,
-        data: visualInspectUnavailable(rendered.reason || '地图截图失败。'),
-      })
-      return
+    let finalImageBase64 = imageBase64
+    if (!finalImageBase64) {
+      const rendered = await visualRenderService.render({ code, runId })
+      if (!rendered.ok || !rendered.imageBase64) {
+        res.json({
+          success: true,
+          data: visualInspectUnavailable(rendered.reason || '地图截图失败。'),
+        })
+        return
+      }
+      finalImageBase64 = rendered.imageBase64
     }
 
     const inspected = await visualInspectionService.inspect({
-      imageBase64: rendered.imageBase64,
+      imageBase64: finalImageBase64,
       hint,
       runId,
     })
     res.json({
       success: true,
-      data: inspected,
+      data: normalizeVisualInspectByCaptureMeta(inspected, captureMeta),
     })
   } catch (err: any) {
     res.json({

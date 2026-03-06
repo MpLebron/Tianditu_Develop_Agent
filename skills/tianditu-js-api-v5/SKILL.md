@@ -47,7 +47,7 @@ allowed-tools: Read Bash(node *)
 15. **代理 URL 写法**：在运行沙箱中优先用绝对地址调用代理（例如 `new URL('/api/tianditu/administrative', window.location.origin)`），避免相对 URL 解析失败
 16. **子级边界参数**：加载省下地级市边界时，使用 `childLevel=1` 且优先 `outputScope=children`，并启用 `expandChildrenBoundary=true`
 17. **路径/地理编码优先代理**：地理编码优先 `/api/tianditu/geocode`、逆地理优先 `/api/tianditu/reverse-geocode`、驾车优先 `/api/tianditu/drive`、公交地铁优先 `/api/tianditu/transit`
-18. **POI 搜索优先代理**：POI/地名检索优先 `/api/tianditu/search`，并做 `status.infocode` 判定（`1000` 成功）
+18. **POI 搜索优先代理**：POI/地名检索优先 `/api/tianditu/search`，并做 `status.infocode` 判定（`1000` 成功）；返回字段必须先解包 `payload.data` 后再读取 `resultType/pois`
 19. **异步状态机**：所有搜索/规划页面必须有 `loading / ready / empty / error` 四态，禁止悬挂 loading
 
 ## API 引入方式

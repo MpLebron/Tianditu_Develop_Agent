@@ -1,4 +1,4 @@
-import type { VisualInspectResult } from '../types/visualQa'
+import type { VisualInspectRequest, VisualInspectResult } from '../types/visualQa'
 
 interface ApiSuccess<T> {
   success: true
@@ -21,7 +21,7 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
 }
 
 export const visualQaApi = {
-  inspect(payload: { code: string; hint?: string; runId?: string }) {
+  inspect(payload: VisualInspectRequest) {
     return requestJson<VisualInspectResult>('/api/chat/visual-inspect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -29,4 +29,3 @@ export const visualQaApi = {
     })
   },
 }
-

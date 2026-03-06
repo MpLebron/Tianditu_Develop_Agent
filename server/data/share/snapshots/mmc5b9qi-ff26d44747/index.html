@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国洪水事件空间分布专题地图</title>
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    <style>
+        :root {
+            --bg-page: #f5f7fb;
+            --bg-card: #ffffff;
+            --text-primary: #16213a;
+            --text-secondary: #5b6780;
+            --brand-500: #2f6bff;
+            --border-soft: #e3e8f2;
+            --shadow-card: 0 8px 24px rgba(22, 33, 58, 0.08);
+            --radius-card: 16px;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        #sidebar {
+            width: 380px;
+            background: var(--bg-card);
+            box-shadow: var(--shadow-card);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+        
+        #sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-soft);
+        }
+        
+        #sidebar-title {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        #sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        #map {
+            flex: 1;
+            height: 100%;
+        }
+        
+        .event-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-card);
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow-card);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .event-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px rgba(22, 33, 58, 0.12);
+        }
+        
+        .event-card.active {
+            border-left: 4px solid var(--brand-500);
+        }
+        
+        .event-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--brand-500);
+        }
+        
+        .event-meta {
+            display: flex;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .event-meta span {
+            margin-right: 12px;
+        }
+        
+        .detail-section {
+            margin-bottom: 20px;
+        }
+        
+        .detail-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--border-soft);
+            padding-bottom: 8px;
+        }
+        
+        .detail-row {
+            display: flex;
+            margin-bottom: 8px;
+        }
+        
+        .detail-label {
+            width: 100px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        
+        .detail-value {
+            flex: 1;
+        }
+        
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .image-grid img {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+        
+        .news-item {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px dashed var(--border-soft);
+        }
+        
+        .news-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .news-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        
+        .news-link {
+            color: var(--brand-500);
+            font-size: 13px;
+            text-decoration: none;
+        }
+        
+        .news-link:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+            }
+            
+            #sidebar {
+                width: 100%;
+                height: 40vh;
+            }
+            
+            #map {
+                height: 60vh;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div id="sidebar-header">
+            <h2 id="sidebar-title">中国洪水事件空间分布</h2>
+        </div>
+        <div id="sidebar-content">
+            <div id="event-list">
+                <!-- 事件列表将通过JS动态生成 -->
+            </div>
+            <div id="event-detail" style="display: none;">
+                <!-- 事件详情将通过JS动态生成 -->
+            </div>
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        // 初始化地图
+        var map = new TMapGL.Map('map', {
+            center: [104.195, 35.861],
+            zoom: 4.5
+        });
+
+        // 存储当前选中的事件ID
+        var currentEventId = null;
+        
+        // 加载洪水事件数据
+        map.on('load', function() {
+            fetch('/share-assets/mmc5b9qi-ff26d44747/assets/asset-1.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    // 添加点数据源
+                    map.addSource('flood-events', {
+                        type: 'geojson',
+                        data: data
+                    });
+                    
+                    // 添加点图层
+                    map.addLayer({
+                        id: 'flood-points',
+                        type: 'circle',
+                        source: 'flood-events',
+                        paint: {
+                            'circle-radius': 8,
+                            'circle-color': '#2f6bff',
+                            'circle-stroke-width': 2,
+                            'circle-stroke-color': '#ffffff'
+                        }
+                    });
+                    
+                    // 添加热力图层
+                    map.addLayer({
+                        id: 'flood-heat',
+                        type: 'heatmap',
+                        source: 'flood-events',
+                        paint: {
+                            'heatmap-weight': [
+                                '+',
+                                ['/', ['get', 'Total_deat'], 100],
+                                ['/', ['get', 'Total_affe'], 100000]
+                            ],
+                            'heatmap-intensity': 1,
+                            'heatmap-color': [
+                                'interpolate', ['linear'], ['heatmap-density'],
+                                0, 'rgba(33, 102, 172, 0)',
+                                0.2, 'rgb(103, 169, 207)',
+                                0.4, 'rgb(209, 229, 240)',
+                                0.6, 'rgb(253, 219, 199)',
+                                0.8, 'rgb(239, 138, 98)',
+                                1, 'rgb(178, 24, 43)'
+                            ],
+                            'heatmap-radius': 50,
+                            'heatmap-opacity': 0.6
+                        }
+                    });
+                    
+                    // 生成事件列表
+                    renderEventList(data.features);
+                    
+                    // 绑定点击事件
+                    map.on('click', 'flood-points', function(e) {
+                        if (e.features && e.features.length > 0) {
+                            showEventDetail(e.features[0]);
+                            currentEventId = e.features[0].id;
+                        }
+                    });
+                    
+                    // 鼠标悬停效果
+                    map.on('mouseenter', 'flood-points', function() {
+                        map.getCanvas().style.cursor = 'pointer';
+                    });
+                    
+                    map.on('mouseleave', 'flood-points', function() {
+                        map.getCanvas().style.cursor = '';
+                    });
+                });
+        });
+        
+        // 渲染事件列表
+        function renderEventList(events) {
+            const eventList = document.getElementById('event-list');
+            eventList.innerHTML = '';
+            
+            events.forEach(event => {
+                const card = document.createElement('div');
+                card.className = 'event-card';
+                card.dataset.id = event.id;
+                
+                card.innerHTML = `
+                    <div class="event-title">${event.properties.Location}洪水事件</div>
+                    <div class="event-meta">
+                        <span>${event.properties.Start_date}</span>
+                        <span>死亡: ${event.properties.Total_deat || 0}人</span>
+                    </div>
+                    <div class="event-meta">
+                        <span>受灾面积: ${event.properties.Magnitude}${event.properties.Magnitud_1}</span>
+                    </div>
+                `;
+                
+                card.addEventListener('click', () => {
+                    showEventDetail(event);
+                    currentEventId = event.id;
+                    
+                    // 移动地图到该点
+                    const coordinates = event.geometry.coordinates[0];
+                    map.flyTo({
+                        center: coordinates,
+                        zoom: 7
+                    });
+                });
+                
+                eventList.appendChild(card);
+            });
+        }
+        
+        // 显示事件详情
+        function showEventDetail(event) {
+            const eventList = document.getElementById('event-list');
+            const eventDetail = document.getElementById('event-detail');
+            
+            // 更新卡片选中状态
+            document.querySelectorAll('.event-card').forEach(card => {
+                card.classList.remove('active');
+                if (card.dataset.id === event.id) {
+                    card.classList.add('active');
+                }
+            });
+            
+            // 生成详情内容
+            const props = event.properties;
+            let imagesHTML = '';
+            if (props.Related_pics && props.Related_pics.length > 0) {
+                imagesHTML = `
+                    <div class="image-grid">
+                        ${props.Related_pics.slice(0, 4).map(img => `<img src="${img}" alt="洪水图片">`).join('')}
+                    </div>
+                `;
+            }
+            
+            let newsHTML = '';
+            if (props.Related_news && props.Related_news.length > 0) {
+                newsHTML = props.Related_news.slice(0, 3).map(news => `
+                    <div class="news-item">
+                        <div class="news-title">${news.title}</div>
+                        <div class="news-desc">${news.desc}</div>
+                        <a href="${news.url}" target="_blank" class="news-link">查看详情 →</a>
+                    </div>
+                `).join('');
+            }
+            
+            eventDetail.innerHTML = `
+                <div class="detail-section">
+                    <div class="detail-title">事件概况</div>
+                    <div class="detail-row">
+                        <div class="detail-label">发生时间</div>
+                        <div class="detail-value">${props.Start_date} 至 ${props.End_date}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">发生地点</div>
+                        <div class="detail-value">${props.Location}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">受灾面积</div>
+                        <div class="detail-value">${props.Magnitude}${props.Magnitud_1}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">死亡人数</div>
+                        <div class="detail-value">${props.Total_deat || 0}人</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">受灾人口</div>
+                        <div class="detail-value">${props.Total_affe || 0}人</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">经济损失</div>
+                        <div class="detail-value">${props.Total_dama || 0}万元</div>
+                    </div>
+                </div>
+                
+                ${imagesHTML ? `
+                <div class="detail-section">
+                    <div class="detail-title">相关图片</div>
+                    ${imagesHTML}
+                </div>
+                ` : ''}
+                
+                ${newsHTML ? `
+                <div class="detail-section">
+                    <div class="detail-title">相关新闻</div>
+                    ${newsHTML}
+                </div>
+                ` : ''}
+                
+                <button onclick="backToList()" style="
+                    background: var(--brand-500);
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    margin-top: 20px;
+                ">返回列表</button>
+            `;
+            
+            // 显示详情，隐藏列表
+            eventList.style.display = 'none';
+            eventDetail.style.display = 'block';
+        }
+        
+        // 返回列表
+        function backToList() {
+            document.getElementById('event-list').style.display = 'block';
+            document.getElementById('event-detail').style.display = 'none';
+            currentEventId = null;
+        }
+    </script>
+</body>
+</html>

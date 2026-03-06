@@ -357,6 +357,14 @@ export class CodeGenerator {
 8. 如需主题样式，仅使用 'black' 或 'blue'，禁止使用 mapbox:// 或任何其他样式 URL
 9. 地图实例变量统一使用 \`var map\`，禁止在同一 HTML 中重复 \`let/const map\` 声明（避免 "Identifier 'map' has already been declared"）
 10. 默认不要添加 \`symbol + text-field\` 的常驻文字标注图层（容易触发字体 pbf 请求告警）；优先用侧边栏/弹窗展示文字信息。仅当用户明确要求“地图上常驻文字标注”时才添加文本图层
+11. POI/地名搜索强约束：
+   - 只能调用 GET /api/tianditu/search（query string 传参）
+   - 禁止调用 https://api.tianditu.gov.cn/v2/search 或 https://api.tianditu.gov.cn/search/v1/poi
+   - 禁止 POST + body(postStr) 调 /api/tianditu/search
+   - URL 必须使用绝对地址：new URL('/api/tianditu/search', window.location.origin).toString()
+   - 读取结果前必须先解包代理层：payload.success===true 后使用 payload.data（不可直接把 payload 当 result）
+   - 业务字段必须从 data 读取：Number(data.resultType)、data.pois、data.status.infocode
+   - data.pois[*].distance 是字符串（如 319m/1.1km），不要默认按数字除以 1000
 
 ## 数据文件处理规则（极其重要，必须严格遵守）
 当用户上传了数据文件时：
@@ -416,6 +424,11 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
    - 先检查并补齐天地图 SDK 引入：
      \`<script src="https://api.tianditu.gov.cn/api/v5/js?tk=\${TIANDITU_TOKEN}"></script>\`
    - 确保该脚本位于业务脚本之前执行
+12. 如果是 POI/地名搜索错误：
+   - 禁止改成直连官方搜索端点；必须回到 GET /api/tianditu/search 代理契约
+   - 禁止把代理搜索改为 POST + body(postStr)；必须改成 query string
+   - 检查是否漏掉代理层解包：必须先判 payload.success，再从 payload.data 读取 resultType/pois/status
+   - 检查 distance 展示：若来自天地图周边搜索，distance 为字符串（m/km），不要强行数值计算
 
 ## 参考文档
 ${params.skillDocs}
@@ -573,6 +586,11 @@ ${params.error}
       .replace(/\blet\s+map\s*=/g, 'var map =')
       .replace(/\bconst\s+map\s*=/g, 'var map =')
 
+    // 纠偏：搜索接口必须走后端代理，禁止直连官方搜索端点
+    next = next
+      .replace(/https?:\/\/api\.tianditu\.gov\.cn\/v2\/search(?:\?[^'"`\s)]*)?/gi, '/api/tianditu/search')
+      .replace(/https?:\/\/api\.tianditu\.gov\.cn\/search\/v1\/poi(?:\?[^'"`\s)]*)?/gi, '/api/tianditu/search')
+
     // 纠偏：将误生成的 mapbox 风格构造改为天地图 v5 构造签名
     // from: new TMapGL.Map({ container: 'map', ... })
     // to:   new TMapGL.Map('map', { ... })
@@ -597,6 +615,110 @@ ${params.error}
       }
     }
 
+    next = this.enforceSearchProxyContract(next)
+
     return next
+  }
+
+  /**
+   * 搜索代理契约兜底修复（确定性）：
+   * - 统一使用绝对代理 URL
+   * - 将常见的 POST body(postStr) 写法改为 GET query string
+   */
+  private enforceSearchProxyContract(code: string): string {
+    let next = code
+
+    next = next
+      .replace(
+        /\b(var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*['"]\/api\/tianditu\/search['"]\s*;/g,
+        `$1 $2 = new URL('/api/tianditu/search', window.location.origin).toString();`,
+      )
+      .replace(
+        /\b(var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*['"]\/api\/tianditu\/search\?['"]\s*\+\s*/g,
+        `$1 $2 = new URL('/api/tianditu/search', window.location.origin).toString() + '?' + `,
+      )
+      .replace(
+        /\b(var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*['"]\/api\/tianditu\/search['"]\s*\+\s*/g,
+        `$1 $2 = new URL('/api/tianditu/search', window.location.origin).toString() + `,
+      )
+      .replace(
+        /fetch\s*\(\s*['"]\/api\/tianditu\/search['"]/g,
+        `fetch(new URL('/api/tianditu/search', window.location.origin).toString()`,
+      )
+      .replace(
+        /fetch\s*\(\s*['"]\/api\/tianditu\/search\?['"]\s*\+\s*/g,
+        `fetch(new URL('/api/tianditu/search', window.location.origin).toString() + '?' + `,
+      )
+      .replace(
+        /fetch\s*\(\s*`\/api\/tianditu\/search\?/g,
+        `fetch(new URL('/api/tianditu/search', window.location.origin).toString() + \`?`,
+      )
+
+    const directBodyPattern = /fetch\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*\{[\s\S]*?\bbody\s*:\s*JSON\.stringify\(\s*postStr\s*\)[\s\S]*?\}\s*\)/g
+    const wrappedBodyPattern = /fetch\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*\{[\s\S]*?\bbody\s*:\s*JSON\.stringify\(\s*\{\s*postStr(?:\s*:\s*postStr)?\s*\}\s*\)[\s\S]*?\}\s*\)/g
+
+    const replacedDirect = directBodyPattern.test(next)
+    directBodyPattern.lastIndex = 0
+    next = next.replace(
+      directBodyPattern,
+      (_m, urlVar) => `fetch(__buildTiandituSearchProxyUrl(${urlVar}, postStr))`,
+    )
+
+    const replacedWrapped = wrappedBodyPattern.test(next)
+    wrappedBodyPattern.lastIndex = 0
+    next = next.replace(
+      wrappedBodyPattern,
+      (_m, urlVar) => `fetch(__buildTiandituSearchProxyUrl(${urlVar}, { postStr: postStr }))`,
+    )
+
+    if (replacedDirect || replacedWrapped) {
+      next = this.injectSearchProxyHelper(next)
+    }
+
+    return next
+  }
+
+  private injectSearchProxyHelper(code: string): string {
+    if (code.includes('function __buildTiandituSearchProxyUrl(')) return code
+
+    const helper = `<script>
+function __buildTiandituSearchProxyUrl(baseUrl, payload) {
+  var source = payload && typeof payload === 'object' && payload.postStr && typeof payload.postStr === 'object'
+    ? payload.postStr
+    : payload;
+  var p = source || {};
+  var q = new URLSearchParams();
+  var add = function(k, v) {
+    if (v == null || v === '') return;
+    q.set(k, String(v));
+  };
+
+  add('keyword', p.keyWord != null ? p.keyWord : p.keyword);
+  add('queryType', p.queryType);
+  add('start', p.start);
+  add('count', p.count);
+  add('level', p.level);
+  add('mapBound', p.mapBound);
+  add('specify', p.specify);
+  add('dataTypes', p.dataTypes);
+  add('show', p.show);
+  add('pointLonlat', p.pointLonlat);
+  add('queryRadius', p.queryRadius);
+  add('polygon', p.polygon);
+
+  var root = (typeof baseUrl === 'string' && baseUrl) ? baseUrl : '/api/tianditu/search';
+  if (!/^https?:\\/\\//i.test(root)) {
+    root = new URL(root, window.location.origin).toString();
+  }
+  var qs = q.toString();
+  if (!qs) return root;
+  return root + (root.indexOf('?') >= 0 ? '&' : '?') + qs;
+}
+</script>`
+
+    if (/<\/body>/i.test(code)) {
+      return code.replace(/<\/body>/i, `${helper}\n</body>`)
+    }
+    return `${code}\n${helper}`
   }
 }

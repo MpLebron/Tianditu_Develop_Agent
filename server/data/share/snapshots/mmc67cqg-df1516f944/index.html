@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>北京到上海驾车路线规划</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        /* 地图容器 */
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 路线信息面板 */
+        .route-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: #ffffff;
+            padding: 20px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(22, 33, 58, 0.12);
+            min-width: 280px;
+        }
+
+        .route-panel h2 {
+            font-size: 18px;
+            color: #16213a;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+
+        .route-info {
+            display: flex;
+            gap: 24px;
+        }
+
+        .info-item {
+            text-align: center;
+        }
+
+        .info-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #2f6bff;
+            line-height: 1.2;
+        }
+
+        .info-label {
+            font-size: 13px;
+            color: #8a95ab;
+            margin-top: 4px;
+        }
+
+        /* 加载状态 */
+        .loading-state {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #5b6780;
+            font-size: 14px;
+        }
+
+        .loading-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e3e8f2;
+            border-top-color: #2f6bff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 错误状态 */
+        .error-state {
+            color: #d9363e;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .error-state .retry-btn {
+            color: #2f6bff;
+            cursor: pointer;
+            text-decoration: underline;
+            margin-left: 8px;
+        }
+
+        .error-state .retry-btn:hover {
+            color: #2558d9;
+        }
+
+        /* 路线图例 */
+        .route-legend {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e3e8f2;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #5b6780;
+        }
+
+        .legend-line {
+            width: 24px;
+            height: 4px;
+            background: #1890ff;
+            border-radius: 2px;
+        }
+
+        /* 标记点图例 */
+        .marker-legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 12px;
+        }
+
+        .marker-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #5b6780;
+        }
+
+        .marker-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .marker-dot.start {
+            background: #12a150;
+        }
+
+        .marker-dot.end {
+            background: #d9363e;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .route-panel {
+                top: auto;
+                bottom: 20px;
+                left: 20px;
+                right: 20px;
+                min-width: auto;
+            }
+
+            .route-info {
+                gap: 16px;
+            }
+
+            .info-value {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="route-panel">
+        <h2>🚗 北京 → 上海 驾车路线</h2>
+        
+        <!-- 加载状态 -->
+        <div id="loadingState" class="loading-state">
+            <div class="loading-spinner"></div>
+            <span>正在规划路线...</span>
+        </div>
+
+        <!-- 路线信息（初始隐藏） -->
+        <div id="routeInfo" class="route-info" style="display: none;">
+            <div class="info-item">
+                <div id="distanceVal" class="info-value">-</div>
+                <div class="info-label">公里</div>
+            </div>
+            <div class="info-item">
+                <div id="durationVal" class="info-value">-</div>
+                <div class="info-label">小时</div>
+            </div>
+        </div>
+
+        <!-- 错误状态（初始隐藏） -->
+        <div id="errorState" class="error-state" style="display: none;"></div>
+
+        <!-- 图例 -->
+        <div id="routeLegend" class="route-legend" style="display: none;">
+            <div class="legend-line"></div>
+            <span>驾车路线</span>
+        </div>
+
+        <div id="markerLegend" class="marker-legend" style="display: none;">
+            <div class="marker-item">
+                <div class="marker-dot start"></div>
+                <span>起点（北京）</span>
+            </div>
+            <div class="marker-item">
+                <div class="marker-dot end"></div>
+                <span>终点（上海）</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 天地图 API -->
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d" type="text/javascript"></script>
+
+    <script>
+        // 北京和上海的坐标 [经度，纬度]
+        var beijing = [116.404, 39.915];
+        var shanghai = [121.474, 31.230];
+
+        // 构建驾车路线代理 URL
+        function buildDriveUrl(orig, dest, style) {
+            var url = new URL('/api/tianditu/drive', window.location.origin);
+            url.searchParams.set('origLng', String(orig[0]));
+            url.searchParams.set('origLat', String(orig[1]));
+            url.searchParams.set('destLng', String(dest[0]));
+            url.searchParams.set('destLat', String(dest[1]));
+            url.searchParams.set('style', String(style || 0));
+            return url.toString();
+        }
+
+        // 解析路线坐标字符串 "lng,lat;lng,lat;..."
+        function parseRouteCoords(raw) {
+            if (!raw) return [];
+            return raw
+                .split(';')
+                .map(function(pair) {
+                    var parts = pair.split(',');
+                    if (parts.length !== 2) return null;
+                    var lng = Number(parts[0]);
+                    var lat = Number(parts[1]);
+                    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+                    return [lng, lat];
+                })
+                .filter(Boolean);
+        }
+
+        // 更新 UI 状态
+        function setLoading(loading) {
+            document.getElementById('loadingState').style.display = loading ? 'flex' : 'none';
+        }
+
+        function setError(message) {
+            var errorEl = document.getElementById('errorState');
+            errorEl.style.display = 'block';
+            errorEl.innerHTML = message + '<span class="retry-btn" onclick="loadRoute()">重试</span>';
+        }
+
+        function clearError() {
+            document.getElementById('errorState').style.display = 'none';
+            document.getElementById('errorState').innerHTML = '';
+        }
+
+        function showRouteInfo(distance, duration) {
+            document.getElementById('routeInfo').style.display = 'flex';
+            document.getElementById('distanceVal').textContent = distance.toFixed(1);
+            document.getElementById('durationVal').textContent = (duration / 3600).toFixed(1);
+            document.getElementById('routeLegend').style.display = 'flex';
+            document.getElementById('markerLegend').style.display = 'flex';
+        }
+
+        // 初始化地图
+        var map = new TMapGL.Map('map', {
+            center: [118.5, 35.5],  // 北京和上海之间的中心点
+            zoom: 6,
+            pitch: 0,
+            bearing: 0
+        });
+
+        // 地图加载完成后执行
+        map.on('load', function() {
+            // 添加地图控件
+            map.addControl(new TMapGL.NavigationControl(), 'top-right');
+            map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+            map.addControl(new TMapGL.FullscreenControl(), 'top-right');
+
+            // 加载路线
+            loadRoute();
+        });
+
+        // 加载驾车路线
+        function loadRoute() {
+            setLoading(true);
+            clearError();
+
+            fetch(buildDriveUrl(beijing, shanghai, 0))
+                .then(function(res) {
+                    if (!res.ok) {
+                        throw new Error('路线请求失败：HTTP ' + res.status);
+                    }
+                    return res.json();
+                })
+                .then(function(payload) {
+                    // 检查代理返回状态
+                    if (!payload || payload.success !== true) {
+                        throw new Error((payload && payload.error) || '路线规划服务异常');
+                    }
+
+                    var routeData = payload.data || {};
+                    var routeCoords = parseRouteCoords(routeData.routelatlon || '');
+
+                    // 检查是否获取到有效坐标
+                    if (!routeCoords || routeCoords.length === 0) {
+                        throw new Error('未获取到可绘制的路线坐标');
+                    }
+
+                    // 添加路线数据源
+                    if (map.getSource('route')) {
+                        map.removeSource('route');
+                    }
+                    map.addSource('route', {
+                        type: 'geojson',
+                        data: {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'LineString',
+                                coordinates: routeCoords
+                            }
+                        }
+                    });
+
+                    // 添加路线图层
+                    if (map.getLayer('route-line')) {
+                        map.removeLayer('route-line');
+                    }
+                    map.addLayer({
+                        id: 'route-line',
+                        type: 'line',
+                        source: 'route',
+                        paint: {
+                            'line-color': '#1890ff',
+                            'line-width': 5,
+                            'line-opacity': 0.85
+                        },
+                        layout: {
+                            'line-cap': 'round',
+                            'line-join': 'round'
+                        }
+                    });
+
+                    // 添加起点标记
+                    if (map.getSource('start-point')) {
+                        map.removeSource('start-point');
+                        map.removeLayer('start-point');
+                    }
+                    map.addSource('start-point', {
+                        type: 'geojson',
+                        data: {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'Point',
+                                coordinates: beijing
+                            }
+                        }
+                    });
+                    map.addLayer({
+                        id: 'start-point',
+                        type: 'circle',
+                        source: 'start-point',
+                        paint: {
+                            'circle-radius': 8,
+                            'circle-color': '#12a150',
+                            'circle-stroke-width': 3,
+                            'circle-stroke-color': '#ffffff'
+                        }
+                    });
+
+                    // 添加终点标记
+                    if (map.getSource('end-point')) {
+                        map.removeSource('end-point');
+                        map.removeLayer('end-point');
+                    }
+                    map.addSource('end-point', {
+                        type: 'geojson',
+                        data: {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'Point',
+                                coordinates: shanghai
+                            }
+                        }
+                    });
+                    map.addLayer({
+                        id: 'end-point',
+                        type: 'circle',
+                        source: 'end-point',
+                        paint: {
+                            'circle-radius': 8,
+                            'circle-color': '#d9363e',
+                            'circle-stroke-width': 3,
+                            'circle-stroke-color': '#ffffff'
+                        }
+                    });
+
+                    // 调整地图视野以适应整条路线
+                    var bounds = new TMapGL.LngLatBounds();
+                    routeCoords.forEach(function(coord) {
+                        bounds.extend(coord);
+                    });
+                    map.fitBounds(bounds, {
+                        padding: 80,
+                        maxZoom: 12
+                    });
+
+                    // 显示路线信息
+                    var distance = Number(routeData.distance) || 0;
+                    var duration = Number(routeData.duration) || 0;
+                    showRouteInfo(distance, duration);
+
+                    setLoading(false);
+                })
+                .catch(function(err) {
+                    console.error('路线规划错误:', err);
+                    setLoading(false);
+                    setError('路线规划失败：' + err.message);
+                });
+        }
+    </script>
+</body>
+</html>

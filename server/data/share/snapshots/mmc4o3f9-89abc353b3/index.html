@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>天地图多个标注点示例</title>
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d" type="text/javascript"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; }
+        #map { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        // 初始化地图
+        var map = new TMapGL.Map('map', {
+            center: [116.40, 39.90],  // 北京中心点
+            zoom: 11
+        });
+
+        // 地图加载完成后添加标记
+        map.on('load', function() {
+            // 定义多个地点数据
+            var locations = [
+                {
+                    name: "天安门广场",
+                    position: [116.3974, 39.9087],
+                    description: "中国北京市中心的天安门广场，世界上最大的城市广场之一。"
+                },
+                {
+                    name: "故宫博物院",
+                    position: [116.3972, 39.9165],
+                    description: "明清两代的皇家宫殿，世界上现存规模最大、保存最完整的木质结构古建筑之一。"
+                },
+                {
+                    name: "颐和园",
+                    position: [116.2719, 39.9997],
+                    description: "中国清朝时期皇家园林，保存最完整的一座皇家行宫御苑。"
+                }
+            ];
+
+            // 为每个地点创建标记和弹窗
+            locations.forEach(function(location) {
+                // 创建弹窗
+                var popup = new TMapGL.Popup({ 
+                    offset: [0, -30],  // 向上偏移30像素，避免遮盖标记
+                    closeButton: false  // 不显示关闭按钮
+                }).setHTML(
+                    '<h3 style="margin:0 0 5px;font-size:16px;">' + location.name + '</h3>' +
+                    '<p style="margin:0;font-size:14px;color:#666;">' + location.description + '</p>'
+                );
+
+                // 创建标记
+                var marker = new TMapGL.Marker({
+                    color: "#FF0000"  // 红色标记
+                })
+                .setLngLat(location.position)
+                .setPopup(popup)  // 绑定弹窗
+                .addTo(map);
+            });
+        });
+    </script>
+</body>
+</html>

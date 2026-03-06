@@ -3,6 +3,7 @@ import { useMapStore } from '../../stores/useMapStore'
 import { useChatStore } from '../../stores/useChatStore'
 import { useCodeRunner } from '../../hooks/useCodeRunner'
 import { visualQaApi } from '../../services/visualQaApi'
+import html2canvas from 'html2canvas'
 
 /** 默认地图 HTML — 展示中国全景，indigo 主题风格 */
 const DEFAULT_MAP_HTML = `<!DOCTYPE html>
@@ -33,6 +34,113 @@ const DEFAULT_MAP_HTML = `<!DOCTYPE html>
 </script>
 </body>
 </html>`
+
+const MIN_CAPTURE_BASE64_LEN = 800
+
+function dataUrlToBase64(dataUrl: string): string | null {
+  const raw = String(dataUrl || '')
+  const marker = ';base64,'
+  const idx = raw.indexOf(marker)
+  if (idx < 0) return null
+  const value = raw.slice(idx + marker.length).trim()
+  return value || null
+}
+
+function isCaptureValid(base64?: string | null): base64 is string {
+  return typeof base64 === 'string' && base64.length >= MIN_CAPTURE_BASE64_LEN
+}
+
+function pickLargestCanvas(doc: Document): { canvas: HTMLCanvasElement | null; count: number; maxArea: number } {
+  const canvases = Array.from(doc.querySelectorAll('canvas'))
+  if (!canvases.length) return { canvas: null, count: 0, maxArea: 0 }
+  let candidate: HTMLCanvasElement | null = null
+  let maxArea = 0
+  for (const canvas of canvases) {
+    const width = Number(canvas.width || canvas.clientWidth || 0)
+    const height = Number(canvas.height || canvas.clientHeight || 0)
+    const area = width * height
+    if (area > maxArea) {
+      maxArea = area
+      candidate = canvas as HTMLCanvasElement
+    }
+  }
+  return { canvas: candidate, count: canvases.length, maxArea }
+}
+
+async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promise<{
+  imageBase64: string
+  mode: 'dom' | 'canvas'
+  canvasCount: number
+  largestCanvasArea: number
+  canvasReadable: boolean
+  canvasTainted: boolean
+}> {
+  if (!iframe) throw new Error('预览容器不存在')
+  const win = iframe.contentWindow
+  const doc = iframe.contentDocument
+  if (!win || !doc) throw new Error('预览页面未就绪')
+
+  await new Promise<void>((resolve) => {
+    win.requestAnimationFrame(() => resolve())
+  })
+  await new Promise((resolve) => setTimeout(resolve, 220))
+
+  const canvasMeta = pickLargestCanvas(doc)
+  let canvasReadable = false
+  let canvasTainted = false
+  if (canvasMeta.canvas) {
+    try {
+      const directBase64 = dataUrlToBase64(canvasMeta.canvas.toDataURL('image/png'))
+      if (isCaptureValid(directBase64)) {
+        canvasReadable = true
+        return {
+          imageBase64: directBase64,
+          mode: 'canvas',
+          canvasCount: canvasMeta.count,
+          largestCanvasArea: canvasMeta.maxArea,
+          canvasReadable,
+          canvasTainted: false,
+        }
+      }
+    } catch {
+      canvasTainted = true
+    }
+  }
+
+  // 优先捕获完整页面，保留 UI 信息
+  try {
+    const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
+    if (rootEl) {
+      const rendered = await html2canvas(rootEl, {
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        width: Math.max(320, rootEl.clientWidth || win.innerWidth || 0),
+        height: Math.max(240, rootEl.clientHeight || win.innerHeight || 0),
+        windowWidth: Math.max(320, win.innerWidth || 0),
+        windowHeight: Math.max(240, win.innerHeight || 0),
+        scrollX: win.scrollX || 0,
+        scrollY: win.scrollY || 0,
+      })
+      const domBase64 = dataUrlToBase64(rendered.toDataURL('image/png'))
+      if (isCaptureValid(domBase64)) {
+        return {
+          imageBase64: domBase64,
+          mode: 'dom',
+          canvasCount: canvasMeta.count,
+          largestCanvasArea: canvasMeta.maxArea,
+          canvasReadable,
+          canvasTainted,
+        }
+      }
+    }
+  } catch {
+    // ignore and fallback to canvas capture
+  }
+
+  throw new Error('无法从前端页面捕获有效截图')
+}
 
 export function MapPreview() {
   const {
@@ -153,8 +261,38 @@ export function MapPreview() {
         const latestUser = [...messages].reverse().find((m) => m.role === 'user')
         const hint = latestUser?.content?.trim() || ''
         const runId = `${Date.now()}-${codeHash.slice(0, 8)}`
+        let imageBase64: string
+        let captureMeta:
+          | {
+              mode: 'dom' | 'canvas'
+              canvasCount: number
+              largestCanvasArea: number
+              canvasReadable: boolean
+              canvasTainted: boolean
+            }
+          | undefined
+        try {
+          const captured = await captureIframeScreenshot(iframeRef.current)
+          imageBase64 = captured.imageBase64
+          captureMeta = {
+            mode: captured.mode,
+            canvasCount: captured.canvasCount,
+            largestCanvasArea: captured.largestCanvasArea,
+            canvasReadable: captured.canvasReadable,
+            canvasTainted: captured.canvasTainted,
+          }
+        } catch (captureErr: any) {
+          useChatStore.getState().addAssistantMessage([
+            '视觉巡检结果：不可用',
+            `诊断：前端截图采样失败（${captureErr?.message || '未知原因'}）。`,
+            '本轮不会触发自动补修。',
+          ].join('\n'))
+          return
+        }
         const result = await visualQaApi.inspect({
+          imageBase64,
           code: state.currentCode,
+          captureMeta,
           hint,
           runId,
         })
@@ -181,11 +319,21 @@ export function MapPreview() {
           return
         }
 
+        if (!result.shouldRepair) {
+          useChatStore.getState().addAssistantMessage([
+            `视觉巡检结果：发现异常（${result.severity}）`,
+            `结论：${result.summary}`,
+            `诊断：${result.diagnosis}`,
+            'AI 判定当前无需触发自动补修。',
+          ].join('\n'))
+          return
+        }
+
         useChatStore.getState().addAssistantMessage([
           `视觉巡检结果：发现异常（${result.severity}）`,
           `结论：${result.summary}`,
           `诊断：${result.diagnosis}`,
-          '系统将自动触发一次视觉回灌补修。',
+          'AI 判定需要自动补修，系统将触发视觉回灌补修。',
         ].join('\n'))
 
         const retryState = useMapStore.getState()

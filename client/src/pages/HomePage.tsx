@@ -78,6 +78,22 @@ const examples: ExampleCard[] = [
     iconColor: 'text-rose-500',
   },
   {
+    title: '清华大学周边POI搜索',
+    desc: '构建左侧检索面板 + 右侧地图，支持周边/视野/普通三种搜索模式',
+    prompt:
+      '请生成一个“清华大学周边POI搜索演示”网页，要求：1）整体布局参考专业 GIS 应用：顶部标题栏（标题、副标题、右侧复制链接按钮），左侧控制面板，右侧地图；2）左侧面板包含：关键词输入框（默认“医院”）、搜索类型切换按钮（周边搜索/视野搜索/普通搜索）、搜索半径输入框、开始搜索按钮、状态提示条、搜索结果列表；3）右侧地图默认定位清华大学，右上角显示“当前位置”信息卡（地名、经纬度）；4）点击地图可切换搜索中心点，结果点在地图和列表联动高亮；5）调用 /api/tianditu/search 代理接口，三种模式分别对应 queryType=3/2/1，结果包含名称、地址、距离；6）必须使用天地图 JS API v5（TMapGL），保证移动端可用、无运行时报错、视觉风格简洁现代。',
+    category: 'POI搜索',
+    preview: 'points',
+    icon: (
+      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-4.3-4.3m1.3-5.2a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
+      </svg>
+    ),
+    gradient: 'from-indigo-500 to-purple-500',
+    bgLight: 'bg-indigo-50',
+    iconColor: 'text-indigo-500',
+  },
+  {
     title: '城中村改造地块',
     desc: '自动加载城中村 GeoJSON，探索拆迁地块并进行合理可视化',
     prompt: '请你探索一下我上传的这个数据，并进行合理的可视化。',

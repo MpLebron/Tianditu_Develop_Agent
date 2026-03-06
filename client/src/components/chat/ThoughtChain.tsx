@@ -166,9 +166,14 @@ function getSummary(item: ThoughtChainItem): string | null {
     if (typeof item.result === 'string') return item.result
     const status = typeof result?.status === 'string' ? result.status : ''
     const anomalous = result?.anomalous === true
+    const shouldRepair = result?.shouldRepair === true
     const summary = typeof result?.summary === 'string' ? result.summary : ''
     return [
-      status === 'unavailable' ? '巡检不可用' : anomalous ? '发现视觉异常' : '视觉巡检通过',
+      status === 'unavailable'
+        ? '巡检不可用'
+        : anomalous
+          ? (shouldRepair ? '发现视觉异常（需补修）' : '发现视觉异常（无需补修）')
+          : '视觉巡检通过',
       summary,
     ].filter(Boolean).join(' | ')
   }

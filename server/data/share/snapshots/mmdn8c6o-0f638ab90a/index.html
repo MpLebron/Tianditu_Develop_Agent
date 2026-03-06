@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>村庄改造数据可视化</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+    <style>
+        html, body { width: 100%; height: 100%; margin: 0; padding: 0; display: flex; }
+        #map { width: 60%; height: 100%; }
+        #panel { width: 40%; height: 100%; display: flex; flex-direction: column; background: #f5f5f5; }
+        .panel-header { padding: 15px; background: #1a73e8; color: white; font-size: 16px; font-weight: bold; }
+        #chart { flex: 1; padding: 15px; }
+        #info { padding: 15px; max-height: 200px; overflow-y: auto; border-top: 1px solid #ddd; background: white; }
+        .legend { display: flex; padding: 10px; background: white; }
+        .legend-item { display: flex; align-items: center; margin-right: 15px; }
+        .legend-color { width: 16px; height: 16px; margin-right: 5px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <div class="panel-header">村庄改造数据统计</div>
+        <div id="chart"></div>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-color" style="background: #12a150;"></div><span>已签约</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #2f6bff;"></div><span>未签约</span></div>
+            <div class="legend-item"><div class="legend-color" style="background: #8a95ab;"></div><span>未知</span></div>
+        </div>
+        <div id="info">点击地图上的区域查看详细信息</div>
+    </div>
+
+    <script>
+        // 共享变量
+        const COLOR = {
+            signed: 'rgba(18,161,80,0.6)',
+            unsigned: 'rgba(47,107,255,0.4)',
+            unknown: 'rgba(138,149,171,0.4)'
+        };
+        var map = null;
+        let chart = null;
+        let currentFeature = null;
+
+        // 初始化地图
+        function initMap() {
+            map = new TMapGL.Map('map');
+            
+            map.on('load', function() {
+                loadData();
+                initChart();
+            });
+        }
+
+        // 加载GeoJSON数据
+        function loadData() {
+            fetch('/share-assets/mmdn8c6o-0f638ab90a/assets/asset-1.geojson')
+                .then(response => response.json())
+                .then(rawData => {
+                    const geojson = rawData;
+                    
+                    // 添加数据源
+                    map.addSource('village-data', {
+                        type: 'geojson',
+                        data: geojson
+                    });
+
+                    // 添加填充图层
+                    map.addLayer({
+                        id: 'village-fill',
+                        type: 'fill',
+                        source: 'village-data',
+                        paint: {
+                            'fill-color': [
+                                'case',
+                                ['==', ['get', '签约情'], '已签约'], COLOR.signed,
+                                ['==', ['get', '签约情'], '未签约'], COLOR.unsigned,
+                                COLOR.unknown
+                            ],
+                            'fill-opacity': 0.7,
+                            'fill-outline-color': '#fff'
+                        }
+                    });
+
+                    // 添加边框图层
+                    map.addLayer({
+                        id: 'village-line',
+                        type: 'line',
+                        source: 'village-data',
+                        paint: {
+                            'line-color': '#fff',
+                            'line-width': 1
+                        }
+                    });
+
+                    // 点击交互
+                    map.on('click', 'village-fill', function(e) {
+                        if (!e.features || !e.features.length) return;
+                        currentFeature = e.features[0];
+                        updateInfoPanel();
+                    });
+
+                    // 悬停效果
+                    map.on('mouseenter', 'village-fill', function() {
+                        map.getCanvas().style.cursor = 'pointer';
+                    });
+                    map.on('mouseleave', 'village-fill', function() {
+                        map.getCanvas().style.cursor = '';
+                    });
+
+                    // 自动定位到数据范围
+                    fitToGeoJSON(map, geojson);
+                    
+                    // 更新图表
+                    updateChart(geojson);
+                })
+                .catch(err => {
+                    console.error('加载数据失败:', err);
+                    document.getElementById('info').textContent = '数据加载失败: ' + err.message;
+                });
+        }
+
+        // 自动定位到数据范围
+        function fitToGeoJSON(map, geojson) {
+            var bounds = new TMapGL.LngLatBounds();
+            geojson.features.forEach(function(f) {
+                if (f.geometry && f.geometry.coordinates) {
+                    const coords = f.geometry.coordinates[0][0]; // MultiPolygon的第一组坐标
+                    if (Array.isArray(coords) && coords.length > 0) {
+                        coords.forEach(coord => {
+                            if (Array.isArray(coord) && coord.length >= 2) {
+                                bounds.extend(coord);
+                            }
+                        });
+                    }
+                }
+            });
+            map.fitBounds(bounds, { padding: 50, maxZoom: 16 });
+        }
+
+        // 初始化图表
+        function initChart() {
+            const chartDom = document.getElementById('chart');
+            if (!chartDom) return;
+            chart = echarts.init(chartDom);
+            window.addEventListener('resize', function() {
+                chart.resize();
+            });
+        }
+
+        // 更新图表
+        function updateChart(geojson) {
+            if (!chart) return;
+            
+            // 统计经济社分布
+            const economicGroups = {};
+            geojson.features.forEach(f => {
+                const group = f.properties.经济社 || '未知';
+                economicGroups[group] = (economicGroups[group] || 0) + 1;
+            });
+            
+            const option = {
+                tooltip: {
+                    trigger: 'item',
+                    formatter: '{a} <br/>{b}: {c} ({d}%)'
+                },
+                legend: {
+                    orient: 'vertical',
+                    right: 10,
+                    top: 'center',
+                    data: Object.keys(economicGroups)
+                },
+                series: [{
+                    name: '经济社分布',
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    avoidLabelOverlap: false,
+                    itemStyle: {
+                        borderRadius: 10,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    },
+                    label: {
+                        show: false,
+                        position: 'center'
+                    },
+                    emphasis: {
+                        label: {
+                            show: true,
+                            fontSize: '18',
+                            fontWeight: 'bold'
+                        }
+                    },
+                    labelLine: {
+                        show: false
+                    },
+                    data: Object.entries(economicGroups).map(([name, value]) => ({
+                        name: name,
+                        value: value
+                    }))
+                }]
+            };
+            
+            chart.setOption(option);
+        }
+
+        // 更新信息面板
+        function updateInfoPanel() {
+            if (!currentFeature) return;
+            
+            const props = currentFeature.properties;
+            const infoHtml = `
+                <h3>${props.编号 || '无编号'}</h3>
+                <p><b>经济社:</b> ${props.经济社 || '未知'}</p>
+                <p><b>动迁组:</b> ${props.动迁组 || '未知'}</p>
+                <p><b>签约状态:</b> ${props.签约情 || '未知'}</p>
+                <p><b>房屋面积:</b> ${props.房屋面 || 0} ㎡</p>
+                <p><b>宗地面积:</b> ${props.宗地面 || 0} ㎡</p>
+            `;
+            
+            document.getElementById('info').innerHTML = infoHtml;
+        }
+
+        // 初始化
+        initMap();
+    </script>
+</body>
+</html>

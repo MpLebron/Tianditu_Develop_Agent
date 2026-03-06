@@ -68,6 +68,9 @@ export const config = {
     baseUrl: process.env.LLM_BASE_URL || 'https://aihubmix.com/v1',
     provider: process.env.LLM_PROVIDER || 'qwen',
     model: process.env.LLM_MODEL || 'qwen3.5-plus',
+    // Qwen 专用链路（阿里云百炼 OpenAI 兼容接口）
+    qwenApiKey: process.env.DASHSCOPE_API_KEY || '',
+    qwenBaseUrl: process.env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     maxOutputTokens: parseInt(process.env.LLM_MAX_OUTPUT_TOKENS || '8192'),
     requestTimeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '240000'),
     maxRetries: parseInt(process.env.LLM_MAX_RETRIES || '2'),

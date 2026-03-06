@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>村庄改造数据探索</title>
+  <script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+  <style>
+    :root {
+      --bg-page: #f4f6fb;
+      --bg-panel: #ffffff;
+      --text-primary: #1f2b46;
+      --text-secondary: #57627f;
+      --text-muted: #8a93a8;
+      --brand-blue: #2f6bff;
+      --brand-orange: #ff8c37;
+      --brand-green: #12a150;
+      --brand-purple: #7c4dff;
+      --brand-cyan: #00b8d9;
+      --border-soft: #e4e8f5;
+      --shadow-panel: 0 12px 30px rgba(31, 43, 70, 0.08);
+      --radius-panel: 20px;
+      --radius-control: 12px;
+      --gap: 16px;
+      font-family: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg-page);
+    }
+    body {
+      display: flex;
+      min-height: 100vh;
+    }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: var(--gap);
+      padding: calc(var(--gap) * 1.5);
+    }
+    .info-panel {
+      background: var(--bg-panel);
+      border-radius: var(--radius-panel);
+      padding: 20px;
+      box-shadow: var(--shadow-panel);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .panel-header {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .panel-subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+    .status-pill {
+      align-self: flex-start;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      background: var(--brand-blue);
+      transition: background 0.3s ease;
+    }
+    .status-pill[data-state="loading"] {
+      background: #ffb547;
+    }
+    .status-pill[data-state="ready"] {
+      background: var(--brand-blue);
+    }
+    .status-pill[data-state="empty"] {
+      background: #9ea7bb;
+    }
+    .status-pill[data-state="error"] {
+      background: #d9363e;
+    }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .stat-card {
+      background: var(--bg-page);
+      border-radius: var(--radius-control);
+      padding: 12px;
+      border: 1px solid var(--border-soft);
+    }
+    .stat-title {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .list-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 0 0 8px 0;
+    }
+    .group-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .group-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .group-item span {
+      white-space: nowrap;
+    }
+    .group-tag {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      margin-right: 8px;
+    }
+    .legend {
+      margin-top: auto;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-soft);
+    }
+    .legend-title {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .legend-items {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .legend-entry {
+      display: flex;
+      align-items: center;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    #map {
+      width: 100%;
+      min-height: 80vh;
+      border-radius: var(--radius-panel);
+      overflow: hidden;
+      box-shadow: var(--shadow-panel);
+      position: relative;
+    }
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+        padding: 12px;
+      }
+      .info-panel {
+        grid-column: 1 / -1;
+      }
+      #map {
+        min-height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <section class="info-panel">
+      <div class="panel-header">村庄改造地块探索</div>
+      <div class="panel-subtitle">按照“经济社”分类，了解现状分布与房屋面积</div>
+      <div class="status-pill" data-state="loading">数据加载中...</div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-title">图斑总数</div>
+          <div class="stat-value" id="featureCount">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">平均房屋面</div>
+          <div class="stat-value" id="avgArea">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">非空经济社</div>
+          <div class="stat-value" id="groupCount">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">最大面积（假设）</div>
+          <div class="stat-value" id="maxArea">-</div>
+        </div>
+      </div>
+      <div>
+        <p class="list-title">Top 5 经济社（按图斑数）</p>
+        <ul class="group-list" id="topGroups">
+          <li class="group-item">数据加载中...</li>
+        </ul>
+      </div>
+      <div class="legend">
+        <p class="legend-title">图例说明</p>
+        <div class="legend-items" id="legendContainer"></div>
+      </div>
+    </section>
+    <section id="map"></section>
+  </div>
+  <script>
+    var map = new TMapGL.Map('map', {
+      center: [113.6000, 23.5385],
+      zoom: 17
+    });
+
+    map.on("load", function () {
+      map.addControl(new TMapGL.NavigationControl({ showCompass: true }), 'top-left');
+      map.addControl(new TMapGL.ScaleControl(), 'bottom-left');
+
+      const statusPill = document.querySelector('.status-pill');
+      const featureCountEl = document.getElementById('featureCount');
+      const avgAreaEl = document.getElementById('avgArea');
+      const groupCountEl = document.getElementById('groupCount');
+      const maxAreaEl = document.getElementById('maxArea');
+      const topGroupsEl = document.getElementById('topGroups');
+      const legendContainer = document.getElementById('legendContainer');
+
+      function setStatus(state, text) {
+        statusPill.dataset.state = state;
+        statusPill.textContent = text;
+      }
+
+      setStatus('loading', '数据加载中...');
+
+      fetch('/share-assets/mmcwlpob-38a37216ed/assets/asset-1.geojson')
+        .then(function (res) {
+          if (!res.ok) {
+            throw new Error('网络返回失败');
+          }
+          return res.json();
+        })
+        .then(function (rawData) {
+          const payload = rawData.rawData || rawData;
+          const geojson = payload.data || payload;
+          const features = geojson.features || [];
+
+          if (!features.length) {
+            setStatus('empty', '结果为空：没有要素');
+            featureCountEl.textContent = '0';
+            avgAreaEl.textContent = '0';
+            groupCountEl.textContent = '0';
+            maxAreaEl.textContent = '0';
+            topGroupsEl.innerHTML = '<li class="group-item">暂无数据</li>';
+            return;
+          }
+
+          setStatus('ready', '数据已加载');
+
+          let totalArea = 0;
+          let maxArea = 0;
+          const labels = {};
+          const bounds = new TMapGL.LngLatBounds();
+
+          function extendBounds(coords) {
+            if (!Array.isArray(coords)) return;
+            if (coords.length && typeof coords[0] === 'number') {
+              bounds.extend(new TMapGL.LngLat(coords[0], coords[1]));
+            } else {
+              coords.forEach(extendBounds);
+            }
+          }
+
+          features.forEach(function (feature) {
+            const area = Number(feature.properties['房屋面'] || 0);
+            totalArea += area;
+            if (area > maxArea) {
+              maxArea = area;
+            }
+            const group = feature.properties['经济社'] || '未标注';
+            labels[group] = (labels[group] || 0) + 1;
+
+            extendBounds(feature.geometry.coordinates);
+          });
+
+          const sortedGroups = Object.entries(labels).sort(function (a, b) {
+            return b[1] - a[1];
+          });
+
+          const palette = ['#2f6bff', '#ff8c37', '#00b8d9', '#17c671', '#7d5df0', '#f68f93'];
+          const colorMap = {};
+          sortedGroups.slice(0, palette.length).forEach(function ([group], idx) {
+            colorMap[group] = palette[idx];
+          });
+          colorMap['未标注'] = '#9ea7bb';
+
+          const legendHtml = [];
+          Object.entries(colorMap).forEach(function ([group, color]) {
+            legendHtml.push(
+              '<div class="legend-entry">' +
+                '<span class="group-tag" style="background:' + color + ';"></span>' +
+                '<span>' + group + '</span>' +
+              '</div>'
+            );
+          });
+          legendContainer.innerHTML = legendHtml.join('');
+
+          topGroupsEl.innerHTML = sortedGroups.slice(0, 5).map(function ([group, count]) {
+            const color = colorMap[group] || '#8ab8ff';
+            return (
+              '<li class="group-item">' +
+                '<span style="display:flex; align-items:center;">' +
+                  '<span class="group-tag" style="background:' + color + ';"></span>' +
+                  '<span>' + group + '</span>' +
+                '</span>' +
+                '<span>' + count + '个</span>' +
+              '</li>'
+            );
+          }).join('');
+
+          featureCountEl.textContent = features.length;
+          avgAreaEl.textContent = (totalArea / features.length).toFixed(2) + ' 平方米';
+          groupCountEl.textContent = Object.keys(labels).length;
+          maxAreaEl.textContent = maxArea.toFixed(2);
+
+          map.addSource('village-polygons', {
+            type: 'geojson',
+            data: geojson
+          });
+
+          map.addLayer({
+            id: 'village-fill',
+            type: 'fill',
+            source: 'village-polygons',
+            paint: {
+              'fill-color': [
+                'match',
+                ['get', '经济社'],
+                ...Object.entries(colorMap).reduce(function (acc, [key, value]) {
+                  if (key === '未标注') return acc;
+                  acc.push(key, value);
+                  return acc;
+                }, []),
+                // 未标注和其余颜色
+                colorMap['未标注'] || '#b0b8d3'
+              ],
+              'fill-opacity': 0.65
+            }
+          });
+
+          map.addLayer({
+            id: 'village-outline',
+            type: 'line',
+            source: 'village-polygons',
+            paint: {
+              'line-color': '#0c1431',
+              'line-width': 1.2
+            }
+          });
+
+          map.fitBounds(bounds, { padding: 80, duration: 1000 });
+
+          const popup = new TMapGL.Popup({ closeButton: true, offset: 15 });
+
+          map.on('click', 'village-fill', function (e) {
+            if (!e.features || !e.features.length) return;
+            const props = e.features[0].properties || {};
+            const html = `
+              <div style="font-size:13px; line-height:1.5;">
+                <strong>编号：</strong>${props['编号'] || '-'}<br />
+                <strong>经济社：</strong>${props['经济社'] || '未登记'}<br />
+                <strong>动迁组：</strong>${props['动迁组'] || '-'}<br />
+                <strong>房屋面：</strong>${props['房屋面'] || '0'}
+              </div>
+            `;
+            popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+          });
+
+          map.on('mousemove', 'village-fill', function () {
+            map.getCanvas().style.cursor = 'pointer';
+          });
+
+          map.on('mouseleave', 'village-fill', function () {
+            map.getCanvas().style.cursor = '';
+          });
+        })
+        .catch(function (err) {
+          console.error(err);
+          setStatus('error', '数据加载出错');
+          topGroupsEl.innerHTML = '<li class="group-item">加载失败</li>';
+        });
+    });
+  </script>
+</body>
+</html>
