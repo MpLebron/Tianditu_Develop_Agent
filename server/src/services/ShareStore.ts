@@ -96,6 +96,8 @@ function sanitizeDescription(input?: string): string {
 
 const MAX_THUMBNAIL_IMAGE_BYTES = 6 * 1024 * 1024
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const MIN_PNG_BYTES_PER_PIXEL = 0.03
+const MIN_DENSITY_CHECK_PIXELS = 1200 * 630
 
 function decodeThumbnailBase64(raw?: string): Buffer | null {
   const input = String(raw || '').trim()
@@ -113,6 +115,16 @@ function decodeThumbnailBase64(raw?: string): Buffer | null {
     if (buf.length < PNG_SIGNATURE.length) return null
     for (let i = 0; i < PNG_SIGNATURE.length; i += 1) {
       if (buf[i] !== PNG_SIGNATURE[i]) return null
+    }
+    // PNG IHDR chunk stores width/height at byte 16..23.
+    if (buf.length >= 24 && buf.toString('ascii', 12, 16) === 'IHDR') {
+      const width = buf.readUInt32BE(16)
+      const height = buf.readUInt32BE(20)
+      const pixels = width * height
+      if (width > 0 && height > 0 && pixels >= MIN_DENSITY_CHECK_PIXELS) {
+        const density = buf.length / pixels
+        if (!Number.isFinite(density) || density < MIN_PNG_BYTES_PER_PIXEL) return null
+      }
     }
     return buf
   } catch {

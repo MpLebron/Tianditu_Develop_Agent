@@ -41,6 +41,66 @@ function findPreviewIframe(): HTMLIFrameElement | null {
   return null
 }
 
+function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('图片解码失败'))
+    img.src = dataUrl
+  })
+}
+
+async function isLikelyBlankDataUrl(dataUrl: string): Promise<boolean> {
+  try {
+    const img = await loadImageFromDataUrl(dataUrl)
+    const sampleWidth = Math.max(8, Math.min(64, img.naturalWidth || img.width || 64))
+    const sampleHeight = Math.max(8, Math.min(64, img.naturalHeight || img.height || 64))
+    const canvas = document.createElement('canvas')
+    canvas.width = sampleWidth
+    canvas.height = sampleHeight
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return false
+
+    ctx.drawImage(img, 0, 0, sampleWidth, sampleHeight)
+    const { data } = ctx.getImageData(0, 0, sampleWidth, sampleHeight)
+
+    let minR = 255
+    let minG = 255
+    let minB = 255
+    let maxR = 0
+    let maxG = 0
+    let maxB = 0
+    let visiblePixels = 0
+    const buckets = new Set<number>()
+
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3]
+      if (a < 8) continue
+      visiblePixels += 1
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      if (r < minR) minR = r
+      if (g < minG) minG = g
+      if (b < minB) minB = b
+      if (r > maxR) maxR = r
+      if (g > maxG) maxG = g
+      if (b > maxB) maxB = b
+      buckets.add(((r >> 5) << 10) | ((g >> 5) << 5) | (b >> 5))
+    }
+
+    if (!visiblePixels) return true
+
+    const spread = (maxR - minR) + (maxG - minG) + (maxB - minB)
+    if (spread <= 16) return true
+    if (buckets.size <= 2 && spread <= 28) return true
+
+    return false
+  } catch {
+    return false
+  }
+}
+
 export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN): Promise<string> {
   const iframe = findPreviewIframe()
   if (!iframe) throw new Error('未找到地图预览容器')
@@ -57,8 +117,12 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
   const largestCanvas = pickLargestCanvas(doc)
   if (largestCanvas) {
     try {
-      const canvasBase64 = dataUrlToBase64(largestCanvas.toDataURL('image/png'))
-      if (isCaptureValid(canvasBase64, minLen)) return canvasBase64
+      const canvasDataUrl = largestCanvas.toDataURL('image/png')
+      const canvasBase64 = dataUrlToBase64(canvasDataUrl)
+      if (isCaptureValid(canvasBase64, minLen)) {
+        const blank = await isLikelyBlankDataUrl(canvasDataUrl)
+        if (!blank) return canvasBase64
+      }
     } catch {
       // Canvas may be tainted by cross-origin texture, fallback to html2canvas
     }
@@ -80,9 +144,14 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
     scrollY: win.scrollY || 0,
   })
 
-  const base64 = dataUrlToBase64(rendered.toDataURL('image/png'))
+  const renderedDataUrl = rendered.toDataURL('image/png')
+  const base64 = dataUrlToBase64(renderedDataUrl)
   if (!isCaptureValid(base64, minLen)) {
     throw new Error('无法生成有效截图')
+  }
+  const blank = await isLikelyBlankDataUrl(renderedDataUrl)
+  if (blank) {
+    throw new Error('截图疑似空白图像')
   }
   return base64
 }
