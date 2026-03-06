@@ -69,6 +69,7 @@ function injectToken(code: string): string {
   if (!token) return code
   // 替换占位符
   code = code.replace(/\$\{TIANDITU_TOKEN\}/g, token)
+  code = code.replace(/\b(?:your_tianditu_token_here|YOUR_TIANDITU_TOKEN|YOUR_TIANDITU_API_KEY|your_tianditu_api_key)\b/g, token)
   // 替换 LLM 硬编码的任意 tk 值（CDN URL 中）
   code = code.replace(/(api\.tianditu\.gov\.cn\/api\/v5\/js\?tk=)[a-f0-9]{32}/g, `$1${token}`)
   // 兼容修复：部分模型会反复生成 style: 'default'，在当前天地图 v5.0 运行环境下可能触发底图 404（default）
