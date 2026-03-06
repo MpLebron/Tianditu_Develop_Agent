@@ -3,6 +3,7 @@ import { shareApi } from '../../services/shareApi'
 import { useChatStore } from '../../stores/useChatStore'
 import type { Message } from '../../types/chat'
 import type { ShareCreateResult, ShareSuggestResult, ShareVisibility } from '../../types/share'
+import { captureMapPreviewPngBase64 } from '../../utils/mapPreviewCapture'
 
 interface ShareModalProps {
   open: boolean
@@ -101,11 +102,19 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
     setError(null)
     setCopyHint(null)
     try {
+      let thumbnailBase64: string | undefined
+      try {
+        // Prefer browser-side capture to avoid server-side headless WebGL blank screenshots.
+        thumbnailBase64 = await captureMapPreviewPngBase64(8000)
+      } catch {
+        thumbnailBase64 = undefined
+      }
       const created = await shareApi.create({
         code,
         title,
         description,
         visibility,
+        thumbnailBase64,
       })
       setResult(created)
     } catch (err: any) {

@@ -1,4 +1,4 @@
-import { mkdir } from 'fs/promises'
+import { mkdir, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { dirname } from 'path'
 import { chromium } from 'playwright-core'
@@ -27,6 +27,8 @@ const VIEWPORT_WIDTH = 1920
 const VIEWPORT_HEIGHT = 1080
 const THUMB_WIDTH = 1200
 const THUMB_HEIGHT = 630
+const MIN_VALID_PNG_BYTES = 9000
+const MAX_CAPTURE_RETRIES = 3
 
 function pickChromiumExecutablePath(configPath?: string): string | undefined {
   const explicit = String(configPath || '').trim()
@@ -119,10 +121,7 @@ export class ShareThumbnailRenderer {
       }
 
       const view = page.viewportSize() || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT }
-      const screenshotOptions: Parameters<typeof page.screenshot>[0] = {
-        path: input.outputPath,
-        type: 'png',
-      }
+      const screenshotOptions: Parameters<typeof page.screenshot>[0] = { type: 'png' }
 
       if (mapBox) {
         const mapX = Math.max(0, Math.floor(mapBox.x))
@@ -153,9 +152,37 @@ export class ShareThumbnailRenderer {
         }
       }
 
-      await page.screenshot({
-        ...screenshotOptions,
-      })
+      let screenshotBuffer: Buffer | null = null
+      let lastByteLength = 0
+
+      for (let attempt = 0; attempt <= MAX_CAPTURE_RETRIES; attempt += 1) {
+        const buffer = await page.screenshot({
+          ...screenshotOptions,
+        }) as Buffer
+        lastByteLength = buffer.byteLength
+
+        if (lastByteLength >= MIN_VALID_PNG_BYTES) {
+          screenshotBuffer = buffer
+          break
+        }
+
+        if (attempt < MAX_CAPTURE_RETRIES) {
+          // Retry when screenshot looks like a blank frame (very small PNG payload).
+          await page.waitForResponse((res) => /tianditu\.gov\.cn/i.test(res.url()) && res.ok(), {
+            timeout: 2500,
+          }).catch(() => undefined)
+          await page.waitForTimeout(1200 + attempt * 1000)
+        }
+      }
+
+      if (!screenshotBuffer) {
+        await context.close()
+        await browser.close()
+        browser = null
+        return { ok: false, reason: `blank thumbnail screenshot (bytes=${lastByteLength})` }
+      }
+
+      await writeFile(input.outputPath, screenshotBuffer)
 
       await context.close()
       await browser.close()
