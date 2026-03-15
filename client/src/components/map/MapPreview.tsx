@@ -161,11 +161,14 @@ export function MapPreview() {
   const [showError, setShowError] = useState(true)
   const fixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const thumbnailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualInFlightRef = useRef(false)
+  const thumbnailInFlightRef = useRef(false)
   const defaultLoaded = useRef(false)
   const MAX_FIX_RETRIES = 2
   const MAX_VISUAL_FIX_RETRIES = 2
   const VISUAL_STABLE_DELAY_MS = 1200
+  const THUMBNAIL_CACHE_DELAY_MS = 700
   const renderCode = previewCode || currentCode
   const previewing = Boolean(previewCode && codeStreaming)
 
@@ -249,6 +252,42 @@ export function MapPreview() {
     }
   }, [execError, fixing, fixRetryCount, previewing])
 
+  // 渲染稳定后先在前端后台缓存一份缩略图，分享时直接复用，不再点击后临时抓图
+  useEffect(() => {
+    if (thumbnailTimerRef.current) {
+      clearTimeout(thumbnailTimerRef.current)
+      thumbnailTimerRef.current = null
+    }
+
+    if (previewing) return
+    if (!currentCode || executing || fixing || execError) return
+    if (useMapStore.getState().shareThumbnailBase64) return
+
+    thumbnailTimerRef.current = setTimeout(async () => {
+      const state = useMapStore.getState()
+      if (state.previewCode && state.codeStreaming) return
+      if (!state.currentCode || state.executing || state.fixing || state.execError) return
+      if (state.shareThumbnailBase64 || thumbnailInFlightRef.current) return
+
+      thumbnailInFlightRef.current = true
+      try {
+        const captured = await captureIframeScreenshot(iframeRef.current)
+        useMapStore.getState().setShareThumbnailBase64(captured.imageBase64)
+      } catch (err: any) {
+        console.warn('[MapPreview] 分享缩略图后台缓存失败，本次分享将退回 SVG 占位图:', err?.message || err)
+      } finally {
+        thumbnailInFlightRef.current = false
+      }
+    }, THUMBNAIL_CACHE_DELAY_MS)
+
+    return () => {
+      if (thumbnailTimerRef.current) {
+        clearTimeout(thumbnailTimerRef.current)
+        thumbnailTimerRef.current = null
+      }
+    }
+  }, [currentCode, execError, executing, fixing, iframeRef, previewing])
+
   // 渲染稳定后自动触发视觉巡检
   useEffect(() => {
     if (visualTimerRef.current) {
@@ -290,6 +329,7 @@ export function MapPreview() {
         try {
           const captured = await captureIframeScreenshot(iframeRef.current)
           imageBase64 = captured.imageBase64
+          useMapStore.getState().setShareThumbnailBase64(captured.imageBase64)
           captureMeta = {
             mode: captured.mode,
             canvasCount: captured.canvasCount,
@@ -298,6 +338,7 @@ export function MapPreview() {
             canvasTainted: captured.canvasTainted,
           }
         } catch (captureErr: any) {
+          useMapStore.getState().setShareThumbnailBase64(null)
           useChatStore.getState().addAssistantMessage([
             '视觉巡检结果：不可用',
             `诊断：前端截图采样失败（${captureErr?.message || '未知原因'}）。`,

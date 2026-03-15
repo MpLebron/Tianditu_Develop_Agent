@@ -2,21 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { shareApi } from '../services/shareApi'
 import type { ShareItem, ShareVisibility } from '../types/share'
+import { copyText } from '../utils/copyText'
 
 type ShareDetail = ShareItem & { shareUrl: string }
 
 function formatTime(ts?: number) {
   if (!ts) return '-'
   return new Date(ts).toLocaleString('zh-CN', { hour12: false })
-}
-
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    return false
-  }
 }
 
 export function ShareViewerPage() {
@@ -81,8 +73,15 @@ export function ShareViewerPage() {
   }, [item])
 
   const withCopyHint = async (text: string, okMsg: string, failMsg: string) => {
-    const ok = await copyText(text)
-    setCopyHint(ok ? okMsg : failMsg)
+    const result = await copyText(text, {
+      manualPromptTitle: '浏览器限制了自动复制，请手动复制以下内容：',
+    })
+    const hint = result === 'copied'
+      ? okMsg
+      : result === 'manual'
+        ? '已弹出手动复制窗口，请直接复制'
+        : failMsg
+    setCopyHint(hint)
     setTimeout(() => setCopyHint(null), 2200)
   }
 

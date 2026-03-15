@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'crypto'
 import { access, copyFile, mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { basename, extname, resolve } from 'path'
-import { ShareThumbnailRenderer } from './ShareThumbnailRenderer.js'
+import { isLikelyBlankThumbnailBuffer } from './ShareThumbnailRenderer.js'
 
 export type ShareVisibility = 'unlisted' | 'public'
 export type ShareStatus = 'active' | 'removed'
@@ -180,7 +180,6 @@ export class ShareStore {
   private readonly snapshotsDir: string
   private readonly indexPath: string
   private readonly tiandituToken?: string
-  private readonly thumbnailRenderer: ShareThumbnailRenderer
 
   private ready = false
   private initPromise: Promise<void> | null = null
@@ -193,14 +192,6 @@ export class ShareStore {
     this.snapshotsDir = resolve(this.rootDir, SNAPSHOT_DIR_NAME)
     this.indexPath = resolve(this.rootDir, INDEX_FILE_NAME)
     this.tiandituToken = opts.tiandituToken
-    this.thumbnailRenderer = new ShareThumbnailRenderer({
-      enabled: opts.thumbnail?.enabled !== false,
-      baseUrl: opts.thumbnail?.baseUrl || 'http://127.0.0.1:3000',
-      chromiumPath: opts.thumbnail?.chromiumPath || '',
-      timeoutMs: opts.thumbnail?.timeoutMs || 30000,
-      waitAfterLoadMs: opts.thumbnail?.waitAfterLoadMs || 1800,
-      maxConcurrentRenders: opts.thumbnail?.maxConcurrentRenders || 2,
-    })
   }
 
   async init() {
@@ -249,6 +240,14 @@ export class ShareStore {
     const task = this.opQueue.then(fn, fn)
     this.opQueue = task.then(() => undefined, () => undefined)
     return task
+  }
+
+  private async writeSvgThumbnail(slug: string, title: string, visibility: ShareVisibility, createdAt: number): Promise<string> {
+    const thumbnailRelativePath = `${slug}/thumbnail.svg`
+    const thumbnailPath = resolve(this.snapshotsDir, thumbnailRelativePath)
+    const thumbnailSvg = buildThumbnailSvg(title, visibility, createdAt)
+    await writeFile(thumbnailPath, thumbnailSvg, 'utf-8')
+    return thumbnailRelativePath
   }
 
   private normalizeHtml(rawHtml: string): string {
@@ -372,34 +371,25 @@ export class ShareStore {
       const htmlPath = resolve(this.snapshotsDir, htmlRelativePath)
       await writeFile(htmlPath, rewritten.html, 'utf-8')
 
-      let thumbnailRelativePath = `${slug}/thumbnail.png`
-      let thumbnailPath = resolve(this.snapshotsDir, thumbnailRelativePath)
-      let usedUploadedThumbnail = false
+      const pngRelativePath = `${slug}/thumbnail.png`
+      const pngPath = resolve(this.snapshotsDir, pngRelativePath)
+      let thumbnailRelativePath = ''
+
       if (uploadedThumbnail) {
-        try {
-          await writeFile(thumbnailPath, uploadedThumbnail)
-          usedUploadedThumbnail = true
-        } catch (err: any) {
-          console.warn(`[ShareStore] 前端缩略图写入失败，改用后端渲染 (${slug}): ${err?.message || 'unknown reason'}`)
+        if (isLikelyBlankThumbnailBuffer(uploadedThumbnail)) {
+          console.warn(`[ShareStore] 前端缩略图疑似空白，改用 SVG 缩略图 (${slug})`)
+        } else {
+          try {
+            await writeFile(pngPath, uploadedThumbnail)
+            thumbnailRelativePath = pngRelativePath
+          } catch (err: any) {
+            console.warn(`[ShareStore] 前端缩略图写入失败，改用 SVG 缩略图 (${slug}): ${err?.message || 'unknown reason'}`)
+          }
         }
       }
 
-      let rendered: { ok: boolean; reason?: string } = { ok: true }
-      if (!usedUploadedThumbnail) {
-        rendered = await this.thumbnailRenderer.render({
-          slug,
-          title: safeTitle,
-          visibility,
-          outputPath: thumbnailPath,
-        })
-      }
-
-      if (!usedUploadedThumbnail && !rendered.ok) {
-        thumbnailRelativePath = `${slug}/thumbnail.svg`
-        thumbnailPath = resolve(this.snapshotsDir, thumbnailRelativePath)
-        const thumbnailSvg = buildThumbnailSvg(safeTitle, visibility, createdAt)
-        await writeFile(thumbnailPath, thumbnailSvg, 'utf-8')
-        console.warn(`[ShareStore] 缩略图渲染失败，已回退 SVG (${slug}): ${rendered.reason || 'unknown reason'}`)
+      if (!thumbnailRelativePath) {
+        thumbnailRelativePath = await this.writeSvgThumbnail(slug, safeTitle, visibility, createdAt)
       }
 
       const htmlStat = await stat(htmlPath)

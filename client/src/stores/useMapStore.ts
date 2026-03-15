@@ -16,6 +16,7 @@ interface MapStore {
   visualChecking: boolean
   visualFixRetryCount: number
   lastVisualCheckedCodeHash: string | null
+  shareThumbnailBase64: string | null
   setCode: (code: string | null) => void
   /** 开始代码流式生成 */
   startCodeStream: () => void
@@ -31,6 +32,7 @@ interface MapStore {
   setExecuting: (v: boolean) => void
   setVisualChecking: (v: boolean) => void
   markVisualChecked: (hash: string | null) => void
+  setShareThumbnailBase64: (base64: string | null) => void
   autoFix: (userInput?: string) => Promise<void>
 }
 
@@ -49,6 +51,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
   visualChecking: false,
   visualFixRetryCount: 0,
   lastVisualCheckedCodeHash: null,
+  shareThumbnailBase64: null,
 
   setCode: (code) => set({
     currentCode: code,
@@ -61,6 +64,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
     visualChecking: false,
     visualFixRetryCount: 0,
     lastVisualCheckedCodeHash: null,
+    shareThumbnailBase64: null,
   }),
 
   startCodeStream: () => set({
@@ -69,6 +73,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
     codeStreaming: true,
     execError: null,
     visualChecking: false,
+    shareThumbnailBase64: null,
   }),
 
   resetCodeStream: () => set((s) => ({
@@ -84,6 +89,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
   commitPreviewCode: (code) => set({
     previewCode: code,
     execError: null,
+    shareThumbnailBase64: null,
   }),
 
   finishCodeStream: (finalCode) => set({
@@ -97,12 +103,14 @@ export const useMapStore = create<MapStore>((set, get) => ({
     visualChecking: false,
     visualFixRetryCount: 0,
     lastVisualCheckedCodeHash: null,
+    shareThumbnailBase64: null,
   }),
 
   setExecError: (error) => set({ execError: error }),
   setExecuting: (v) => set({ executing: v }),
   setVisualChecking: (v) => set({ visualChecking: v }),
   markVisualChecked: (hash) => set({ lastVisualCheckedCodeHash: hash }),
+  setShareThumbnailBase64: (base64) => set({ shareThumbnailBase64: base64 }),
 
   autoFix: async (userInput?: string) => {
     const { currentCode, execError, fixRetryCount, fixing } = get()
@@ -137,6 +145,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
           fixing: false,
           fixingSource: null,
           fixRetryCount: fixRetryCount + 1,
+          shareThumbnailBase64: null,
         })
       } else {
         console.log('[AutoFix] 修复失败:', json.data?.explanation)

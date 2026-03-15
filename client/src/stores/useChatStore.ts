@@ -579,6 +579,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               execError: null,
               fixing: false,
               fixingSource: null,
+              shareThumbnailBase64: null,
               ...(source === 'visual'
                 ? { lastVisualCheckedCodeHash: null }
                 : { visualFixRetryCount: 0, lastVisualCheckedCodeHash: null }),
@@ -627,6 +628,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             execError: null,
             fixing: false,
             fixingSource: null,
+            shareThumbnailBase64: null,
             ...(source === 'visual'
               ? { lastVisualCheckedCodeHash: null }
               : { visualFixRetryCount: 0, lastVisualCheckedCodeHash: null }),

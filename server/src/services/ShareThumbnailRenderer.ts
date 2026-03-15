@@ -31,12 +31,16 @@ const VIEWPORT_HEIGHT = 1080
 const THUMB_WIDTH = 1200
 const THUMB_HEIGHT = 630
 const MIN_VALID_PNG_BYTES = 9000
-const MAX_CAPTURE_RETRIES = 3
+const MAX_CAPTURE_RETRIES = 1
 const MIN_SAMPLE_VISIBLE_PIXELS = 40
 const BLANK_SPREAD_THRESHOLD = 18
 const BLANK_BUCKET_THRESHOLD = 3
+const INITIAL_SETTLE_WAIT_MS = 350
+const MAP_ATTACH_WAIT_MS = 1800
+const NETWORK_SETTLE_WAIT_MS = 2500
+const RETRY_WAIT_BASE_MS = 500
 
-function isLikelyBlankScreenshot(buffer: Buffer): boolean {
+export function isLikelyBlankThumbnailBuffer(buffer: Buffer): boolean {
   try {
     const png = PNG.sync.read(buffer)
     const width = Math.max(1, png.width || 1)
@@ -121,8 +125,12 @@ export class ShareThumbnailRenderer {
 
       const executablePath = pickChromiumExecutablePath(this.opts.chromiumPath)
       const pageUrl = `${origin}/share-assets/${input.slug}/index.html`
-      const timeout = Number.isFinite(this.opts.timeoutMs) ? Math.max(this.opts.timeoutMs, 8000) : 30000
-      const waitAfterLoadMs = Number.isFinite(this.opts.waitAfterLoadMs) ? Math.max(this.opts.waitAfterLoadMs, 500) : 1800
+      const timeout = Number.isFinite(this.opts.timeoutMs)
+        ? Math.min(Math.max(this.opts.timeoutMs, 4000), 15000)
+        : 12000
+      const waitAfterLoadMs = Number.isFinite(this.opts.waitAfterLoadMs)
+        ? Math.min(Math.max(this.opts.waitAfterLoadMs, 150), 1500)
+        : 600
 
       await mkdir(dirname(input.outputPath), { recursive: true })
 
@@ -153,14 +161,17 @@ export class ShareThumbnailRenderer {
         page.setDefaultNavigationTimeout(timeout)
 
         await page.goto(pageUrl, { waitUntil: 'domcontentloaded' })
-        await page.waitForTimeout(1000)
+        await page.waitForTimeout(Math.min(INITIAL_SETTLE_WAIT_MS, waitAfterLoadMs))
 
-        await page.waitForResponse((res) => {
-          const u = res.url()
-          return /tianditu\.gov\.cn/i.test(u) && res.ok()
-        }, { timeout: Math.min(timeout, 12000) }).catch(() => undefined)
-
-        await page.waitForLoadState('networkidle', { timeout: Math.min(timeout, 15000) }).catch(() => undefined)
+        await Promise.allSettled([
+          page.locator('canvas, #map, .map, [id*="map"]').first().waitFor({
+            state: 'attached',
+            timeout: Math.min(timeout, MAP_ATTACH_WAIT_MS),
+          }),
+          page.waitForLoadState('networkidle', {
+            timeout: Math.min(timeout, NETWORK_SETTLE_WAIT_MS),
+          }),
+        ])
         await page.waitForTimeout(waitAfterLoadMs)
 
         let mapBox: { x: number; y: number; width: number; height: number } | null = null
@@ -217,7 +228,7 @@ export class ShareThumbnailRenderer {
           lastByteLength = buffer.byteLength
 
           if (lastByteLength >= MIN_VALID_PNG_BYTES) {
-            const blank = isLikelyBlankScreenshot(buffer)
+            const blank = isLikelyBlankThumbnailBuffer(buffer)
             if (!blank) {
               screenshotBuffer = buffer
               break
@@ -226,10 +237,7 @@ export class ShareThumbnailRenderer {
           }
 
           if (attempt < MAX_CAPTURE_RETRIES) {
-            await page.waitForResponse((res) => /tianditu\.gov\.cn/i.test(res.url()) && res.ok(), {
-              timeout: 2500,
-            }).catch(() => undefined)
-            await page.waitForTimeout(1200 + attempt * 1000)
+            await page.waitForTimeout(RETRY_WAIT_BASE_MS + attempt * 450)
           }
         }
 
