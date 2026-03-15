@@ -4,6 +4,41 @@ import { useMapStore } from '../stores/useMapStore'
 function buildCaptureScriptTag() {
   return `<script>
     (function() {
+      function patchCanvasContexts() {
+        function patch(proto) {
+          if (!proto || typeof proto.getContext !== 'function' || proto.__codexCapturePatched) return;
+          var originalGetContext = proto.getContext;
+          Object.defineProperty(proto, '__codexCapturePatched', {
+            value: true,
+            configurable: false,
+            enumerable: false,
+            writable: false
+          });
+
+          proto.getContext = function(type, attrs) {
+            var kind = String(type || '').toLowerCase();
+            if (kind === 'webgl' || kind === 'experimental-webgl' || kind === 'webgl2') {
+              var nextAttrs = {};
+              if (attrs && typeof attrs === 'object') {
+                for (var key in attrs) nextAttrs[key] = attrs[key];
+              }
+              nextAttrs.preserveDrawingBuffer = true;
+              try {
+                return originalGetContext.call(this, type, nextAttrs);
+              } catch (_) {}
+            }
+            return originalGetContext.call(this, type, attrs);
+          };
+        }
+
+        try { patch(window.HTMLCanvasElement && HTMLCanvasElement.prototype); } catch (_) {}
+        try {
+          if (typeof OffscreenCanvas !== 'undefined') patch(OffscreenCanvas.prototype);
+        } catch (_) {}
+      }
+
+      patchCanvasContexts();
+
       var ignorePatterns = [
         '_mouseRotate', '_mouseZoom', '_touchRotate', '_touchZoom',
         'Script error', 'ResizeObserver loop',
@@ -304,11 +339,14 @@ function buildCaptureScriptTag() {
 
 function injectCaptureScript(code: string) {
   const captureScript = buildCaptureScriptTag()
-  if (/<\/head>/i.test(code)) {
-    return code.replace(/<\/head>/i, (m) => `${captureScript}${m}`)
+  if (/<head[^>]*>/i.test(code)) {
+    return code.replace(/<head[^>]*>/i, (m) => `${m}${captureScript}`)
   }
-  if (/<\/body>/i.test(code)) {
-    return code.replace(/<\/body>/i, (m) => `${captureScript}${m}`)
+  if (/<html[^>]*>/i.test(code)) {
+    return code.replace(/<html[^>]*>/i, (m) => `${m}<head>${captureScript}</head>`)
+  }
+  if (/<!doctype html[^>]*>/i.test(code)) {
+    return code.replace(/<!doctype html[^>]*>/i, (m) => `${m}<head>${captureScript}</head>`)
   }
   return `${captureScript}${code}`
 }

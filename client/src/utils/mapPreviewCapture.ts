@@ -1,5 +1,3 @@
-import html2canvas from 'html2canvas'
-
 const DEFAULT_MIN_BASE64_LEN = 800
 
 export interface MapPreviewCaptureResult {
@@ -40,6 +38,41 @@ function pickLargestCanvas(doc: Document): { canvas: HTMLCanvasElement | null; c
   return { canvas: candidate, count: canvases.length }
 }
 
+function getRect(el: Element | null): DOMRect | null {
+  if (!el || typeof (el as HTMLElement).getBoundingClientRect !== 'function') return null
+  const rect = (el as HTMLElement).getBoundingClientRect()
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null
+  return rect
+}
+
+function rectsIntersect(a: DOMRect, b: DOMRect): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+}
+
+function pickCaptureRegion(doc: Document, fallbackCanvas: HTMLCanvasElement | null): DOMRect | null {
+  const hostSelectors = ['#map', '.map', '[id*="map"]', '[class*="map"]']
+  for (const selector of hostSelectors) {
+    const rect = getRect(doc.querySelector(selector))
+    if (rect && rect.width >= 180 && rect.height >= 120) return rect
+  }
+  return getRect(fallbackCanvas)
+}
+
+function fillCaptureBackground(ctx: CanvasRenderingContext2D, target: HTMLElement | null, width: number, height: number) {
+  let color = '#ffffff'
+  try {
+    const view = target?.ownerDocument?.defaultView || window
+    const computed = target ? view.getComputedStyle(target).backgroundColor : ''
+    if (computed && computed !== 'rgba(0, 0, 0, 0)' && computed !== 'transparent') {
+      color = computed
+    }
+  } catch {
+    // ignore
+  }
+  ctx.fillStyle = color
+  ctx.fillRect(0, 0, width, height)
+}
+
 function findPreviewIframe(): HTMLIFrameElement | null {
   const exact = document.querySelector('iframe[title="地图预览"]')
   if (exact instanceof HTMLIFrameElement) return exact
@@ -63,50 +96,65 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
   await new Promise((resolve) => setTimeout(resolve, 220))
 
   const canvasMeta = pickLargestCanvas(doc)
+  const captureRegion = pickCaptureRegion(doc, canvasMeta.canvas)
+  if (!captureRegion) throw new Error('未找到可截图的地图渲染区域')
+
   let canvasReadable = false
   let canvasTainted = false
-  if (canvasMeta.canvas) {
+  const output = document.createElement('canvas')
+  output.width = Math.max(1, Math.round(captureRegion.width))
+  output.height = Math.max(1, Math.round(captureRegion.height))
+  const ctx = output.getContext('2d')
+  if (!ctx) throw new Error('无法创建截图画布')
+
+  const mapHost = doc.querySelector('#map, .map, [id*="map"], [class*="map"]') as HTMLElement | null
+  fillCaptureBackground(ctx, mapHost, output.width, output.height)
+
+  let drawnCount = 0
+  const canvases = Array.from(doc.querySelectorAll('canvas'))
+  for (const canvas of canvases) {
+    const rect = getRect(canvas)
+    if (!rect || !rectsIntersect(rect, captureRegion)) continue
+
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1
+    const left = Math.max(rect.left, captureRegion.left)
+    const top = Math.max(rect.top, captureRegion.top)
+    const right = Math.min(rect.right, captureRegion.right)
+    const bottom = Math.min(rect.bottom, captureRegion.bottom)
+    const width = right - left
+    const height = bottom - top
+    if (width <= 0 || height <= 0) continue
+
     try {
-      const canvasBase64 = dataUrlToBase64(canvasMeta.canvas.toDataURL('image/png'))
-      if (isCaptureValid(canvasBase64, minLen)) {
-        canvasReadable = true
-        return {
-          base64: canvasBase64,
-          mode: 'canvas',
-          canvasCount: canvasMeta.count,
-          canvasReadable: true,
-          canvasTainted: false,
-        }
-      }
+      ctx.drawImage(
+        canvas,
+        (left - rect.left) * scaleX,
+        (top - rect.top) * scaleY,
+        width * scaleX,
+        height * scaleY,
+        left - captureRegion.left,
+        top - captureRegion.top,
+        width,
+        height,
+      )
+      drawnCount += 1
+      canvasReadable = true
     } catch {
-      // Canvas may be tainted by cross-origin texture, fallback to html2canvas
       canvasTainted = true
     }
   }
 
-  const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
-  if (!rootEl) throw new Error('地图页面根节点不存在')
-
-  const rendered = await html2canvas(rootEl, {
-    useCORS: true,
-    allowTaint: true,
-    logging: false,
-    backgroundColor: '#ffffff',
-    width: Math.max(320, rootEl.clientWidth || win.innerWidth || 0),
-    height: Math.max(240, rootEl.clientHeight || win.innerHeight || 0),
-    windowWidth: Math.max(320, win.innerWidth || 0),
-    windowHeight: Math.max(240, win.innerHeight || 0),
-    scrollX: win.scrollX || 0,
-    scrollY: win.scrollY || 0,
-  })
-
-  const base64 = dataUrlToBase64(rendered.toDataURL('image/png'))
-  if (!isCaptureValid(base64, minLen)) {
-    throw new Error('无法生成有效截图')
+  if (!drawnCount) {
+    throw new Error('未能从地图渲染画布导出有效截图')
   }
+
+  const base64 = dataUrlToBase64(output.toDataURL('image/png'))
+  if (!isCaptureValid(base64, minLen)) throw new Error('无法生成有效截图')
+
   return {
     base64,
-    mode: 'dom',
+    mode: 'canvas',
     canvasCount: canvasMeta.count,
     canvasReadable,
     canvasTainted,
