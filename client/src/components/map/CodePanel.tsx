@@ -5,7 +5,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { extractFirstCompleteHtmlDocument } from '../../utils/extractFirstCompleteHtmlDocument'
 
 export function CodePanel() {
-  const { currentCode, previewCode, streamingCode, codeStreaming } = useMapStore()
+  const { currentCode, previewCode, streamingCode, codeStreaming, fixing, fixingSource } = useMapStore()
   const [copied, setCopied] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -70,6 +70,11 @@ export function CodePanel() {
   }
 
   const lineCount = (displayCode || '').split('\n').length
+  const streamStatusLabel = resolvedPreviewCode
+    ? (fixing ? '已预渲染修复方案，收尾中...' : '已预渲染，收尾中...')
+    : (fixing
+      ? `正在${fixingSource === 'visual' ? '视觉回灌补修' : '自动修复'}...`
+      : '生成中...')
 
   return (
     <div className="flex flex-col h-full bg-[#1e1e2e] text-gray-100 overflow-hidden dark-scrollbar">
@@ -86,7 +91,7 @@ export function CodePanel() {
           {codeStreaming ? (
             <span className="flex items-center gap-1.5 text-[11px] text-blue-400">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              {resolvedPreviewCode ? '已预渲染，收尾中...' : '生成中...'}
+              {streamStatusLabel}
             </span>
           ) : (
             <span className="text-[11px] text-gray-500">{lineCount} 行</span>

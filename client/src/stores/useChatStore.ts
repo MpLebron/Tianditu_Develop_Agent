@@ -390,9 +390,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const assistantId = createId()
     let assistantCreated = false
     let receivedCode = false
+    let previewCommitted = false
     let explanationStarted = false
     let textContent = ''
     let streamedFixCode = ''
+    const extractRenderableHtml = (code: string | null | undefined) => {
+      const html = extractFirstCompleteHtmlDocument(code)
+      return html ? injectTiandituTokenPlaceholders(html) : ''
+    }
 
     const ensureAssistantMessage = () => {
       if (assistantCreated) return
@@ -545,18 +550,38 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
 
           if (chunk.type === 'code_start') {
+            if (receivedCode) return
+            useMapStore.getState().startCodeStream()
+            useWorkspaceStore.getState().setShowCode(true)
             return
           }
 
           if (chunk.type === 'code_reset') {
             if (receivedCode) return
             streamedFixCode = ''
+            const nextMapState = useMapStore.getState()
+            if (previewCommitted || nextMapState.previewCode) {
+              return
+            }
+            useMapStore.getState().resetCodeStream()
+            useWorkspaceStore.getState().setShowCode(true)
             return
           }
 
           if (chunk.type === 'code_delta') {
             if (receivedCode) return
             streamedFixCode += String(chunk.content || '')
+            const nextMapState = useMapStore.getState()
+            if (previewCommitted || nextMapState.previewCode) {
+              return
+            }
+            useMapStore.getState().appendCodeDelta(String(chunk.content || ''))
+            const updatedStreamingCode = useMapStore.getState().streamingCode || ''
+            const previewCode = extractRenderableHtml(updatedStreamingCode)
+            if (previewCode) {
+              useMapStore.getState().commitPreviewCode(previewCode)
+              previewCommitted = true
+            }
             return
           }
 
@@ -565,7 +590,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ensureAssistantMessage()
             receivedCode = true
             const code = String(chunk.content || '')
-            const finalCode = injectTiandituTokenPlaceholders(extractFirstCompleteHtmlDocument(code) || code)
+            const nextMapState = useMapStore.getState()
+            const extractedFinalCode = extractRenderableHtml(code)
+            const finalCode = nextMapState.previewCode
+              || extractedFinalCode
+              || injectTiandituTokenPlaceholders(extractFirstCompleteHtmlDocument(code) || code)
             set((s) => ({
               messages: s.messages.map((m) =>
                 m.id === assistantId ? { ...m, code: finalCode, streaming: false } : m,
@@ -574,6 +603,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             // 修复成功后直接替换代码并清空 execError；计数递增防止连续无限重试
             useMapStore.setState({
               currentCode: finalCode,
+              previewCode: null,
               streamingCode: null,
               codeStreaming: false,
               execError: null,
@@ -610,9 +640,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (buffer.trim()) processLine(buffer)
 
       if (!receivedCode) {
-        const recoveredFixCode = injectTiandituTokenPlaceholders(
-          extractFirstCompleteHtmlDocument(streamedFixCode) || '',
-        )
+        const latestMapState = useMapStore.getState()
+        const recoveredFixCode = latestMapState.previewCode
+          || extractRenderableHtml(latestMapState.streamingCode)
+          || injectTiandituTokenPlaceholders(extractFirstCompleteHtmlDocument(streamedFixCode) || '')
         if (recoveredFixCode) {
           receivedCode = true
           set((s) => ({
@@ -641,6 +672,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           appendText('\n\n检测到修复输出在代码中途结束，本轮未自动应用截断代码。')
         }
         useMapStore.setState({
+          previewCode: null,
           fixing: false,
           fixingSource: null,
           codeStreaming: false,
@@ -657,6 +689,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       ensureAssistantMessage()
       appendText(`\n\n修复请求失败：${err.message || '未知错误'}`)
       useMapStore.setState({
+        previewCode: null,
         fixing: false,
         fixingSource: null,
         codeStreaming: false,
