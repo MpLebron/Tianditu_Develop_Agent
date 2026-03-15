@@ -5,6 +5,7 @@ import { useCodeRunner } from '../../hooks/useCodeRunner'
 import { visualQaApi } from '../../services/visualQaApi'
 import html2canvas from 'html2canvas'
 import { DEFAULT_TIANDITU_TOKEN } from '../../constants/tianditu'
+import { isLikelyBlankThumbnailBase64 } from '../../utils/isLikelyBlankThumbnail'
 
 /** 默认地图 HTML — 展示中国全景，indigo 主题风格 */
 const DEFAULT_MAP_HTML = `<!DOCTYPE html>
@@ -169,6 +170,8 @@ export function MapPreview() {
   const MAX_VISUAL_FIX_RETRIES = 2
   const VISUAL_STABLE_DELAY_MS = 1200
   const THUMBNAIL_CACHE_DELAY_MS = 700
+  const MAX_THUMBNAIL_CAPTURE_ATTEMPTS = 4
+  const THUMBNAIL_RETRY_WAIT_MS = 900
   const renderCode = previewCode || currentCode
   const previewing = Boolean(previewCode && codeStreaming)
 
@@ -271,8 +274,23 @@ export function MapPreview() {
 
       thumbnailInFlightRef.current = true
       try {
-        const captured = await captureIframeScreenshot(iframeRef.current)
-        useMapStore.getState().setShareThumbnailBase64(captured.imageBase64)
+        for (let attempt = 0; attempt < MAX_THUMBNAIL_CAPTURE_ATTEMPTS; attempt += 1) {
+          const latestState = useMapStore.getState()
+          if (latestState.previewCode && latestState.codeStreaming) return
+          if (!latestState.currentCode || latestState.executing || latestState.fixing || latestState.execError) return
+
+          const captured = await captureIframeScreenshot(iframeRef.current)
+          const blank = await isLikelyBlankThumbnailBase64(captured.imageBase64)
+          if (!blank) {
+            useMapStore.getState().setShareThumbnailBase64(captured.imageBase64)
+            return
+          }
+
+          if (attempt < MAX_THUMBNAIL_CAPTURE_ATTEMPTS - 1) {
+            await new Promise((resolve) => setTimeout(resolve, THUMBNAIL_RETRY_WAIT_MS))
+          }
+        }
+        console.warn('[MapPreview] 分享缩略图多次采样后仍为空白，本次分享将退回 SVG 占位图')
       } catch (err: any) {
         console.warn('[MapPreview] 分享缩略图后台缓存失败，本次分享将退回 SVG 占位图:', err?.message || err)
       } finally {
