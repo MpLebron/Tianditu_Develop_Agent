@@ -1,0 +1,23 @@
+<svg width="960" height="192" viewBox="0 0 960 192" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .cn {
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      font-size: 108px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      fill: #284FA3;
+      text-anchor: middle;
+    }
+    .en {
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 58px;
+      font-weight: 600;
+      letter-spacing: 0;
+      fill: #284FA3;
+      text-anchor: middle;
+    }
+  </style>
+  <rect x="0" y="0" width="960" height="192" fill="none"/>
+  <text x="480" y="92" class="cn" textLength="952" lengthAdjust="spacingAndGlyphs">天地图开发智能体</text>
+  <text x="480" y="171" class="en" textLength="669" lengthAdjust="spacingAndGlyphs">Tianditu Development Agent</text>
+</svg>

@@ -46,6 +46,20 @@ function getTitle(item: ThoughtChainItem): string {
       return mode === 'fix'
         ? '修复阶段：决定下一步（读文档 / 直接修复）'
         : '生成阶段：决定下一步（读文档 / 开始生成）'
+    case 'domain_selector.selectPackages':
+      return mode === 'fix' ? '修复阶段：选择领域 package' : '生成阶段：选择领域 package'
+    case 'reference_planner.decide':
+      return mode === 'fix' ? '修复阶段：规划 reference 和 contract' : '生成阶段：规划 reference 和 contract'
+    case 'file_intelligence.inspect':
+      return '读取真实数据并生成数据画像'
+    case 'context_assembler.loadPackages':
+      return '装配领域 package 上下文'
+    case 'context_assembler.load':
+      return '装配生成上下文'
+    case 'doc_loader.readReferenceDocs':
+      return `${mode === 'fix' ? '修复阶段' : '生成阶段'}：读取 reference 文档`
+    case 'error_analyzer.analyze':
+      return '错误分析：提取证据并判断根因'
     case 'doc_loader.readSkillDoc':
       return `${mode === 'fix' ? '修复阶段' : mode === 'generate' ? '生成阶段' : 'Agent'}：读取 skill 文档${skillName ? `（${skillName}）` : ''}`
     case 'code_generator.fixError':
@@ -54,6 +68,8 @@ function getTitle(item: ThoughtChainItem): string {
       return '调用代码生成器'
     case 'code_guard.validate':
       return '执行代码守卫校验'
+    case 'code_verifier.validate':
+      return '执行代码 verifier 校验'
     case 'skill_planner.selectSkills':
       return mode === 'fix' ? '修复阶段兜底：选择技能' : '生成阶段兜底：选择技能'
     case 'skill_matcher.matchByKeywords':
@@ -81,6 +97,71 @@ function getSummary(item: ThoughtChainItem): string | null {
     const summary = typeof result?.decisionSummary === 'string' ? result.decisionSummary : ''
     const reason = typeof result?.reason === 'string' ? result.reason : ''
     return [summary, reason ? `原因：${reason}` : ''].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'domain_selector.selectPackages') {
+    const selectedPackages = item.selectedPackages || (Array.isArray(result?.packageIds) ? result.packageIds : [])
+    const reason = typeof result?.reason === 'string' ? result.reason : ''
+    const source = item.decisionSource ? `来源：${item.decisionSource}` : ''
+    if (item.status === 'running') return '正在判断本轮应进入哪些领域 package'
+    return [
+      selectedPackages.length ? `选中 package: ${selectedPackages.join(', ')}` : '未选中 package',
+      reason ? `原因：${reason}` : '',
+      source,
+    ].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'reference_planner.decide') {
+    const refs = item.selectedReferences || (Array.isArray(result?.referenceIds) ? result.referenceIds : [])
+    const contracts = item.selectedContracts || (Array.isArray(result?.contractIds) ? result.contractIds : [])
+    const reason = typeof result?.reason === 'string' ? result.reason : ''
+    if (item.status === 'running') return '正在决定还需读取哪些 reference，以及是否直接进入生成/修复'
+    return [
+      result?.action === 'generate' ? '直接进入下一阶段' : (refs.length ? `reference: ${refs.join(', ')}` : '未新增 reference'),
+      contracts.length ? `contracts: ${contracts.join(', ')}` : '',
+      reason ? `原因：${reason}` : '',
+      item.fallbackReason ? `fallback: ${item.fallbackReason}` : '',
+    ].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'context_assembler.loadPackages' || item.toolName === 'context_assembler.load') {
+    if (item.status === 'running') return '正在装配 package / reference / contract 上下文'
+    const packages = item.selectedPackages || (Array.isArray(result?.selectedPackages) ? result.selectedPackages : [])
+    const refs = item.selectedReferences || (Array.isArray(result?.selectedReferences) ? result.selectedReferences : [])
+    const contracts = item.selectedContracts || (Array.isArray(result?.selectedContracts) ? result.selectedContracts : [])
+    return [
+      packages.length ? `packages: ${packages.join(', ')}` : '',
+      refs.length ? `references: ${refs.join(', ')}` : '',
+      contracts.length ? `contracts: ${contracts.join(', ')}` : '',
+    ].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'doc_loader.readReferenceDocs') {
+    if (item.status === 'running') return '正在读取所选 reference 文档'
+    const loaded = Array.isArray(result?.loadedReferences) ? result.loadedReferences : []
+    const docChars = typeof result?.docChars === 'number' ? `${result.docChars} chars` : ''
+    return [loaded.length ? `累计 references: ${loaded.join(', ')}` : '', docChars].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'file_intelligence.inspect') {
+    if (item.status === 'running') return '正在读取真实数据并提取字段画像、几何类型与可视化建议'
+    const featureCount = typeof result?.featureCount === 'number' ? `${result.featureCount} 个要素` : ''
+    const geometryTypes = result?.geometryTypeStats && typeof result.geometryTypeStats === 'object'
+      ? Object.keys(result.geometryTypeStats).join(', ')
+      : ''
+    return [featureCount, geometryTypes ? `几何类型: ${geometryTypes}` : ''].filter(Boolean).join(' | ') || null
+  }
+
+  if (item.toolName === 'error_analyzer.analyze') {
+    if (item.status === 'running') return '正在结合错误证据分析根因'
+    const category = typeof result?.category === 'string' ? result.category : ''
+    const cause = typeof result?.likelyCause === 'string' ? result.likelyCause : ''
+    const packages = item.selectedPackages || (Array.isArray(result?.suggestedPackages) ? result.suggestedPackages : [])
+    return [
+      category ? `类别: ${category}` : '',
+      cause,
+      packages.length ? `建议 package: ${packages.join(', ')}` : '',
+    ].filter(Boolean).join(' | ') || null
   }
 
   if (item.toolName === 'doc_loader.readSkillDoc') {
@@ -143,6 +224,16 @@ function getSummary(item: ThoughtChainItem): string | null {
     ].filter(Boolean).join(' | ')
   }
 
+  if (item.toolName === 'code_verifier.validate') {
+    if (item.status === 'running') return '正在执行阻断级 verifier 校验'
+    const issueCount = typeof result?.issueCount === 'number' ? result.issueCount : 0
+    const blocking = result?.blocking === true || item.vetoApplied === true
+    return [
+      issueCount > 0 ? `发现 ${issueCount} 个 verifier 风险点` : '未发现 verifier 风险点',
+      blocking ? '包含阻断级问题' : '无阻断级问题',
+    ].filter(Boolean).join(' | ')
+  }
+
   if (item.toolName === 'skill_matcher.matchByKeywords') {
     if (item.status === 'running') return '关键词兜底匹配中（说明上游 planner 异常）'
     const matched = Array.isArray(result?.matchedSkills) ? result.matchedSkills : []
@@ -181,6 +272,62 @@ function getSummary(item: ThoughtChainItem): string | null {
   return null
 }
 
+function getExplanation(item: ThoughtChainItem): string | null {
+  const result = asRecord(item.result)
+
+  if (!result) return null
+
+  if (item.toolName === 'domain_selector.selectPackages') {
+    const parts = [
+      typeof result.intent === 'string' && result.intent.trim() ? `意图：${result.intent.trim()}` : '',
+      typeof result.reason === 'string' && result.reason.trim() ? `原因：${result.reason.trim()}` : '',
+      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
+    ]
+    return parts.filter(Boolean).join('\n') || null
+  }
+
+  if (item.toolName === 'reference_planner.decide') {
+    const riskFlags = Array.isArray(result.riskFlags)
+      ? result.riskFlags.map(String).map((value) => value.trim()).filter(Boolean)
+      : []
+    const parts = [
+      typeof result.reason === 'string' && result.reason.trim() ? `规划原因：${result.reason.trim()}` : '',
+      typeof result.action === 'string' ? `下一步：${result.action === 'generate' ? '直接进入生成/修复' : '继续补充 reference 文档'}` : '',
+      riskFlags.length ? `风险标记：${riskFlags.join(', ')}` : '',
+      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
+    ]
+    return parts.filter(Boolean).join('\n') || null
+  }
+
+  if (item.toolName === 'error_analyzer.analyze') {
+    const checklist = Array.isArray(result.fixChecklist)
+      ? result.fixChecklist.map(String).map((value) => value.trim()).filter(Boolean).slice(0, 3)
+      : []
+    const parts = [
+      typeof result.likelyCause === 'string' && result.likelyCause.trim() ? `根因判断：${result.likelyCause.trim()}` : '',
+      checklist.length ? `修复清单：${checklist.join('；')}` : '',
+      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
+    ]
+    return parts.filter(Boolean).join('\n') || null
+  }
+
+  if (item.toolName === 'code_verifier.validate' || item.toolName === 'code_guard.validate') {
+    const critique = typeof result.critique === 'string' ? result.critique.trim() : ''
+    return critique ? `Verifier 说明：${critique}` : null
+  }
+
+  if (item.toolName === 'visual_inspector.diagnose') {
+    const parts = [
+      typeof result.summary === 'string' && result.summary.trim() ? `结论：${result.summary.trim()}` : '',
+      typeof result.diagnosis === 'string' && result.diagnosis.trim() ? `观察：${result.diagnosis.trim()}` : '',
+      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
+    ]
+    return parts.filter(Boolean).join('\n') || null
+  }
+
+  return null
+}
+
 function modeBadgeClass(mode: 'fix' | 'generate' | undefined) {
   if (mode === 'fix') return 'bg-amber-50 text-amber-700 border-amber-200/80'
   if (mode === 'generate') return 'bg-slate-50 text-slate-600 border-slate-200/80'
@@ -193,8 +340,8 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
   const runningCount = items.filter((i) => i.status === 'running').length
 
   return (
-    <details open={streaming ? true : undefined} className="mb-2 rounded-xl border border-gray-200/80 bg-gray-50/70 overflow-hidden">
-      <summary className="list-none cursor-pointer select-none px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-gray-50">
+    <details open={streaming ? true : undefined} className="mb-2 rounded-xl border border-gray-200/80 bg-gray-50/70 overflow-hidden soft-panel">
+      <summary className="list-none cursor-pointer select-none px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-gray-50 soft-pop">
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-5 h-5 rounded-md bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -217,13 +364,14 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
         </div>
       </summary>
 
-      <div className="px-2 pb-2 space-y-1.5">
+      <div className="px-2 pb-2 space-y-1.5 animate-fade-in">
         {items.map((item) => {
           const argsText = formatValue(item.args)
           const resultText = formatValue(item.result)
           const mode = getMode(item)
           const title = getTitle(item)
           const summary = getSummary(item)
+          const explanation = getExplanation(item)
           const durationMs =
             typeof item.startedAt === 'number' && typeof item.endedAt === 'number'
               ? Math.max(0, item.endedAt - item.startedAt)
@@ -233,14 +381,16 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
             <details
               key={item.toolCallId}
               open={item.status === 'running' ? true : undefined}
-              className="bg-white border border-gray-200/80 rounded-lg overflow-hidden"
+              className="bg-white border border-gray-200/80 rounded-lg overflow-hidden soft-panel"
             >
-              <summary className="list-none cursor-pointer px-2.5 py-2 flex items-center justify-between gap-2 hover:bg-gray-50/60">
-                <div className="min-w-0">
-                  <div className="text-[11.5px] font-medium text-gray-700 truncate">{title}</div>
+              <summary className="list-none cursor-pointer px-2.5 py-2 flex items-center justify-between gap-2 hover:bg-gray-50/60 soft-pop">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11.5px] font-medium text-gray-700 leading-relaxed">{title}</div>
                   <div className="text-[10.5px] text-gray-400 truncate font-mono">{item.toolName}</div>
                   {summary && (
-                    <div className="text-[10.5px] text-gray-500 truncate">{summary}</div>
+                    <div className="text-[10.5px] text-gray-500 leading-relaxed whitespace-pre-wrap break-words mt-0.5">
+                      {summary}
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -258,17 +408,25 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
                 </div>
               </summary>
 
-              <div className="border-t border-gray-100 px-2.5 py-2 space-y-2">
+              <div className="border-t border-gray-100 px-2.5 py-2 space-y-2 animate-fade-in">
+                {explanation && (
+                  <div>
+                    <div className="text-[10.5px] text-gray-400 mb-1">节点说明</div>
+                    <div className="m-0 p-2 rounded-md bg-blue-50/60 text-[10.5px] leading-relaxed text-gray-700 whitespace-pre-wrap break-words soft-surface">
+                      {explanation}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <div className="text-[10.5px] text-gray-400 mb-1">调用 ID</div>
-                  <div className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 break-all font-mono">
+                  <div className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 break-all font-mono soft-surface">
                     {item.toolCallId}
                   </div>
                 </div>
                 {argsText && (
                   <div>
                     <div className="text-[10.5px] text-gray-400 mb-1">参数</div>
-                    <pre className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 whitespace-pre-wrap break-all font-mono">
+                    <pre className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 whitespace-pre-wrap break-all font-mono soft-surface">
                       {argsText}
                     </pre>
                   </div>
@@ -276,7 +434,7 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
                 {resultText && (
                   <div>
                     <div className="text-[10.5px] text-gray-400 mb-1">结果</div>
-                    <pre className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 whitespace-pre-wrap break-all font-mono">
+                    <pre className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 whitespace-pre-wrap break-all font-mono soft-surface">
                       {resultText}
                     </pre>
                   </div>

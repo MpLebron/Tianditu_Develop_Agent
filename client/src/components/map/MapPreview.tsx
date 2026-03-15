@@ -4,6 +4,7 @@ import { useChatStore } from '../../stores/useChatStore'
 import { useCodeRunner } from '../../hooks/useCodeRunner'
 import { visualQaApi } from '../../services/visualQaApi'
 import html2canvas from 'html2canvas'
+import { DEFAULT_TIANDITU_TOKEN } from '../../constants/tianditu'
 
 /** 默认地图 HTML — 展示中国全景，indigo 主题风格 */
 const DEFAULT_MAP_HTML = `<!DOCTYPE html>
@@ -15,7 +16,7 @@ const DEFAULT_MAP_HTML = `<!DOCTYPE html>
   html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden}
   #map{width:100%;height:100%}
 </style>
-<script src="https://api.tianditu.gov.cn/api/v5/js?tk=4043dde46add842282bacc412299311d"></script>
+<script src="https://api.tianditu.gov.cn/api/v5/js?tk=${DEFAULT_TIANDITU_TOKEN}"></script>
 </head>
 <body>
 <div id="map"></div>
@@ -144,7 +145,9 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promis
 
 export function MapPreview() {
   const {
+    previewCode,
     currentCode,
+    codeStreaming,
     executing,
     execError,
     fixing,
@@ -163,6 +166,8 @@ export function MapPreview() {
   const MAX_FIX_RETRIES = 2
   const MAX_VISUAL_FIX_RETRIES = 2
   const VISUAL_STABLE_DELAY_MS = 1200
+  const renderCode = previewCode || currentCode
+  const previewing = Boolean(previewCode && codeStreaming)
 
   const hashCode = (text: string) => {
     let hash = 2166136261
@@ -175,15 +180,15 @@ export function MapPreview() {
 
   // 加载默认地图或用户代码
   useEffect(() => {
-    if (currentCode) {
-      run(currentCode)
+    if (renderCode) {
+      run(renderCode)
       defaultLoaded.current = false
     } else if (!defaultLoaded.current) {
       // 没有用户代码时显示默认地图（同样注入错误捕获脚本）
       run(DEFAULT_MAP_HTML)
       defaultLoaded.current = true
     }
-  }, [currentCode, run, iframeRef])
+  }, [renderCode, run, iframeRef])
 
   // 监听 iframe 错误
   useEffect(() => {
@@ -218,6 +223,15 @@ export function MapPreview() {
       fixTimerRef.current = null
     }
 
+    if (previewing) {
+      return () => {
+        if (fixTimerRef.current) {
+          clearTimeout(fixTimerRef.current)
+          fixTimerRef.current = null
+        }
+      }
+    }
+
     if (execError) {
       setShowError(true)
       if (!fixing && fixRetryCount < MAX_FIX_RETRIES) {
@@ -233,7 +247,7 @@ export function MapPreview() {
         fixTimerRef.current = null
       }
     }
-  }, [execError, fixing, fixRetryCount])
+  }, [execError, fixing, fixRetryCount, previewing])
 
   // 渲染稳定后自动触发视觉巡检
   useEffect(() => {
@@ -242,6 +256,7 @@ export function MapPreview() {
       visualTimerRef.current = null
     }
 
+    if (previewing) return
     if (!currentCode || executing || fixing || execError) return
     if (visualFixRetryCount >= MAX_VISUAL_FIX_RETRIES) return
 
@@ -250,6 +265,7 @@ export function MapPreview() {
 
     visualTimerRef.current = setTimeout(async () => {
       const state = useMapStore.getState()
+      if (state.previewCode && state.codeStreaming) return
       if (!state.currentCode || state.executing || state.fixing || state.execError) return
       if (visualInFlightRef.current) return
 
@@ -314,7 +330,7 @@ export function MapPreview() {
             '视觉巡检结果：通过',
             `结论：${result.summary}`,
             `说明：${result.diagnosis}`,
-            `置信度：${Math.round((result.confidence || 0) * 100)}%`,
+            `结论把握度：${Math.round((result.confidence || 0) * 100)}%`,
           ].join('\n'))
           return
         }
@@ -370,6 +386,7 @@ export function MapPreview() {
     }
   }, [
     currentCode,
+    previewing,
     executing,
     fixing,
     execError,
@@ -403,7 +420,7 @@ export function MapPreview() {
       {/* 渲染中指示器 */}
       {executing && (
         <div className="absolute top-3 right-3 animate-fade-in">
-          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md shadow-lg shadow-black/5 border border-gray-200/60 text-blue-600 text-xs font-medium px-3 py-2 rounded-xl">
+          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md shadow-lg shadow-black/5 border border-gray-200/60 text-blue-600 text-xs font-medium px-3 py-2 rounded-xl soft-surface">
             <div className="w-3.5 h-3.5 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
             渲染地图中...
           </div>
@@ -440,7 +457,7 @@ export function MapPreview() {
       {/* 自动修复中指示器 */}
       {fixing && (
         <div className="absolute top-3 right-3 animate-fade-in z-10">
-          <div className="flex items-center gap-2 bg-amber-50/95 backdrop-blur-md shadow-lg shadow-amber-500/10 border border-amber-200/60 text-amber-700 text-xs font-medium px-3 py-2 rounded-xl">
+          <div className="flex items-center gap-2 bg-amber-50/95 backdrop-blur-md shadow-lg shadow-amber-500/10 border border-amber-200/60 text-amber-700 text-xs font-medium px-3 py-2 rounded-xl soft-surface">
             <div className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-500 rounded-full animate-spin" />
             {fixingSource === 'visual' ? '正在视觉回灌补修' : '正在自动修复'} ({fixingAttempt}/{fixingMax})...
           </div>
@@ -450,7 +467,7 @@ export function MapPreview() {
       {/* 视觉巡检中指示器（前台阻塞） */}
       {visualChecking && !fixing && (
         <div className="absolute top-3 right-3 animate-fade-in z-10">
-          <div className="flex items-center gap-2 bg-slate-950/70 backdrop-blur-xl shadow-lg shadow-indigo-900/30 border border-indigo-300/20 text-indigo-100 text-xs font-medium px-3 py-2 rounded-xl">
+          <div className="flex items-center gap-2 bg-slate-950/70 backdrop-blur-xl shadow-lg shadow-indigo-900/30 border border-indigo-300/20 text-indigo-100 text-xs font-medium px-3 py-2 rounded-xl soft-surface">
             <div className="w-3.5 h-3.5 border-2 border-violet-200 border-t-violet-500 rounded-full animate-spin" />
             正在进行AI视觉巡检...
           </div>
@@ -464,7 +481,7 @@ export function MapPreview() {
             retriesExhausted
               ? 'bg-orange-50/95 border-orange-200/60 text-orange-600 shadow-orange-500/5'
               : 'bg-red-50/95 border-red-200/60 text-red-600 shadow-red-500/5'
-          }`}>
+          } soft-surface`}>
             <svg className={`w-4 h-4 mt-0.5 shrink-0 ${retriesExhausted ? 'text-orange-400' : 'text-red-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
             </svg>
@@ -483,7 +500,7 @@ export function MapPreview() {
             </div>
             <button
               onClick={() => setShowError(false)}
-              className={`${retriesExhausted ? 'text-orange-300 hover:text-orange-500' : 'text-red-300 hover:text-red-500'} transition shrink-0 p-0.5`}
+              className={`${retriesExhausted ? 'text-orange-300 hover:text-orange-500' : 'text-red-300 hover:text-red-500'} soft-pop shrink-0 p-0.5`}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

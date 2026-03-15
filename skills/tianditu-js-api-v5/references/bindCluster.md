@@ -44,7 +44,7 @@ map.addLayer({
     filter: ['has', 'point_count'],
     layout: {
         'text-field': ['get', 'point_count_abbreviated'],
-        'text-font': ['Microsoft YaHei'],
+        'text-font': ['WenQuanYi Micro Hei Mono'],
         'text-size': 12
     },
     paint: { 'text-color': '#333' }
@@ -117,3 +117,4 @@ map.on('click', 'unclustered-point', function(e) {
 1. 聚合 filter 用 `['has', 'point_count']` 区分聚合/非聚合要素
 2. `point_count_abbreviated` 是自动生成的缩写数字（如 1.2k）
 3. `getClusterExpansionZoom` 是异步回调，不是 Promise
+4. 聚合数量文本属于 `symbol + text-field`，必须显式设置 `text-font: ['WenQuanYi Micro Hei Mono']`，不要使用 `Microsoft YaHei` 之类页面字体名

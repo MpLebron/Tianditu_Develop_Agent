@@ -65,6 +65,7 @@ export interface ShareStoreOptions {
     chromiumPath?: string
     timeoutMs?: number
     waitAfterLoadMs?: number
+    maxConcurrentRenders?: number
   }
 }
 
@@ -182,6 +183,7 @@ export class ShareStore {
   private readonly thumbnailRenderer: ShareThumbnailRenderer
 
   private ready = false
+  private initPromise: Promise<void> | null = null
   private indexData: ShareIndexFile = { version: 1, items: [] }
   private opQueue: Promise<unknown> = Promise.resolve()
 
@@ -197,32 +199,46 @@ export class ShareStore {
       chromiumPath: opts.thumbnail?.chromiumPath || '',
       timeoutMs: opts.thumbnail?.timeoutMs || 30000,
       waitAfterLoadMs: opts.thumbnail?.waitAfterLoadMs || 1800,
+      maxConcurrentRenders: opts.thumbnail?.maxConcurrentRenders || 2,
     })
   }
 
   async init() {
     if (this.ready) return
-    await mkdir(this.rootDir, { recursive: true })
-    await mkdir(this.snapshotsDir, { recursive: true })
-
-    try {
-      await access(this.indexPath)
-      const raw = await readFile(this.indexPath, 'utf-8')
-      const parsed = JSON.parse(raw) as ShareIndexFile
-      if (parsed && parsed.version === 1 && Array.isArray(parsed.items)) {
-        this.indexData = {
-          version: 1,
-          items: parsed.items.filter((item) => item && typeof item.slug === 'string'),
-        }
-      } else {
-        this.indexData = { version: 1, items: [] }
-      }
-    } catch {
-      this.indexData = { version: 1, items: [] }
-      await this.persistIndex()
+    if (this.initPromise) {
+      await this.initPromise
+      return
     }
 
-    this.ready = true
+    this.initPromise = (async () => {
+      await mkdir(this.rootDir, { recursive: true })
+      await mkdir(this.snapshotsDir, { recursive: true })
+
+      try {
+        await access(this.indexPath)
+        const raw = await readFile(this.indexPath, 'utf-8')
+        const parsed = JSON.parse(raw) as ShareIndexFile
+        if (parsed && parsed.version === 1 && Array.isArray(parsed.items)) {
+          this.indexData = {
+            version: 1,
+            items: parsed.items.filter((item) => item && typeof item.slug === 'string'),
+          }
+        } else {
+          this.indexData = { version: 1, items: [] }
+        }
+      } catch {
+        this.indexData = { version: 1, items: [] }
+        await this.persistIndex()
+      }
+
+      this.ready = true
+    })()
+
+    try {
+      await this.initPromise
+    } finally {
+      this.initPromise = null
+    }
   }
 
   private async persistIndex() {

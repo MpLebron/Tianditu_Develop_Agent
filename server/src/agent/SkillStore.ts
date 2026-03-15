@@ -1,26 +1,52 @@
 import type { Dirent } from 'fs'
 import { access, readdir, readFile } from 'fs/promises'
-import { resolve, basename } from 'path'
+import { basename, resolve } from 'path'
 import { config } from '../config.js'
 
+export type SkillDomainId =
+  | 'jsapi'
+  | 'lbs'
+  | 'ui'
+  | 'error'
+  | 'echarts-bridge'
+  | 'echarts-charts'
+  | 'root'
+  | 'misc'
+
 export interface SkillEntry {
-  name: string        // 供 planner / tool loop 使用的文档标识（唯一）
-  refName: string     // references 文件名（不含 .md）
-  title: string       // 文档标题（# 行）
-  summary: string     // 前 2 行描述
-  filePath: string    // 完整路径
-  location: string    // 相对 skills 根目录的逻辑路径（用于给 LLM 展示）
-  packageId: string   // 所属 skill 包（frontmatter.name 或目录名）
-  packageDirName: string // 子目录名；根 skill 包为空字符串
+  name: string
+  canonicalName: string
+  legacyNames: string[]
+  refName: string
+  title: string
+  summary: string
+  filePath: string
+  location: string
+  domainId: SkillDomainId
+  canonicalPackageId: string
+  sourcePackageId: string
+  sourcePackageDirName: string
   packageDescription: string
 }
 
-interface SkillPackageMeta {
+export interface PackageDescriptor {
   id: string
-  dirName: string // '' 表示根 skill 包，其他为 skills/<dirName>
+  title: string
+  description: string
+  domainId: SkillDomainId
+  entryPath?: string
+  entryLocation?: string
+  sourcePackageIds: string[]
+  legacyAliases: string[]
+}
+
+interface SourceSkillPackageMeta {
+  id: string
+  dirName: string
   rootPath: string
   entryPath?: string
   description: string
+  title: string
 }
 
 interface RawReferenceDoc {
@@ -29,107 +55,189 @@ interface RawReferenceDoc {
   summary: string
   filePath: string
   location: string
-  packageId: string
-  packageDirName: string
-  packageDescription: string
+  sourcePackageId: string
+  sourcePackageDirName: string
+  sourcePackageDescription: string
+  domainId: SkillDomainId
+  canonicalPackageId: string
 }
 
 /**
- * Skills 文件系统索引（参考 OpenClaw 的多 skill 包加载思路）
+ * Skills 文件系统索引
  *
- * 支持两种结构并存：
- * 1. 旧结构（兼容）：skills/SKILL.md + skills/references/*.md
- * 2. 多 skill 包：skills/<skill-dir>/SKILL.md + skills/<skill-dir>/references/*.md
+ * 当前实现对外暴露“canonical id + legacy alias”双轨能力：
+ * - canonical id: `jsapi/map-init`、`lbs/geocoder`
+ * - legacy alias: `map-init`、`geocoder`、`tianditu-js-api-v5/map-init`
  *
- * 运行时对外仍暴露“可选择文档列表”，但会保留 package 元数据，
- * 以便在加载 reference 文档时自动补充对应 skill 包的 SKILL.md（类似 OpenClaw 先读 skill 再读文档）。
+ * 这样可以在不打断旧链路的前提下，把运行时切到 package/domain first 的知识组织方式。
  */
 export class SkillStore {
   private skills: Map<string, SkillEntry> = new Map()
-  private packages: Map<string, SkillPackageMeta> = new Map()
-  private catalogText: string = ''
-  private plannerCatalogText: string = ''
+  private aliases: Map<string, string> = new Map()
+  private packages: Map<string, PackageDescriptor> = new Map()
+  private sourcePackages: Map<string, SourceSkillPackageMeta> = new Map()
+  private packageAliases: Map<string, string> = new Map()
+  private catalogText = ''
+  private plannerCatalogText = ''
+  private packagePlannerCatalogText = ''
+  private initialized = false
+  private initPromise: Promise<void> | null = null
 
   async init() {
-    this.skills.clear()
-    this.packages.clear()
-    this.catalogText = ''
-    this.plannerCatalogText = ''
-
-    const packageMetas = await this.scanSkillPackages()
-    const rawRefs: RawReferenceDoc[] = []
-
-    for (const pkg of packageMetas) {
-      this.packages.set(pkg.id, pkg)
-      rawRefs.push(...await this.scanReferencesForPackage(pkg))
+    if (this.initialized) return
+    if (this.initPromise) {
+      await this.initPromise
+      return
     }
 
-    // 同名 reference（不同 skill 包）自动加前缀，避免冲突
-    const refNameCounts = new Map<string, number>()
-    for (const ref of rawRefs) {
-      refNameCounts.set(ref.refName, (refNameCounts.get(ref.refName) || 0) + 1)
-    }
+    this.initPromise = (async () => {
+      this.skills.clear()
+      this.aliases.clear()
+      this.packages.clear()
+      this.sourcePackages.clear()
+      this.packageAliases.clear()
+      this.catalogText = ''
+      this.plannerCatalogText = ''
+      this.packagePlannerCatalogText = ''
 
-    for (const ref of rawRefs.sort((a, b) => a.location.localeCompare(b.location))) {
-      const duplicated = (refNameCounts.get(ref.refName) || 0) > 1
-      const exposedName = duplicated ? `${ref.packageId}/${ref.refName}` : ref.refName
-      this.skills.set(exposedName, {
-        name: exposedName,
-        refName: ref.refName,
-        title: ref.title,
-        summary: ref.summary,
-        filePath: ref.filePath,
-        location: ref.location,
-        packageId: ref.packageId,
-        packageDirName: ref.packageDirName,
-        packageDescription: ref.packageDescription,
-      })
-    }
+      const sourcePackages = await this.scanSkillPackages()
+      const rawRefs: RawReferenceDoc[] = []
 
-    this.buildCatalogTexts()
-    console.log(`[SkillStore] 已加载 ${this.skills.size} 个 reference 文档，来自 ${this.packages.size} 个 skill 包`)
+      for (const pkg of sourcePackages) {
+        this.sourcePackages.set(pkg.id, pkg)
+        this.registerPackageDescriptor(pkg)
+        rawRefs.push(...await this.scanReferencesForPackage(pkg))
+      }
+
+      const baseCanonicalCounts = new Map<string, number>()
+      const bareRefCounts = new Map<string, number>()
+      for (const ref of rawRefs) {
+        const baseCanonicalName = `${ref.domainId}/${ref.refName}`
+        baseCanonicalCounts.set(baseCanonicalName, (baseCanonicalCounts.get(baseCanonicalName) || 0) + 1)
+        bareRefCounts.set(ref.refName, (bareRefCounts.get(ref.refName) || 0) + 1)
+      }
+
+      for (const ref of rawRefs.sort((a, b) => a.location.localeCompare(b.location))) {
+        const baseCanonicalName = `${ref.domainId}/${ref.refName}`
+        const canonicalName =
+          (baseCanonicalCounts.get(baseCanonicalName) || 0) > 1
+            ? `${ref.domainId}/${ref.sourcePackageId}/${ref.refName}`
+            : baseCanonicalName
+
+        const legacyNames = buildReferenceAliases(ref, bareRefCounts.get(ref.refName) || 0)
+
+        const entry: SkillEntry = {
+          name: canonicalName,
+          canonicalName,
+          legacyNames,
+          refName: ref.refName,
+          title: ref.title,
+          summary: ref.summary,
+          filePath: ref.filePath,
+          location: ref.location,
+          domainId: ref.domainId,
+          canonicalPackageId: ref.canonicalPackageId,
+          sourcePackageId: ref.sourcePackageId,
+          sourcePackageDirName: ref.sourcePackageDirName,
+          packageDescription: ref.sourcePackageDescription,
+        }
+
+        this.skills.set(canonicalName, entry)
+        this.aliases.set(canonicalName, canonicalName)
+        for (const alias of legacyNames) {
+          if (!this.aliases.has(alias)) {
+            this.aliases.set(alias, canonicalName)
+          }
+        }
+      }
+
+      this.buildCatalogTexts()
+      this.initialized = true
+      console.log(
+        `[SkillStore] 已加载 ${this.skills.size} 个 reference 文档，来自 ${this.sourcePackages.size} 个物理 skill 包，映射为 ${this.packages.size} 个逻辑 package`,
+      )
+    })()
+
+    try {
+      await this.initPromise
+    } finally {
+      this.initPromise = null
+    }
   }
 
-  /** 获取目录摘要（注入系统提示） */
   getCatalog(): string {
     return this.catalogText
   }
 
-  /** 获取给 LLM 做技能选择的目录（OpenClaw 风格） */
   getPlannerCatalog(): string {
     return this.plannerCatalogText
   }
 
-  /** 获取所有 reference 文档标识 */
+  getPackagePlannerCatalog(): string {
+    return this.packagePlannerCatalogText
+  }
+
+  getPlannerCatalogForPackages(packageIds: string[]): string {
+    const canonical = new Set(packageIds.map((id) => this.resolvePackageAlias(id)).filter(Boolean))
+    if (!canonical.size) return this.getPlannerCatalog()
+
+    return [
+      '<available_skills>',
+      ...this.listPackages()
+        .filter((pkg) => canonical.has(pkg.id))
+        .flatMap((pkg) => {
+          return this.listReferencesByPackage(pkg.id).map((skill) => [
+            '  <skill>',
+            `    <name>${skill.canonicalName}</name>`,
+            `    <description>${escapeXml(`[domain:${skill.domainId}] [package:${pkg.id}] ${skill.title} — ${skill.summary}`)}</description>`,
+            `    <location>${skill.location}</location>`,
+            '  </skill>',
+          ].join('\n'))
+        }),
+      '</available_skills>',
+    ].join('\n')
+  }
+
   getSkillNames(): string[] {
-    return Array.from(this.skills.keys())
+    return Array.from(this.skills.keys()).sort()
   }
 
-  /** 获取所有 reference 文档条目（按名称排序） */
   listSkills(): SkillEntry[] {
-    return Array.from(this.skills.values()).sort((a, b) => a.name.localeCompare(b.name))
+    return Array.from(this.skills.values()).sort((a, b) => a.canonicalName.localeCompare(b.canonicalName))
   }
 
-  /** 根据名称获取 reference 文档条目 */
+  listPackages(): PackageDescriptor[] {
+    return Array.from(this.packages.values()).sort(comparePackages)
+  }
+
+  listReferencesByPackage(packageId: string): SkillEntry[] {
+    const canonicalPackageId = this.resolvePackageAlias(packageId)
+    if (!canonicalPackageId) return []
+    return this.listSkills().filter((skill) => skill.canonicalPackageId === canonicalPackageId)
+  }
+
+  resolveAlias(name: string): string | null {
+    return this.aliases.get(name) || null
+  }
+
   getSkill(name: string): SkillEntry | undefined {
-    return this.skills.get(name)
+    const resolved = this.resolveAlias(name)
+    return resolved ? this.skills.get(resolved) : undefined
   }
 
-  /** 获取所有 skill 包（供调试/扩展用） */
-  listPackages(): SkillPackageMeta[] {
-    return Array.from(this.packages.values()).sort((a, b) => a.id.localeCompare(b.id))
+  getPackageEntry(packageId: string): PackageDescriptor | undefined {
+    const resolved = this.resolvePackageAlias(packageId)
+    return resolved ? this.packages.get(resolved) : undefined
   }
 
-  /** 加载指定 reference 文档 */
   async loadDoc(name: string): Promise<string | null> {
-    const skill = this.skills.get(name)
+    const skill = this.getSkill(name)
     if (!skill) return null
     return readFile(skill.filePath, 'utf-8')
   }
 
-  /** 加载 skill 包入口（SKILL.md） */
   async loadSkillEntry(packageId: string): Promise<string | null> {
-    const pkg = this.packages.get(packageId)
+    const pkg = this.getPackageEntry(packageId)
     if (!pkg?.entryPath) return null
     try {
       return await readFile(pkg.entryPath, 'utf-8')
@@ -138,36 +246,56 @@ export class SkillStore {
     }
   }
 
-  /**
-   * 批量加载多个 reference 文档
-   * 会自动在每个包的第一个文档前补充对应 SKILL.md，模拟 OpenClaw 的“先读 skill 再读细节文档”。
-   */
-  async loadDocs(names: string[]): Promise<string> {
+  async loadPackageEntries(packageIds: string[]): Promise<string> {
     const docs: string[] = []
-    const loadedPackageEntries = new Set<string>()
+
+    for (const packageId of dedupeStrings(packageIds)) {
+      const pkg = this.getPackageEntry(packageId)
+      if (!pkg) continue
+      const entry = await this.loadSkillEntry(pkg.id)
+      if (!entry) continue
+      docs.push([
+        `<!-- logical-package:${pkg.id} entry:start -->`,
+        entry,
+        `<!-- logical-package:${pkg.id} entry:end -->`,
+      ].join('\n'))
+    }
+
+    return docs.join('\n\n---\n\n')
+  }
+
+  async loadDocs(names: string[], opts?: { includePackageEntries?: boolean }): Promise<string> {
+    const docs: string[] = []
+    const includePackageEntries = opts?.includePackageEntries !== false
+    const loadedSourcePackageEntries = new Set<string>()
 
     for (const name of dedupeStrings(names)) {
-      const skill = this.skills.get(name)
+      const skill = this.getSkill(name)
       if (!skill) continue
 
-      if (!loadedPackageEntries.has(skill.packageId)) {
-        loadedPackageEntries.add(skill.packageId)
-        const entry = await this.loadSkillEntry(skill.packageId)
-        if (entry) {
-          docs.push([
-            `<!-- skill-package:${skill.packageId} entry:start -->`,
-            entry,
-            `<!-- skill-package:${skill.packageId} entry:end -->`,
-          ].join('\n'))
+      if (includePackageEntries && !loadedSourcePackageEntries.has(skill.sourcePackageId)) {
+        loadedSourcePackageEntries.add(skill.sourcePackageId)
+        const sourcePackage = this.sourcePackages.get(skill.sourcePackageId)
+        if (sourcePackage?.entryPath) {
+          try {
+            const entry = await readFile(sourcePackage.entryPath, 'utf-8')
+            docs.push([
+              `<!-- source-package:${skill.sourcePackageId} entry:start -->`,
+              entry,
+              `<!-- source-package:${skill.sourcePackageId} entry:end -->`,
+            ].join('\n'))
+          } catch {
+            // ignore per source package
+          }
         }
       }
 
-      const content = await this.loadDoc(name)
+      const content = await this.loadDoc(skill.canonicalName)
       if (content) {
         docs.push([
-          `<!-- reference:${skill.name} (${skill.location}) start -->`,
+          `<!-- reference:${skill.canonicalName} (${skill.location}) start -->`,
           content,
-          `<!-- reference:${skill.name} end -->`,
+          `<!-- reference:${skill.canonicalName} end -->`,
         ].join('\n'))
       }
     }
@@ -175,15 +303,53 @@ export class SkillStore {
     return docs.join('\n\n---\n\n')
   }
 
-  private async scanSkillPackages(): Promise<SkillPackageMeta[]> {
-    const root = config.skillsDir
-    const packages: SkillPackageMeta[] = []
+  private resolvePackageAlias(packageId: string): string | null {
+    return this.packageAliases.get(packageId) || (this.packages.has(packageId) ? packageId : null)
+  }
 
-    // 兼容旧结构：skills/ 目录本身作为一个 skill 包（若存在 SKILL.md 或 references）
+  private registerPackageDescriptor(sourcePackage: SourceSkillPackageMeta) {
+    const canonicalPackageIds = inferCanonicalPackageIdsForSourcePackage(sourcePackage.id)
+    for (const canonicalPackageId of canonicalPackageIds) {
+      const domainId = inferDomainIdForPackage(canonicalPackageId)
+      const descriptor = this.packages.get(canonicalPackageId)
+      const title = getPackageTitle(canonicalPackageId)
+      const description = descriptor?.description || sourcePackage.description || title
+      const next: PackageDescriptor = descriptor
+        ? {
+          ...descriptor,
+          sourcePackageIds: dedupeStrings([...descriptor.sourcePackageIds, sourcePackage.id]),
+          description,
+          entryPath: descriptor.entryPath || (sourcePackage.id === canonicalPackageId ? sourcePackage.entryPath : descriptor.entryPath),
+          entryLocation: descriptor.entryLocation || buildPackageEntryLocation(sourcePackage),
+        }
+        : {
+          id: canonicalPackageId,
+          title,
+          description,
+          domainId,
+          entryPath: sourcePackage.id === canonicalPackageId ? sourcePackage.entryPath : undefined,
+          entryLocation: sourcePackage.id === canonicalPackageId ? buildPackageEntryLocation(sourcePackage) : undefined,
+          sourcePackageIds: [sourcePackage.id],
+          legacyAliases: buildPackageAliases(canonicalPackageId, domainId, sourcePackage.id),
+        }
+
+      this.packages.set(canonicalPackageId, next)
+      this.packageAliases.set(canonicalPackageId, canonicalPackageId)
+      for (const alias of next.legacyAliases) {
+        if (!this.packageAliases.has(alias)) {
+          this.packageAliases.set(alias, canonicalPackageId)
+        }
+      }
+    }
+  }
+
+  private async scanSkillPackages(): Promise<SourceSkillPackageMeta[]> {
+    const root = config.skillsDir
+    const packages: SourceSkillPackageMeta[] = []
+
     const rootPkg = await this.buildPackageMeta(root, '')
     if (rootPkg) packages.push(rootPkg)
 
-    // 多包结构：skills/<dir>/SKILL.md + skills/<dir>/references/
     let dirents: Dirent[] = []
     try {
       dirents = await readdir(root, { withFileTypes: true })
@@ -195,7 +361,6 @@ export class SkillStore {
       if (!d.isDirectory()) continue
       const dirName = d.name
       if (dirName === 'references' || dirName === 'assets' || dirName.startsWith('.')) continue
-
       const pkg = await this.buildPackageMeta(resolve(root, dirName), dirName)
       if (pkg) packages.push(pkg)
     }
@@ -203,7 +368,7 @@ export class SkillStore {
     return dedupePackages(packages)
   }
 
-  private async buildPackageMeta(packageRoot: string, dirName: string): Promise<SkillPackageMeta | null> {
+  private async buildPackageMeta(packageRoot: string, dirName: string): Promise<SourceSkillPackageMeta | null> {
     const skillMdPath = resolve(packageRoot, 'SKILL.md')
     const refsDir = resolve(packageRoot, 'references')
 
@@ -213,13 +378,15 @@ export class SkillStore {
 
     let packageId = dirName || 'root-skill'
     let description = ''
+    let title = packageId
 
     if (hasSkillMd) {
       try {
         const raw = await readFile(skillMdPath, 'utf-8')
         const fm = parseFrontmatter(raw)
         if (typeof fm.name === 'string' && fm.name.trim()) packageId = fm.name.trim()
-        if (typeof fm.description === 'string') description = fm.description.trim()
+        if (typeof fm.description === 'string' && fm.description.trim()) description = fm.description.trim()
+        title = packageId
       } catch {
         // ignore malformed skill entry, keep fallback metadata
       }
@@ -231,10 +398,11 @@ export class SkillStore {
       rootPath: packageRoot,
       entryPath: hasSkillMd ? skillMdPath : undefined,
       description,
+      title,
     }
   }
 
-  private async scanReferencesForPackage(pkg: SkillPackageMeta): Promise<RawReferenceDoc[]> {
+  private async scanReferencesForPackage(pkg: SourceSkillPackageMeta): Promise<RawReferenceDoc[]> {
     const refsDir = resolve(pkg.rootPath, 'references')
     if (!(await pathExists(refsDir))) return []
 
@@ -257,20 +425,22 @@ export class SkillStore {
         content,
         packageId: pkg.id,
       })
-
-      const location = pkg.dirName
-        ? `skills/${pkg.dirName}/references/${refName}.md`
-        : `skills/references/${refName}.md`
+      const domainId = inferReferenceDomain(pkg.id, refName)
+      const canonicalPackageId = inferCanonicalPackageIdForReference(pkg.id, refName)
 
       docs.push({
         refName,
         title,
         summary,
         filePath,
-        location,
-        packageId: pkg.id,
-        packageDirName: pkg.dirName,
-        packageDescription: pkg.description,
+        location: pkg.dirName
+          ? `skills/${pkg.dirName}/references/${refName}.md`
+          : `skills/references/${refName}.md`,
+        sourcePackageId: pkg.id,
+        sourcePackageDirName: pkg.dirName,
+        sourcePackageDescription: pkg.description,
+        domainId,
+        canonicalPackageId,
       })
     }
 
@@ -278,34 +448,41 @@ export class SkillStore {
   }
 
   private buildCatalogTexts() {
-    const grouped = new Map<string, SkillEntry[]>()
-    for (const skill of this.skills.values()) {
-      const arr = grouped.get(skill.packageId) || []
-      arr.push(skill)
-      grouped.set(skill.packageId, arr)
-    }
-
-    const packageOrder = Array.from(this.packages.values()).sort((a, b) => a.id.localeCompare(b.id))
+    const packageOrder = this.listPackages()
 
     this.catalogText = packageOrder
       .map((pkg) => {
-        const docs = (grouped.get(pkg.id) || []).sort((a, b) => a.name.localeCompare(b.name))
+        const docs = this.listReferencesByPackage(pkg.id)
         if (!docs.length) return ''
-        const header = `### ${pkg.id}${pkg.description ? ` — ${pkg.description}` : ''}`
-        const items = docs.map((s) => `- **${s.name}**: ${s.title} — ${s.summary}`)
+        const header = `### ${pkg.title} [${pkg.domainId}]${pkg.description ? ` — ${pkg.description}` : ''}`
+        const items = docs.map((s) => `- **${s.canonicalName}**: ${s.title} — ${s.summary}`)
         return [header, ...items].join('\n')
       })
       .filter(Boolean)
       .join('\n\n')
 
+    this.packagePlannerCatalogText = [
+      '<available_packages>',
+      ...packageOrder.map((pkg) => [
+        '  <package>',
+        `    <id>${pkg.id}</id>`,
+        `    <domain>${pkg.domainId}</domain>`,
+        `    <title>${escapeXml(pkg.title)}</title>`,
+        `    <description>${escapeXml(pkg.description || pkg.title)}</description>`,
+        `    <skills>${this.listReferencesByPackage(pkg.id).length}</skills>`,
+        '  </package>',
+      ].join('\n')),
+      '</available_packages>',
+    ].join('\n')
+
     this.plannerCatalogText = [
       '<available_skills>',
       ...packageOrder.flatMap((pkg) => {
-        const docs = (grouped.get(pkg.id) || []).sort((a, b) => a.name.localeCompare(b.name))
+        const docs = this.listReferencesByPackage(pkg.id)
         return docs.map((s) => [
           '  <skill>',
-          `    <name>${s.name}</name>`,
-          `    <description>${escapeXml(`[package:${pkg.id}] ${s.title} — ${s.summary}`)}</description>`,
+          `    <name>${s.canonicalName}</name>`,
+          `    <description>${escapeXml(`[domain:${s.domainId}] [package:${pkg.id}] ${s.title} — ${s.summary}`)}</description>`,
           `    <location>${s.location}</location>`,
           '  </skill>',
         ].join('\n'))
@@ -315,14 +492,13 @@ export class SkillStore {
   }
 }
 
-function dedupePackages(items: SkillPackageMeta[]): SkillPackageMeta[] {
-  const out: SkillPackageMeta[] = []
+function dedupePackages(items: SourceSkillPackageMeta[]): SourceSkillPackageMeta[] {
+  const out: SourceSkillPackageMeta[] = []
   const used = new Set<string>()
 
   for (const item of items) {
     let id = item.id
     if (used.has(id)) {
-      // 与 OpenClaw 的“按名字合并/覆盖”思路类似，但这里优先保留根 skill，子 skill 重名时加目录前缀避免冲突
       id = item.dirName ? `${item.dirName}/${item.id}` : `root/${item.id}`
     }
     used.add(id)
@@ -384,7 +560,22 @@ function buildReferenceSummary(params: {
 }): string {
   const { refName, title, rawSummary, content, packageId } = params
 
-  // 为 echarts 示例生成更有区分度的摘要，避免 planner 看到一堆“纯图表示例（完整 HTML）”后难以决策
+  if (packageId === 'tianditu-lbs') {
+    if (refName === 'api-overview') {
+      return 'LBS 总览；说明官方端点、queryType、代理 envelope、编码表与返回结构阅读约定'
+    }
+    if (refName === 'scene-routing') {
+      return 'LBS 场景分流入口；先判搜索/编码/行政区划/路线，再选择对应 scene 文档'
+    }
+    if (/^scene\d+-/.test(refName)) {
+      const firstTask = content.match(/## 适用任务[\s\S]*?^- (.+)$/m)?.[1]?.trim()
+      if (firstTask) {
+        return `${title}；适用任务：${firstTask}`
+      }
+      return `${title}；按场景说明端点、参数、返回结构和关键字段读取方式`
+    }
+  }
+
   if (packageId === 'echarts-charts' && /^echarts-/.test(refName) && refName !== 'echarts-index') {
     const chartType = inferEchartsChartType(refName)
     const titleCore = title.replace(/^ECharts\s*示例[:：]\s*/, '').trim() || refName
@@ -394,6 +585,110 @@ function buildReferenceSummary(params: {
   }
 
   return rawSummary
+}
+
+function buildReferenceAliases(ref: RawReferenceDoc, bareRefCount: number): string[] {
+  const aliases = [
+    ref.refName,
+    `${ref.sourcePackageId}/${ref.refName}`,
+    `${ref.canonicalPackageId}/${ref.refName}`,
+  ]
+
+  if (ref.domainId && ref.domainId !== 'misc' && ref.domainId !== 'root') {
+    aliases.push(`${ref.domainId}/${ref.refName}`)
+  }
+  if (bareRefCount > 1) {
+    return dedupeStrings(aliases.filter((alias) => alias !== ref.refName))
+  }
+  return dedupeStrings(aliases)
+}
+
+function buildPackageAliases(canonicalPackageId: string, domainId: SkillDomainId, sourcePackageId: string): string[] {
+  const aliases = [canonicalPackageId, sourcePackageId]
+  if (domainId === 'jsapi') aliases.push('jsapi')
+  if (domainId === 'lbs') aliases.push('lbs')
+  if (domainId === 'ui') aliases.push('ui')
+  if (domainId === 'error') aliases.push('error')
+  if (domainId === 'echarts-bridge') aliases.push('echarts-bridge')
+  if (domainId === 'echarts-charts') aliases.push('echarts-charts')
+  return dedupeStrings(aliases)
+}
+
+function buildPackageEntryLocation(sourcePackage: SourceSkillPackageMeta): string | undefined {
+  if (!sourcePackage.entryPath) return undefined
+  return sourcePackage.dirName
+    ? `skills/${sourcePackage.dirName}/SKILL.md`
+    : 'skills/SKILL.md'
+}
+
+function inferCanonicalPackageIdsForSourcePackage(sourcePackageId: string): string[] {
+  if (sourcePackageId === 'tianditu-js-api-v5') return ['tianditu-jsapi', 'tianditu-lbs']
+  return [sourcePackageId]
+}
+
+function inferCanonicalPackageIdForReference(sourcePackageId: string, refName: string): string {
+  if (sourcePackageId === 'tianditu-js-api-v5') {
+    return isLegacyLbsReference(refName) ? 'tianditu-lbs' : 'tianditu-jsapi'
+  }
+  return sourcePackageId
+}
+
+function inferDomainIdForPackage(packageId: string): SkillDomainId {
+  if (packageId === 'tianditu-jsapi') return 'jsapi'
+  if (packageId === 'tianditu-lbs') return 'lbs'
+  if (packageId === 'tianditu-ui-design') return 'ui'
+  if (packageId === 'error-solution') return 'error'
+  if (packageId === 'tianditu-echarts-bridge') return 'echarts-bridge'
+  if (packageId === 'echarts-charts') return 'echarts-charts'
+  if (packageId === 'root-skill') return 'root'
+  return 'misc'
+}
+
+function inferReferenceDomain(sourcePackageId: string, refName: string): SkillDomainId {
+  if (sourcePackageId === 'tianditu-js-api-v5') {
+    return isLegacyLbsReference(refName) ? 'lbs' : 'jsapi'
+  }
+  return inferDomainIdForPackage(sourcePackageId)
+}
+
+function isLegacyLbsReference(refName: string): boolean {
+  return [
+    'geocoder',
+    'search-v2',
+    'search-poi',
+    'search-admin',
+    'search-route',
+    'search-transit',
+  ].includes(refName)
+}
+
+function getPackageTitle(packageId: string): string {
+  if (packageId === 'tianditu-jsapi') return '天地图 JSAPI'
+  if (packageId === 'tianditu-lbs') return '天地图 LBS'
+  if (packageId === 'tianditu-ui-design') return '地图 UI 设计'
+  if (packageId === 'error-solution') return '错误修复'
+  if (packageId === 'tianditu-echarts-bridge') return '地图图表联动'
+  if (packageId === 'echarts-charts') return 'ECharts 图表'
+  return packageId
+}
+
+function comparePackages(a: PackageDescriptor, b: PackageDescriptor): number {
+  const order = packageSortWeight(a.id) - packageSortWeight(b.id)
+  if (order !== 0) return order
+  return a.id.localeCompare(b.id)
+}
+
+function packageSortWeight(id: string): number {
+  const ordered = [
+    'tianditu-jsapi',
+    'tianditu-lbs',
+    'tianditu-ui-design',
+    'error-solution',
+    'tianditu-echarts-bridge',
+    'echarts-charts',
+  ]
+  const idx = ordered.indexOf(id)
+  return idx >= 0 ? idx : ordered.length + 1
 }
 
 function inferEchartsChartType(refName: string): string {
@@ -409,7 +704,9 @@ function inferEchartsChartType(refName: string): string {
 function inferEchartsFeatureHints(content: string, titleCore: string): string[] {
   const source = `${titleCore}\n${content}`.toLowerCase()
   const hints: string[] = []
-  const push = (v: string) => { if (!hints.includes(v)) hints.push(v) }
+  const push = (value: string) => {
+    if (!hints.includes(value)) hints.push(value)
+  }
 
   if (source.includes('datazoom')) push('dataZoom')
   if (source.includes('polar') || source.includes('极坐标')) push('极坐标')

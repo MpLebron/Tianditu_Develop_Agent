@@ -128,7 +128,7 @@ export function ShareViewerPage() {
         <div className="max-w-[1600px] mx-auto h-full flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3 no-underline">
             <img src="/tianditu-logo.png" alt="天地图" className="h-8 object-contain" />
-            <img src="/tianditu-subtitle.png" alt="地理底图应用开发智能体" className="h-6 object-contain hidden sm:block" />
+            <img src="/tianditu-agent-logo.svg" alt="天地图开发智能体" className="h-7 sm:h-8 w-auto object-contain hidden sm:block" />
           </Link>
 
           <div className="flex items-center gap-2 text-sm">

@@ -7,6 +7,12 @@ export interface ThoughtChainItem {
   isError?: boolean
   startedAt?: number
   endedAt?: number
+  decisionSource?: string
+  selectedPackages?: string[]
+  selectedReferences?: string[]
+  selectedContracts?: string[]
+  fallbackReason?: string
+  vetoApplied?: boolean
 }
 
 export interface Message {

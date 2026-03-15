@@ -10,7 +10,7 @@ interface ExampleCard {
   gradient: string
   bgLight: string
   iconColor: string
-  preview: 'map' | 'pin' | 'parcel' | 'points' | 'flood' | 'drive' | 'transit' | 'admin' | 'batch' | 'bar3d'
+  preview: 'map' | 'pin' | 'parcel' | 'points' | 'flood' | 'drive' | 'transit' | 'admin' | 'batch' | 'bar3d' | 'history'
 }
 
 const jiangsuVillageBatchPrompt = `请把以下地点在地图上精确显示，并在页面左侧加一个可滚动列表框。要求：
@@ -126,6 +126,22 @@ const examples: ExampleCard[] = [
     gradient: 'from-emerald-500 to-green-400',
     bgLight: 'bg-emerald-50',
     iconColor: 'text-emerald-500',
+  },
+  {
+    title: '长征胜利90周年专题',
+    desc: '自动加载长征历史数据，生成三路红军长征路线与关键节点专题地图',
+    prompt: '根据上传的长征数据，帮我生成长征胜利90周年专题地图',
+    sampleId: 'long-march',
+    category: '历史专题',
+    preview: 'history',
+    icon: (
+      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v18m0-18l6 3-6 3-6-3 6-3zm0 6l6 3-6 3-6-3 6-3z" />
+      </svg>
+    ),
+    gradient: 'from-red-500 to-orange-500',
+    bgLight: 'bg-red-50',
+    iconColor: 'text-red-500',
   },
   {
     title: '中国洪水事件专题',
@@ -287,6 +303,19 @@ function CardPreview({ variant, gradient }: { variant: ExampleCard['preview']; g
         </>
       )}
 
+      {variant === 'history' && (
+        <>
+          <svg viewBox="0 0 200 110" className="absolute inset-0 w-full h-full">
+            <path d="M18 72 C 44 42, 62 76, 88 48 S 132 34, 182 58" fill="none" stroke="rgba(255,255,255,.92)" strokeWidth="3.5" strokeLinecap="round" />
+            <path d="M24 84 C 58 56, 90 94, 132 68" fill="none" stroke="rgba(255,230,230,.85)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="5 5" />
+          </svg>
+          <div className="absolute left-8 top-8 w-2.5 h-2.5 rounded-full bg-white/95" />
+          <div className="absolute left-20 top-14 w-2 h-2 rounded-full bg-white/85" />
+          <div className="absolute right-10 top-10 w-2.5 h-2.5 rounded-full bg-white/95" />
+          <div className="absolute right-16 bottom-8 w-8 h-8 rounded-full border border-white/50 bg-white/20 flex items-center justify-center text-[10px] font-semibold text-white/90">90</div>
+        </>
+      )}
+
       {variant === 'drive' && (
         <>
           <svg viewBox="0 0 200 110" className="absolute inset-0 w-full h-full">
@@ -381,7 +410,7 @@ export function HomePage() {
           <div className="flex items-center gap-3">
             <img src="/tianditu-logo.png" alt="天地图" className="h-10 object-contain" />
             <div className="w-px h-7 bg-gray-200" />
-            <img src="/tianditu-subtitle.png" alt="地理底图应用开发智能体" className="h-8 object-contain" />
+            <img src="/tianditu-agent-logo.svg" alt="天地图开发智能体" className="h-9 sm:h-10 w-auto object-contain" />
           </div>
           <div className="flex items-center gap-2">
             <button

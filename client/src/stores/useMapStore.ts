@@ -2,6 +2,8 @@ import { create } from 'zustand'
 
 interface MapStore {
   currentCode: string | null
+  /** 首份可运行 HTML 的预渲染代码 */
+  previewCode: string | null
   /** 正在流式生成中的代码（逐步拼接） */
   streamingCode: string | null
   /** 是否正在流式生成代码 */
@@ -17,8 +19,12 @@ interface MapStore {
   setCode: (code: string | null) => void
   /** 开始代码流式生成 */
   startCodeStream: () => void
+  /** 重置当前代码流缓冲 */
+  resetCodeStream: () => void
   /** 追加代码增量 */
   appendCodeDelta: (delta: string) => void
+  /** 提交首份完整 HTML 作为预渲染代码 */
+  commitPreviewCode: (code: string) => void
   /** 结束代码流式生成（用完整代码替换） */
   finishCodeStream: (finalCode: string) => void
   setExecError: (error: string | null) => void
@@ -32,6 +38,7 @@ const MAX_FIX_RETRIES = 2
 
 export const useMapStore = create<MapStore>((set, get) => ({
   currentCode: null,
+  previewCode: null,
   streamingCode: null,
   codeStreaming: false,
   executing: false,
@@ -45,6 +52,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
 
   setCode: (code) => set({
     currentCode: code,
+    previewCode: null,
     streamingCode: null,
     codeStreaming: false,
     execError: null,
@@ -55,14 +63,32 @@ export const useMapStore = create<MapStore>((set, get) => ({
     lastVisualCheckedCodeHash: null,
   }),
 
-  startCodeStream: () => set({ streamingCode: '', codeStreaming: true }),
+  startCodeStream: () => set({
+    previewCode: null,
+    streamingCode: '',
+    codeStreaming: true,
+    execError: null,
+    visualChecking: false,
+  }),
+
+  resetCodeStream: () => set((s) => ({
+    previewCode: s.previewCode,
+    streamingCode: '',
+    codeStreaming: true,
+  })),
 
   appendCodeDelta: (delta) => set((s) => ({
     streamingCode: (s.streamingCode || '') + delta,
   })),
 
+  commitPreviewCode: (code) => set({
+    previewCode: code,
+    execError: null,
+  }),
+
   finishCodeStream: (finalCode) => set({
     currentCode: finalCode,
+    previewCode: null,
     streamingCode: null,
     codeStreaming: false,
     execError: null,
@@ -106,6 +132,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
         // 设置修复后的代码，会触发 MapPreview 重新渲染
         set({
           currentCode: json.data.code,
+          previewCode: null,
           execError: null,
           fixing: false,
           fixingSource: null,

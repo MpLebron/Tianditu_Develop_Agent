@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import { config } from './config.js'
 import { errorHandler } from './middleware/errorHandler.js'
+import { requestContextMiddleware } from './middleware/requestContext.js'
 import chatRouter from './routes/chat.js'
 import uploadRouter from './routes/upload.js'
 import tiandituRouter from './routes/tianditu.js'
@@ -21,6 +22,7 @@ const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
+app.use(requestContextMiddleware)
 
 // 静态文件（上传的文件）
 app.use('/uploads', express.static(config.upload.dir))

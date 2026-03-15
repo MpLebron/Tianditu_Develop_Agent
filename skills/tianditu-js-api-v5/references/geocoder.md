@@ -17,6 +17,44 @@ GET /api/tianditu/reverse-geocode?lng=116.40&lat=39.90
 
 前端应先判断 `success === true`，再读取 `data`。
 
+当前项目里，正向编码代理的参数名是 `address`，不是 `query`：
+
+```javascript
+function geocodeByProxy(address) {
+    var url = new URL('/api/tianditu/geocode', window.location.origin);
+    url.searchParams.set('address', address);
+
+    return fetch(url.toString())
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(payload) {
+            if (!payload || payload.success !== true) {
+                throw new Error((payload && payload.error) || '地理编码失败');
+            }
+            return payload.data || {};
+        });
+}
+```
+
+读取代理结果时，应写成：
+
+```javascript
+geocodeByProxy('自然资源部').then(function(data) {
+    var location = data.location || {};
+    var lng = Number(location.lon);
+    var lat = Number(location.lat);
+});
+```
+
+不要误写成：
+
+```javascript
+fetch('/api/tianditu/geocode?query=自然资源部')
+// 或读取 data.lon / data.lat
+```
+
 ## 天地图地理编码 API
 
 ### 正向编码（地址转坐标）
@@ -86,6 +124,8 @@ function reverseGeocode(lng, lat) {
 4. 禁止使用 `https://api.tianditu.gov.cn/v5/geocoder`
 5. 禁止使用 `https://api.tianditu.gov.cn/geocoder?address=...`（参数格式错误）
 6. 必须维护 `loading / ready / empty / error` 四态，避免界面永久停在 loading
+7. 当前项目代理里，正向编码只接受 `/api/tianditu/geocode?address=...`，不要误写成 `query`
+8. 当前项目代理返回坐标位于 `payload.data.location.lon / lat`，不要误读成 `payload.data.lon / lat`
 
 ## 常用模式：地址定位并标注（推荐两步法）
 
@@ -136,3 +176,5 @@ map.on('click', function(e) {
 2. 正向编码的参数名是 `ds`，逆向是 `postStr` + `type=geocode`
 3. 返回的坐标是 `{ lon, lat }` 对象，不是数组
 4. 正向编码不要读取 `data.addressComponent`；需要结构化地址请走“正向取坐标 + 逆向取地址组件”
+5. 在当前项目运行时里，更推荐走 `/api/tianditu/geocode?address=...` 代理；只有离开当前项目单独写官方 demo 时，才直接使用 `geocoder?ds=...`
+6. 如果后续还要做“命名地点 -> 路线规划”，先拿 `location.lon / location.lat`，再进入 `/api/tianditu/drive` 或 `/api/tianditu/transit`

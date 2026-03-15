@@ -2,22 +2,42 @@ import { useState, useRef, useEffect } from 'react'
 import { useMapStore } from '../../stores/useMapStore'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { extractFirstCompleteHtmlDocument } from '../../utils/extractFirstCompleteHtmlDocument'
 
 export function CodePanel() {
-  const { currentCode, streamingCode, codeStreaming } = useMapStore()
+  const { currentCode, previewCode, streamingCode, codeStreaming } = useMapStore()
   const [copied, setCopied] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
+  const resolvedCurrentCode = currentCode
+    ? extractFirstCompleteHtmlDocument(currentCode) || currentCode
+    : null
+  const resolvedPreviewCode = previewCode
+    ? extractFirstCompleteHtmlDocument(previewCode) || previewCode
+    : null
+  const resolvedStreamingCode = streamingCode
+    ? extractFirstCompleteHtmlDocument(streamingCode) || streamingCode
+    : null
+
   // 显示的代码：流式生成中用 streamingCode，否则用 currentCode
-  const displayCode = codeStreaming ? streamingCode : currentCode
+  const displayCode = codeStreaming
+    ? (resolvedPreviewCode || resolvedStreamingCode)
+    : resolvedCurrentCode
 
   // 流式生成时自动滚动到底部
   useEffect(() => {
-    if (codeStreaming && panelRef.current) {
+    if (codeStreaming && !resolvedPreviewCode && panelRef.current) {
       panelRef.current.scrollTop = panelRef.current.scrollHeight
     }
-  }, [streamingCode, codeStreaming])
+  }, [streamingCode, codeStreaming, resolvedPreviewCode])
+
+  // 首份完整 HTML 出现后锁定到顶部查看
+  useEffect(() => {
+    if (codeStreaming && resolvedPreviewCode && panelRef.current) {
+      panelRef.current.scrollTop = 0
+    }
+  }, [codeStreaming, resolvedPreviewCode])
 
   // 最终代码更新时滚动到顶部
   useEffect(() => {
@@ -30,15 +50,15 @@ export function CodePanel() {
   if (!displayCode && !codeStreaming) return null
 
   const handleCopy = async () => {
-    if (!currentCode) return
-    await navigator.clipboard.writeText(currentCode)
+    if (!resolvedCurrentCode) return
+    await navigator.clipboard.writeText(resolvedCurrentCode)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
   const handleDownload = () => {
-    if (!currentCode) return
-    const blob = new Blob([currentCode], { type: 'text/html' })
+    if (!resolvedCurrentCode) return
+    const blob = new Blob([resolvedCurrentCode], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -66,7 +86,7 @@ export function CodePanel() {
           {codeStreaming ? (
             <span className="flex items-center gap-1.5 text-[11px] text-blue-400">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              生成中...
+              {resolvedPreviewCode ? '已预渲染，收尾中...' : '生成中...'}
             </span>
           ) : (
             <span className="text-[11px] text-gray-500">{lineCount} 行</span>
@@ -142,8 +162,10 @@ export function CodePanel() {
             className="p-4 text-[12.5px] leading-[1.6] text-gray-300 whitespace-pre-wrap break-all"
             style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace" }}
           >
-            {streamingCode}
-            <span className="inline-block w-[2px] h-[14px] bg-blue-400 animate-pulse ml-px align-middle" />
+            {displayCode}
+            {!resolvedPreviewCode && (
+              <span className="inline-block w-[2px] h-[14px] bg-blue-400 animate-pulse ml-px align-middle" />
+            )}
           </pre>
         ) : (
           /* 生成完成：用 SyntaxHighlighter 做完整语法高亮 */
@@ -170,7 +192,7 @@ export function CodePanel() {
             }}
             wrapLongLines
           >
-            {currentCode!}
+            {resolvedCurrentCode!}
           </SyntaxHighlighter>
         )}
       </div>

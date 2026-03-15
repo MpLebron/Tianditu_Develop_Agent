@@ -80,12 +80,46 @@ function normalizeSeverity(value: unknown): VisualSeverity {
   return 'low'
 }
 
-function normalizeConfidence(value: unknown): number {
+function normalizeConfidenceValue(value: unknown): number | null {
   const n = Number(value)
-  if (!Number.isFinite(n)) return 0
+  if (!Number.isFinite(n)) return null
+  if (n > 1 && n <= 100) return Number((n / 100).toFixed(2))
   if (n < 0) return 0
   if (n > 1) return 1
   return Number(n.toFixed(2))
+}
+
+function fallbackConfidence(params: {
+  anomalous: boolean
+  shouldRepair: boolean
+  severity: VisualSeverity
+}): number {
+  if (!params.anomalous) return 0.9
+  if (params.shouldRepair) {
+    if (params.severity === 'high') return 0.88
+    if (params.severity === 'medium') return 0.82
+    return 0.76
+  }
+  if (params.severity === 'high') return 0.72
+  if (params.severity === 'medium') return 0.66
+  return 0.6
+}
+
+export function resolveVisualInspectionConfidence(
+  value: unknown,
+  params: {
+    anomalous: boolean
+    shouldRepair: boolean
+    severity: VisualSeverity
+  },
+): number {
+  const normalized = normalizeConfidenceValue(value)
+  if (normalized == null) return fallbackConfidence(params)
+
+  // 有些模型会把 confidence 理解成“异常概率”，导致页面正常时回 0。
+  // 这里统一改成“对最终结论的把握度”语义，避免 UI 出现“通过但 0%”。
+  if (!params.anomalous && normalized === 0) return fallbackConfidence(params)
+  return normalized
 }
 
 function normalizeShouldRepair(value: unknown): boolean {
@@ -155,6 +189,10 @@ export class VisualInspectionService {
       '3) 仅当确实需要代码修复（空白/黑屏/错位/关键功能失效）时，shouldRepair=true。',
       '4) diagnosis 描述可观察到的现象，不要编造未见事实。',
       '5) repairHint 用于代码修复输入，1~3 句即可；shouldRepair=false 时可填“无”。',
+      '6) confidence 表示你对“最终判断”的把握度，不是异常概率。',
+      '7) 若你判断页面正常且证据充分，confidence 通常应在 0.80~0.98。',
+      '8) 若你判断页面异常且证据充分，confidence 通常应在 0.70~0.98。',
+      '9) 只有当截图模糊、被遮挡、信息不足或难以判断时，confidence 才应低于 0.50，并在 diagnosis 说明不确定性来源。',
     ].join('\n')
 
     const userPrompt = [
@@ -202,6 +240,11 @@ export class VisualInspectionService {
       }
 
       const severity = anomalous ? normalizeSeverity(parsed.severity) : 'low'
+      const confidence = resolveVisualInspectionConfidence(parsed.confidence, {
+        anomalous,
+        shouldRepair,
+        severity,
+      })
 
       return {
         status: 'ok',
@@ -211,7 +254,7 @@ export class VisualInspectionService {
         summary,
         diagnosis,
         repairHint,
-        confidence: normalizeConfidence(parsed.confidence),
+        confidence,
         model: MODEL_NAME,
       }
     } catch (err: any) {

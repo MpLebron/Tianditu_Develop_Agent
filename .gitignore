@@ -36,3 +36,7 @@ npm-debug.log*
 
 # Coverage
 coverage/
+
+# Local automation / visual-check artifacts
+.playwright-cli/
+output/

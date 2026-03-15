@@ -99,6 +99,7 @@ export const config = {
       chromiumPath: process.env.THUMBNAIL_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '',
       timeoutMs: parseInt(process.env.SHARE_THUMBNAIL_TIMEOUT_MS || '30000'),
       waitAfterLoadMs: parseInt(process.env.SHARE_THUMBNAIL_WAIT_MS || '1800'),
+      maxConcurrentRenders: parseInt(process.env.SHARE_THUMBNAIL_MAX_CONCURRENT || '2'),
     },
   },
 
@@ -112,5 +113,15 @@ export const config = {
     viewportHeight: parseInt(process.env.VISUAL_INSPECTION_VIEWPORT_HEIGHT || '900'),
     maxCodeChars: parseInt(process.env.VISUAL_INSPECTION_MAX_CODE_CHARS || '400000'),
     llmTimeoutMs: parseInt(process.env.VISUAL_INSPECTION_LLM_TIMEOUT_MS || '20000'),
+    maxConcurrentRenders: parseInt(process.env.VISUAL_INSPECTION_MAX_CONCURRENT || '2'),
+  },
+
+  agentRuntime: {
+    mode: process.env.AGENT_RUNTIME_MODE
+      || ((process.env.NODE_ENV || 'development') === 'development' ? 'agent_first_full' : 'shadow'),
+    maxPlanRounds: parseInt(process.env.AGENT_MAX_PLAN_ROUNDS || '2'),
+    maxVerifyRepairRounds: parseInt(process.env.AGENT_MAX_VERIFY_REPAIR_ROUNDS || '1'),
+    enableVerifier: process.env.AGENT_ENABLE_VERIFIER === 'true',
+    enableShadowEvents: process.env.AGENT_RUNTIME_SHADOW_EVENTS !== 'false',
   },
 }

@@ -7,7 +7,12 @@ export interface ParsedData {
   headers: string[]
   rows: Record<string, any>[]
   geojson?: any
+  json?: any
   summary: string
+  encoding?: 'utf-8' | 'gb18030'
+  rootShape?: 'object' | 'array'
+  topLevelKeys?: string[]
+  arrayLength?: number
 }
 
 /**
@@ -31,8 +36,12 @@ export class FileParser {
   }
 
   private async parseJSON(filePath: string): Promise<ParsedData> {
-    const content = await readFile(filePath, 'utf-8')
-    const data = JSON.parse(content)
+    const content = await readFile(filePath)
+    const parsed = parseJsonBufferWithFallback(content, filePath)
+    const data = parsed.value
+    const rootShape = Array.isArray(data) ? 'array' : 'object'
+    const topLevelKeys = !Array.isArray(data) && data && typeof data === 'object' ? Object.keys(data) : undefined
+    const arrayLength = Array.isArray(data) ? data.length : undefined
 
     const directGeoJSON = this.asGeoJSON(data)
     if (directGeoJSON) {
@@ -43,6 +52,11 @@ export class FileParser {
         headers,
         rows: features.map((f: any) => f.properties || {}),
         geojson: directGeoJSON,
+        json: data,
+        encoding: parsed.encoding,
+        rootShape,
+        topLevelKeys,
+        arrayLength,
         summary: [
           `GeoJSON 数据，${features.length} 个要素，字段: ${headers.slice(0, 5).join(', ')}`,
           'GeoJSON提取路径: rawData',
@@ -61,6 +75,11 @@ export class FileParser {
         headers,
         rows: features.map((f: any) => f.properties || {}),
         geojson: wrappedGeoJSON,
+        json: data,
+        encoding: parsed.encoding,
+        rootShape,
+        topLevelKeys,
+        arrayLength,
         summary: [
           `GeoJSON 数据（包装对象 data 字段），${features.length} 个要素，字段: ${headers.slice(0, 5).join(', ')}`,
           '原始响应根结构: 对象（常见字段 status / message / data）',
@@ -77,6 +96,10 @@ export class FileParser {
         type: 'json',
         headers,
         rows: data,
+        json: data,
+        encoding: parsed.encoding,
+        rootShape,
+        arrayLength,
         summary: `JSON 数据，${data.length} 条记录，字段: ${headers.slice(0, 5).join(', ')}`,
       }
     }
@@ -85,6 +108,10 @@ export class FileParser {
       type: 'json',
       headers: Object.keys(data),
       rows: [data],
+      json: data,
+      encoding: parsed.encoding,
+      rootShape,
+      topLevelKeys,
       summary: `JSON 对象，字段: ${Object.keys(data).slice(0, 5).join(', ')}`,
     }
   }
@@ -119,4 +146,34 @@ export class FileParser {
       summary: `${type.toUpperCase()} 数据，${rows.length} 行，字段: ${headers.slice(0, 8).join(', ')}`,
     }
   }
+}
+
+export function parseJsonBufferWithFallback(
+  buffer: Buffer,
+  filePath: string,
+): { value: any; encoding: 'utf-8' | 'gb18030' } {
+  const attempts: Array<{ encoding: 'utf-8' | 'gb18030'; label: string }> = [
+    { encoding: 'utf-8', label: 'UTF-8' },
+    // gb18030 covers common GBK/GB2312 JSON exports from Chinese desktop tools.
+    { encoding: 'gb18030', label: 'GB18030/GBK' },
+  ]
+
+  let lastError: unknown = null
+
+  for (const attempt of attempts) {
+    try {
+      const text = decodeText(buffer, attempt.encoding)
+      return { value: JSON.parse(text), encoding: attempt.encoding }
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  const detail = lastError instanceof Error ? lastError.message : String(lastError || '未知错误')
+  throw new Error(`JSON 文件解析失败（已尝试 UTF-8 与 GB18030/GBK）: ${filePath}；${detail}`)
+}
+
+function decodeText(buffer: Buffer, encoding: 'utf-8' | 'gb18030'): string {
+  const decoder = new TextDecoder(encoding, { fatal: true })
+  return decoder.decode(buffer).replace(/^\uFEFF/, '')
 }

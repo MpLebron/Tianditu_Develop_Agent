@@ -56,6 +56,8 @@ paint: {
 
 ## symbol 类型（文字标注）
 
+只有在用户明确要求“地图上常驻文字标签”时再添加文本图层。否则优先用侧边栏、列表或 `Popup` 展示文字，避免无意义的字体资源请求。
+
 ```javascript
 map.addLayer({
     id: 'label-layer',
@@ -63,6 +65,7 @@ map.addLayer({
     source: 'points',
     layout: {
         'text-field': ['get', 'name'],
+        'text-font': ['WenQuanYi Micro Hei Mono'],
         'text-size': 12,
         'text-anchor': 'top',
         'text-offset': [0, 1]
@@ -91,10 +94,23 @@ map.addLayer({
     id: 'labels',
     type: 'symbol',
     source: 'points',
-    layout: { 'text-field': ['get', 'name'], 'text-size': 11, 'text-offset': [0, -1.5], 'text-anchor': 'bottom' },
+    layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['WenQuanYi Micro Hei Mono'],
+        'text-size': 11,
+        'text-offset': [0, -1.5],
+        'text-anchor': 'bottom'
+    },
     paint: { 'text-color': '#333', 'text-halo-color': '#fff', 'text-halo-width': 1 }
 });
 ```
+
+## 字体告警说明
+
+- `symbol + text-field` 会触发天地图 glyph/pbf 字体请求。
+- 不要依赖默认字体栈，也不要把页面 CSS `font-family` 当成图层字体。
+- 当前运行环境下，文本图层统一使用 `text-font: ['WenQuanYi Micro Hei Mono']`。
+- 如果并不需要地图上常驻名称，直接省略文本图层，改用侧边栏或 `Popup`。
 
 ## 数据守卫模板（推荐直接复用）
 
@@ -135,3 +151,4 @@ map.on('click', 'point-layer', function(e) {
 3. 数据驱动样式中 `['get', 'fieldName']` 从 Feature 的 `properties` 中读取字段
 4. 点击事件里访问 `e.features[0]` 前必须判空：`if (!e.features || !e.features.length) return`
 5. 坐标校验优先看 `geometry.coordinates`，禁止读取预览字段 `coordinatesPreview`
+6. 如果用了 `symbol + text-field`，必须显式设置 `text-font: ['WenQuanYi Micro Hei Mono']`，避免 `vector.tianditu.gov.cn/static/font/*.pbf` 404

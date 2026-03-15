@@ -6,7 +6,10 @@ import { DocLoader } from './DocLoader.js'
 import { CodeGenerator } from './CodeGenerator.js'
 import { analyzeGeneratedCode, formatGuardIssuesForPrompt, hasBlockingGuardIssue } from './GeneratedCodeGuard.js'
 import { buildApiContractPrompt } from './TiandituApiContractAdvisor.js'
+import { AgentRuntime, type AgentRuntimeChunk } from './AgentRuntime.js'
+import { FileIntelligenceService } from './FileIntelligenceService.js'
 import type { LlmSelection } from '../provider/index.js'
+import { config } from '../config.js'
 
 // ========== 状态定义 ==========
 
@@ -24,12 +27,13 @@ const AgentState = Annotation.Root({
 
 type AgentStateType = typeof AgentState.State
 
-type CodeStreamChunk = { type: 'text' | 'code_start' | 'code_delta' | 'code' | 'error'; content: string }
+type CodeStreamChunk = { type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }
 type ToolStartChunk = {
   type: 'tool_execution_start'
   toolCallId: string
   toolName: string
   args: unknown
+  startedAtMs?: number
 }
 type ToolEndChunk = {
   type: 'tool_execution_end'
@@ -37,9 +41,18 @@ type ToolEndChunk = {
   toolName: string
   result: unknown
   isError: boolean
+  startedAtMs?: number
+  endedAtMs?: number
+  durationMs?: number
+  decisionSource?: string
+  selectedPackages?: string[]
+  selectedReferences?: string[]
+  selectedContracts?: string[]
+  fallbackReason?: string
+  vetoApplied?: boolean
 }
 
-export type AgentStreamChunk = CodeStreamChunk | ToolStartChunk | ToolEndChunk
+export type AgentStreamChunk = CodeStreamChunk | ToolStartChunk | ToolEndChunk | AgentRuntimeChunk
 
 // ========== MapAgent 类 ==========
 
@@ -49,8 +62,11 @@ export class MapAgent {
   private skillPlanner: SkillPlanner
   private docLoader: DocLoader
   private codeGen: CodeGenerator
+  private runtime: AgentRuntime
+  private fileIntelligence: FileIntelligenceService
   private graph: any
   private initialized = false
+  private initPromise: Promise<void> | null = null
 
   constructor() {
     this.skillStore = new SkillStore()
@@ -58,14 +74,33 @@ export class MapAgent {
     this.skillPlanner = new SkillPlanner(this.skillStore)
     this.docLoader = new DocLoader(this.skillStore)
     this.codeGen = new CodeGenerator()
+    this.fileIntelligence = new FileIntelligenceService()
+    this.runtime = new AgentRuntime({
+      skillStore: this.skillStore,
+      docLoader: this.docLoader,
+      codeGen: this.codeGen,
+    })
   }
 
   async init() {
     if (this.initialized) return
-    await this.skillStore.init()
-    this.graph = this.buildGraph()
-    this.initialized = true
-    console.log('[MapAgent] 初始化完成')
+    if (this.initPromise) {
+      await this.initPromise
+      return
+    }
+
+    this.initPromise = (async () => {
+      await this.skillStore.init()
+      this.graph = this.buildGraph()
+      this.initialized = true
+      console.log('[MapAgent] 初始化完成')
+    })()
+
+    try {
+      await this.initPromise
+    } finally {
+      this.initPromise = null
+    }
   }
 
   /**
@@ -109,6 +144,27 @@ export class MapAgent {
    * LLM 自主判断是生成代码还是纯文字回复
    */
   async *invokeStream(params: {
+    userInput: string
+    fileData?: string
+    conversationHistory?: string
+    existingCode?: string
+    llmSelection?: LlmSelection
+  }): AsyncGenerator<AgentStreamChunk> {
+    await this.init()
+
+    const mode = this.resolveRuntimeMode()
+    const effectiveParams = mode === 'legacy' || mode === 'shadow'
+      ? await this.enrichFileData(params)
+      : params
+    if (mode === 'legacy' || mode === 'shadow') {
+      yield* this.invokeLegacyStream(effectiveParams)
+      return
+    }
+
+    yield* this.runtime.invokeStream(effectiveParams)
+  }
+
+  private async *invokeLegacyStream(params: {
     userInput: string
     fileData?: string
     conversationHistory?: string
@@ -393,9 +449,9 @@ export class MapAgent {
       }
 
       // 4. 代码守卫：对最终 HTML 做静态契约检查，必要时自动再修一次
-      if (hasFinalCode && latestFinalCode) {
+      if (config.agentRuntime.enableVerifier && hasFinalCode && latestFinalCode) {
         const guardCallId = nextToolCallId('code_guard.validate')
-        const issues = analyzeGeneratedCode(latestFinalCode)
+        const issues = analyzeGeneratedCode(latestFinalCode, { fileData: params.fileData })
         const blocking = hasBlockingGuardIssue(issues)
         yield {
           type: 'tool_execution_start',
@@ -499,6 +555,27 @@ export class MapAgent {
     }
   }
 
+  async *fixCodeStream(params: {
+    code: string
+    error: string
+    userInput: string
+    fileData?: string
+    llmSelection?: LlmSelection
+  }): AsyncGenerator<AgentStreamChunk> {
+    await this.init()
+
+    const mode = this.resolveRuntimeMode()
+    const effectiveParams = mode === 'legacy' || mode === 'shadow' || mode === 'agent_first_generate'
+      ? await this.enrichFileData(params)
+      : params
+    if (mode === 'legacy' || mode === 'shadow' || mode === 'agent_first_generate') {
+      yield* this.fixLegacyCodeStream(effectiveParams)
+      return
+    }
+
+    yield* this.runtime.fixCodeStream(effectiveParams)
+  }
+
   /**
    * 修复代码错误
    */
@@ -545,7 +622,7 @@ export class MapAgent {
   /**
    * 流式修复代码错误（用于前端在消息面板展示修复过程 + ThoughtChain）
    */
-  async *fixCodeStream(params: {
+  private async *fixLegacyCodeStream(params: {
     code: string
     error: string
     userInput: string
@@ -873,9 +950,9 @@ export class MapAgent {
         isError: sawError || !hasFinalCode,
       }
 
-      if (hasFinalCode && latestFixedCode) {
+      if (config.agentRuntime.enableVerifier && hasFinalCode && latestFixedCode) {
         const guardCallId = nextToolCallId('code_guard.validate')
-        const issues = analyzeGeneratedCode(latestFixedCode)
+        const issues = analyzeGeneratedCode(latestFixedCode, { fileData: params.fileData })
         const blocking = hasBlockingGuardIssue(issues)
         yield {
           type: 'tool_execution_start',
@@ -1023,6 +1100,23 @@ export class MapAgent {
     graph.addEdge('generate', END)
 
     return graph.compile()
+  }
+
+  private resolveRuntimeMode() {
+    const mode = String(config.agentRuntime.mode || 'legacy')
+    if (mode === 'legacy' || mode === 'shadow' || mode === 'agent_first_generate' || mode === 'agent_first_full') {
+      return mode
+    }
+    return 'legacy'
+  }
+
+  private async enrichFileData<T extends { fileData?: string }>(params: T): Promise<T> {
+    if (!params.fileData) return params
+    const inspected = await this.fileIntelligence.enrich(params.fileData)
+    return {
+      ...params,
+      fileData: inspected.fileData,
+    }
   }
 
   /**

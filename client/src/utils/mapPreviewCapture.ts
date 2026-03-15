@@ -2,6 +2,14 @@ import html2canvas from 'html2canvas'
 
 const DEFAULT_MIN_BASE64_LEN = 800
 
+export interface MapPreviewCaptureResult {
+  base64: string
+  mode: 'canvas' | 'dom'
+  canvasCount: number
+  canvasReadable: boolean
+  canvasTainted: boolean
+}
+
 function dataUrlToBase64(dataUrl: string): string | null {
   const raw = String(dataUrl || '')
   const marker = ';base64,'
@@ -15,9 +23,9 @@ function isCaptureValid(base64?: string | null, minLen = DEFAULT_MIN_BASE64_LEN)
   return typeof base64 === 'string' && base64.length >= minLen
 }
 
-function pickLargestCanvas(doc: Document): HTMLCanvasElement | null {
+function pickLargestCanvas(doc: Document): { canvas: HTMLCanvasElement | null; count: number } {
   const canvases = Array.from(doc.querySelectorAll('canvas'))
-  if (!canvases.length) return null
+  if (!canvases.length) return { canvas: null, count: 0 }
   let candidate: HTMLCanvasElement | null = null
   let maxArea = 0
   for (const canvas of canvases) {
@@ -29,7 +37,7 @@ function pickLargestCanvas(doc: Document): HTMLCanvasElement | null {
       candidate = canvas as HTMLCanvasElement
     }
   }
-  return candidate
+  return { canvas: candidate, count: canvases.length }
 }
 
 function findPreviewIframe(): HTMLIFrameElement | null {
@@ -41,7 +49,7 @@ function findPreviewIframe(): HTMLIFrameElement | null {
   return null
 }
 
-export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN): Promise<string> {
+export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN): Promise<MapPreviewCaptureResult> {
   const iframe = findPreviewIframe()
   if (!iframe) throw new Error('未找到地图预览容器')
 
@@ -54,13 +62,25 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
   })
   await new Promise((resolve) => setTimeout(resolve, 220))
 
-  const largestCanvas = pickLargestCanvas(doc)
-  if (largestCanvas) {
+  const canvasMeta = pickLargestCanvas(doc)
+  let canvasReadable = false
+  let canvasTainted = false
+  if (canvasMeta.canvas) {
     try {
-      const canvasBase64 = dataUrlToBase64(largestCanvas.toDataURL('image/png'))
-      if (isCaptureValid(canvasBase64, minLen)) return canvasBase64
+      const canvasBase64 = dataUrlToBase64(canvasMeta.canvas.toDataURL('image/png'))
+      if (isCaptureValid(canvasBase64, minLen)) {
+        canvasReadable = true
+        return {
+          base64: canvasBase64,
+          mode: 'canvas',
+          canvasCount: canvasMeta.count,
+          canvasReadable: true,
+          canvasTainted: false,
+        }
+      }
     } catch {
       // Canvas may be tainted by cross-origin texture, fallback to html2canvas
+      canvasTainted = true
     }
   }
 
@@ -84,5 +104,11 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
   if (!isCaptureValid(base64, minLen)) {
     throw new Error('无法生成有效截图')
   }
-  return base64
+  return {
+    base64,
+    mode: 'dom',
+    canvasCount: canvasMeta.count,
+    canvasReadable,
+    canvasTainted,
+  }
 }

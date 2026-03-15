@@ -31,13 +31,34 @@ GET /api/tianditu/drive?origLng=116.404&origLat=39.915&destLng=121.474&destLat=3
 - `<routelatlon>`：整条路线 `"lng,lat;lng,lat;..."`
 - `<mapinfo><center>`：建议中心点
 
+在当前项目里，前端通常不直接面对这段 XML，而是通过 `/api/tianditu/drive` 代理拿到：
+
+```json
+{
+  "success": true,
+  "data": {
+    "format": "xml",
+    "distance": 6400,
+    "duration": 900,
+    "routelatlon": "116.35506,39.92277;...",
+    "mapinfo": {
+      "center": "116.3762,39.9146",
+      "scale": "11"
+    }
+  }
+}
+```
+
+也就是说，项目内前端代码应直接读取 `payload.data.distance / duration / routelatlon`，不要再自行做 XML 解析。
+
 ## 红线规则（必须遵守）
 
 1. 禁止写模拟路线（如 `var routeCoords = [...]` 占位后直接渲染）
 2. 必须调用真实 `drive` API 并解析返回结果（优先代理）
-3. 不要假设返回 JSON；默认按 XML 解析
+3. 直连官方 `drive` 端点时，不要假设返回 JSON；默认按 XML 解析
 4. 若 API 失败，应显示错误信息，不要偷偷回退成“北京-上海直线”
 5. 必须维护 `loading / ready / empty / error` 四态，不允许一直 Loading
+6. 如果起点、终点是地点名、机构名或地址，而不是显式经纬度，优先先走 `/api/tianditu/geocode?address=...`，不要凭印象手写坐标
 
 ## 路线坐标解析
 
@@ -57,6 +78,56 @@ function parseLatLonPairs(raw) {
     .filter(Boolean);
 }
 ```
+
+## 常用模式：命名地点先地理编码，再做路线规划
+
+```javascript
+function geocodeByProxy(address) {
+  var url = new URL('/api/tianditu/geocode', window.location.origin);
+  url.searchParams.set('address', address);
+
+  return fetch(url.toString())
+    .then(function (res) {
+      if (!res.ok) throw new Error('地理编码失败: HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function (payload) {
+      if (!payload || payload.success !== true) {
+        throw new Error((payload && payload.error) || '地理编码失败');
+      }
+
+      var location = (payload.data && payload.data.location) || {};
+      var lng = Number(location.lon);
+      var lat = Number(location.lat);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        throw new Error('地理编码未返回有效坐标');
+      }
+      return [lng, lat];
+    });
+}
+
+map.on('load', function () {
+  Promise.all([
+    geocodeByProxy('国家基础地理信息中心'),
+    geocodeByProxy('自然资源部'),
+  ]).then(function (coordsPair) {
+    var startCoords = coordsPair[0];
+    var endCoords = coordsPair[1];
+    return fetch(buildDriveProxyUrl(startCoords, endCoords, 0)).then(function (res) {
+      return res.json();
+    });
+  });
+});
+```
+
+这一类场景里，默认不要直接写：
+
+```javascript
+var startCoords = [116.39751, 39.90854];
+var endCoords = [116.404, 39.915];
+```
+
+除非用户已经明确给出了这两个坐标。
 
 ## XML 解析（推荐）
 
@@ -113,17 +184,22 @@ map.on('load', function () {
         throw new Error((payload && payload.error) || '代理请求失败');
       }
       var route = payload.data || {};
-      // 代理已兼容 XML，统一返回 routelatlon / distance / duration
-      route.coords = parseLatLonPairs(route.routelatlon || '');
-      if (!route.coords.length) {
+      // 代理已兼容 XML，统一返回 distance / duration / routelatlon
+      var distanceKm = Number(route.distance);
+      var durationSec = Number(route.duration);
+      var coords = parseLatLonPairs(route.routelatlon || '');
+      if (coords.length < 2) {
         throw new Error('未获取到可绘制的路线坐标');
       }
+
+      if (map.getLayer('route-line')) map.removeLayer('route-line');
+      if (map.getSource('route')) map.removeSource('route');
 
       map.addSource('route', {
         type: 'geojson',
         data: {
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: route.coords },
+          geometry: { type: 'LineString', coordinates: coords },
         },
       });
 
@@ -146,13 +222,13 @@ map.on('load', function () {
       new TMapGL.Marker().setLngLat(shanghai).addTo(map);
 
       var bounds = new TMapGL.LngLatBounds();
-      route.coords.forEach(function (c) { bounds.extend(c); });
+      coords.forEach(function (c) { bounds.extend(c); });
       map.fitBounds(bounds, { padding: 60 });
 
       // 路线信息面板（真实数据）
-      var hours = route.durationSec / 3600;
-      document.getElementById('distanceVal').textContent = route.distanceKm.toFixed(1);
-      document.getElementById('durationVal').textContent = hours.toFixed(1);
+      var hours = Number.isFinite(durationSec) ? (durationSec / 3600) : 0;
+      document.getElementById('distanceVal').textContent = Number.isFinite(distanceKm) ? distanceKm.toFixed(1) : '-';
+      document.getElementById('durationVal').textContent = Number.isFinite(hours) ? hours.toFixed(1) : '-';
     })
     .catch(function (err) {
       document.getElementById('routeError').textContent = '路线规划失败：' + err.message;
@@ -183,6 +259,11 @@ map.on('load', function () {
 
 1. `drive` 常见返回 XML：不要直接 `res.json()`
 2. `routelatlon` 是字符串，需按 `;` 和 `,` 解析为 `[lng, lat]`
-3. `distance` 单位为公里，`duration` 单位为秒
-4. `style` 建议传字符串 `"0"~"3"`，避免类型歧义
-5. 只要拿不到真实路线，就报错，不要回退假坐标
+3. 在当前项目代理里，前端直接读 `payload.data.distance / duration / routelatlon`
+4. `distance` 视为公里、`duration` 视为秒；不要把 `distance` 先 `/1000`
+5. `style` 建议传字符串 `"0"~"3"`，避免类型歧义
+6. 只要拿不到真实路线，就报错，不要回退假坐标
+7. 若后续会重复规划路线，重绘前先清理已有 source/layer，避免重复 ID 报错
+8. 命名地点路线规划时，当前项目的地理编码代理参数名是 `address`，不是 `query`
+9. 当前项目的地理编码代理结果要读 `payload.data.location.lon / lat`，不是 `payload.data.lon / lat`
+10. 起终点标记与弹窗仍然使用标准 TMapGL v5 写法：`new TMapGL.Marker().setLngLat(...).addTo(map)`，以及 `new TMapGL.Popup().setLngLat(...).setHTML(...).addTo(map)`

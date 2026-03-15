@@ -1,0 +1,1 @@
+export const DEFAULT_TIANDITU_TOKEN = '4043dde46add842282bacc412299311d'

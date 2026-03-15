@@ -14,6 +14,7 @@ const store = new ShareStore({
     chromiumPath: config.share.thumbnail.chromiumPath,
     timeoutMs: config.share.thumbnail.timeoutMs,
     waitAfterLoadMs: config.share.thumbnail.waitAfterLoadMs,
+    maxConcurrentRenders: config.share.thumbnail.maxConcurrentRenders,
   },
 })
 const suggestionService = new ShareSuggestionService({

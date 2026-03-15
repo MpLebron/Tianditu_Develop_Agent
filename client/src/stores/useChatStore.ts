@@ -4,6 +4,8 @@ import { useMapStore } from './useMapStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
 import { useModelStore } from './useModelStore'
 import { createId } from '../utils/createId'
+import { extractFirstCompleteHtmlDocument } from '../utils/extractFirstCompleteHtmlDocument'
+import { injectTiandituTokenPlaceholders } from '../utils/injectTiandituTokenPlaceholders'
 
 interface ChatStore {
   messages: Message[]
@@ -58,6 +60,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     let textContent = ''
     let receivedCode = false
     let receivedCodeDelta = false
+    let previewCommitted = false
+
+    const extractRenderableHtml = (code: string | null | undefined) => {
+      const html = extractFirstCompleteHtmlDocument(code)
+      return html ? injectTiandituTokenPlaceholders(html) : ''
+    }
 
     const ensureAssistantMessage = () => {
       if (assistantCreated) return
@@ -92,6 +100,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               isError: patch.isError,
               startedAt: patch.startedAt,
               endedAt: patch.endedAt,
+              decisionSource: patch.decisionSource,
+              selectedPackages: patch.selectedPackages,
+              selectedReferences: patch.selectedReferences,
+              selectedContracts: patch.selectedContracts,
+              fallbackReason: patch.fallbackReason,
+              vetoApplied: patch.vetoApplied,
             })
           } else {
             chain[idx] = { ...chain[idx], ...patch }
@@ -117,7 +131,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             toolName: String(chunk.toolName || 'unknown'),
             args: chunk.args,
             status: 'running',
-            startedAt: Date.now(),
+            startedAt: typeof chunk.startedAtMs === 'number' ? chunk.startedAtMs : Date.now(),
           })
           return
         }
@@ -129,7 +143,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             result: chunk.result,
             isError: !!chunk.isError,
             status: chunk.isError ? 'error' : 'done',
-            endedAt: Date.now(),
+            endedAt: typeof chunk.endedAtMs === 'number' ? chunk.endedAtMs : Date.now(),
+            decisionSource: typeof chunk.decisionSource === 'string' ? chunk.decisionSource : undefined,
+            selectedPackages: Array.isArray(chunk.selectedPackages) ? chunk.selectedPackages : undefined,
+            selectedReferences: Array.isArray(chunk.selectedReferences) ? chunk.selectedReferences : undefined,
+            selectedContracts: Array.isArray(chunk.selectedContracts) ? chunk.selectedContracts : undefined,
+            fallbackReason: typeof chunk.fallbackReason === 'string' ? chunk.fallbackReason : undefined,
+            vetoApplied: chunk.vetoApplied === true,
           })
           return
         }
@@ -152,26 +172,65 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             ),
           }))
         } else if (chunk.type === 'code_start') {
+          if (receivedCode) return
           // 代码开始生成 → 立即展开代码面板，开始流式显示
           useMapStore.getState().startCodeStream()
           useWorkspaceStore.getState().setShowCode(true)
+        } else if (chunk.type === 'code_reset') {
+          if (receivedCode) return
+          const mapState = useMapStore.getState()
+          if (previewCommitted || mapState.previewCode) {
+            return
+          }
+          useMapStore.getState().resetCodeStream()
+          useWorkspaceStore.getState().setShowCode(true)
         } else if (chunk.type === 'code_delta') {
+          if (receivedCode) return
           // 代码增量 → 追加到流式代码缓冲
           receivedCodeDelta = true
-          useMapStore.getState().appendCodeDelta(chunk.content)
+          const mapState = useMapStore.getState()
+          if (previewCommitted || mapState.previewCode) {
+            return
+          }
+          useMapStore.getState().appendCodeDelta(String(chunk.content || ''))
+          const updatedStreamingCode = useMapStore.getState().streamingCode || ''
+          const previewCode = extractRenderableHtml(updatedStreamingCode)
+          if (previewCode) {
+            useMapStore.getState().commitPreviewCode(previewCode)
+            set({ error: null })
+            previewCommitted = true
+          }
         } else if (chunk.type === 'code') {
+          if (receivedCode) return
           receivedCode = true
+          const code = String(chunk.content || '')
+          const mapState = useMapStore.getState()
+          const extractedFinalCode = extractRenderableHtml(code)
+          const finalCode = mapState.previewCode
+            || extractedFinalCode
+            || injectTiandituTokenPlaceholders(code)
           // 收到完整代码 → 结束流式，渲染地图
           ensureAssistantMessage()
           // 更新消息的 code 字段，并标记流式结束
           set((s) => ({
             messages: s.messages.map((m) =>
-              m.id === assistantId ? { ...m, code: chunk.content, streaming: false } : m,
+              m.id === assistantId ? { ...m, code: finalCode, streaming: false } : m,
             ),
           }))
           // 完成流式：设置最终代码并渲染地图
-          useMapStore.getState().finishCodeStream(chunk.content)
+          useMapStore.getState().finishCodeStream(finalCode)
+          set({ error: null })
         } else if (chunk.type === 'error') {
+          const mapState = useMapStore.getState()
+          const recoveredHtml = mapState.previewCode
+            || extractRenderableHtml(mapState.streamingCode)
+            || extractRenderableHtml(mapState.currentCode)
+
+          // 如果已经有一份可运行的完整 HTML，就不要再把通用“不完整”错误展示给用户
+          if (recoveredHtml) {
+            return
+          }
+
           set({ error: chunk.content })
         }
       } catch {
@@ -181,32 +240,58 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     /** 流结束后清理状态 */
     const finalize = () => {
-      // 兜底：如果服务端只返回了 code_delta 没有最终 code，则使用已拼接代码收尾
+      // 兜底：如果服务端只返回了 code_delta 没有最终 code，则优先使用已预渲染代码收尾
       const mapState = useMapStore.getState()
       if (!receivedCode && receivedCodeDelta) {
-        const recoveredCode = (mapState.streamingCode || '').trim()
-        if (recoveredCode) {
-          useMapStore.getState().finishCodeStream(recoveredCode)
+        const previewCode = mapState.previewCode
+        if (previewCode) {
+          useMapStore.getState().finishCodeStream(previewCode)
           ensureAssistantMessage()
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantId
                 ? {
                     ...m,
-                    code: recoveredCode,
-                    content: `${textContent}\n\n[系统提示] 模型输出在代码中途结束，已自动使用当前代码收尾。`,
+                    code: previewCode,
+                    content: textContent,
                     streaming: false,
                   }
                 : m,
             ),
           }))
+          set({ error: null })
           receivedCode = true
+        } else {
+          const recoveredHtml = extractRenderableHtml(mapState.streamingCode)
+          if (recoveredHtml) {
+            useMapStore.getState().finishCodeStream(recoveredHtml)
+            ensureAssistantMessage()
+            set((s) => ({
+              messages: s.messages.map((m) =>
+                m.id === assistantId
+                  ? {
+                      ...m,
+                      code: recoveredHtml,
+                      content: `${textContent}\n\n[系统提示] 模型输出在代码中途结束，已自动使用当前代码收尾。`,
+                      streaming: false,
+                    }
+                  : m,
+              ),
+            }))
+            set({ error: null })
+            receivedCode = true
+          }
         }
       }
 
       // 没拿到最终代码且没有可恢复代码时，兜底关闭代码流状态，避免 UI 一直“生成中”
-      if (!receivedCode && mapState.codeStreaming) {
-        useMapStore.setState({ codeStreaming: false, streamingCode: null })
+      const latestMapState = useMapStore.getState()
+      if (!receivedCode && latestMapState.codeStreaming) {
+        useMapStore.setState({
+          previewCode: null,
+          codeStreaming: false,
+          streamingCode: null,
+        })
       }
 
       if (assistantCreated) {
@@ -307,6 +392,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     let receivedCode = false
     let explanationStarted = false
     let textContent = ''
+    let streamedFixCode = ''
 
     const ensureAssistantMessage = () => {
       if (assistantCreated) return
@@ -352,6 +438,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               isError: patch.isError,
               startedAt: patch.startedAt,
               endedAt: patch.endedAt,
+              decisionSource: patch.decisionSource,
+              selectedPackages: patch.selectedPackages,
+              selectedReferences: patch.selectedReferences,
+              selectedContracts: patch.selectedContracts,
+              fallbackReason: patch.fallbackReason,
+              vetoApplied: patch.vetoApplied,
             })
           } else {
             chain[idx] = { ...chain[idx], ...patch }
@@ -424,7 +516,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               toolName: String(chunk.toolName || 'unknown'),
               args: chunk.args,
               status: 'running',
-              startedAt: Date.now(),
+              startedAt: typeof chunk.startedAtMs === 'number' ? chunk.startedAtMs : Date.now(),
             })
             return
           }
@@ -436,7 +528,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               result: chunk.result,
               isError: !!chunk.isError,
               status: chunk.isError ? 'error' : 'done',
-              endedAt: Date.now(),
+              endedAt: typeof chunk.endedAtMs === 'number' ? chunk.endedAtMs : Date.now(),
+              decisionSource: typeof chunk.decisionSource === 'string' ? chunk.decisionSource : undefined,
+              selectedPackages: Array.isArray(chunk.selectedPackages) ? chunk.selectedPackages : undefined,
+              selectedReferences: Array.isArray(chunk.selectedReferences) ? chunk.selectedReferences : undefined,
+              selectedContracts: Array.isArray(chunk.selectedContracts) ? chunk.selectedContracts : undefined,
+              fallbackReason: typeof chunk.fallbackReason === 'string' ? chunk.fallbackReason : undefined,
+              vetoApplied: chunk.vetoApplied === true,
             })
             return
           }
@@ -447,28 +545,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           }
 
           if (chunk.type === 'code_start') {
-            useWorkspaceStore.getState().setShowCode(true)
-            useMapStore.getState().startCodeStream()
+            return
+          }
+
+          if (chunk.type === 'code_reset') {
+            if (receivedCode) return
+            streamedFixCode = ''
             return
           }
 
           if (chunk.type === 'code_delta') {
-            useMapStore.getState().appendCodeDelta(String(chunk.content || ''))
+            if (receivedCode) return
+            streamedFixCode += String(chunk.content || '')
             return
           }
 
           if (chunk.type === 'code') {
+            if (receivedCode) return
             ensureAssistantMessage()
             receivedCode = true
             const code = String(chunk.content || '')
+            const finalCode = injectTiandituTokenPlaceholders(extractFirstCompleteHtmlDocument(code) || code)
             set((s) => ({
               messages: s.messages.map((m) =>
-                m.id === assistantId ? { ...m, code, streaming: false } : m,
+                m.id === assistantId ? { ...m, code: finalCode, streaming: false } : m,
               ),
             }))
             // 修复成功后直接替换代码并清空 execError；计数递增防止连续无限重试
             useMapStore.setState({
-              currentCode: code,
+              currentCode: finalCode,
               streamingCode: null,
               codeStreaming: false,
               execError: null,
@@ -504,8 +609,33 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (buffer.trim()) processLine(buffer)
 
       if (!receivedCode) {
-        const partial = (useMapStore.getState().streamingCode || '').trim()
-        if (partial) {
+        const recoveredFixCode = injectTiandituTokenPlaceholders(
+          extractFirstCompleteHtmlDocument(streamedFixCode) || '',
+        )
+        if (recoveredFixCode) {
+          receivedCode = true
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === assistantId ? { ...m, code: recoveredFixCode, streaming: false } : m,
+            ),
+          }))
+          useMapStore.setState({
+            currentCode: recoveredFixCode,
+            previewCode: null,
+            streamingCode: null,
+            codeStreaming: false,
+            execError: null,
+            fixing: false,
+            fixingSource: null,
+            ...(source === 'visual'
+              ? { lastVisualCheckedCodeHash: null }
+              : { visualFixRetryCount: 0, lastVisualCheckedCodeHash: null }),
+            ...(source === 'visual'
+              ? { visualFixRetryCount: attempt }
+              : { fixRetryCount: attempt }),
+          })
+          appendText('\n\n修复输出未显式返回最终 code 事件，已自动提取完整 HTML 并应用。')
+        } else if (streamedFixCode.trim()) {
           appendText('\n\n检测到修复输出在代码中途结束，本轮未自动应用截断代码。')
         }
         useMapStore.setState({

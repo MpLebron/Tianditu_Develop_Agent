@@ -1,0 +1,321 @@
+import { describe, expect, it } from 'vitest'
+import { analyzeGeneratedCode } from '../src/agent/CodeVerifier.js'
+
+const runtimeFileContext = `
+文件: village-renovation.geojson
+文件获取链接URL: http://localhost:3000/uploads/example.geojson
+## 运行时文件契约（唯一可信，代码必须只按本节读取）
+\`\`\`json
+{
+  "version": "geojson-runtime-contract-v2",
+  "kind": "geojson",
+  "fileUrl": "http://localhost:3000/uploads/example.geojson",
+  "responseShape": "FeatureCollection",
+  "geojsonPath": "rawData",
+  "forbiddenPaths": ["rawData.data", "rawData.rawData"],
+  "featureCount": 268,
+  "geometryTypeStats": { "MultiPolygon": 268 },
+  "pointAccessorByGeometryType": {
+    "MultiPolygon": "geometry.coordinates[0][0][0]"
+  },
+  "safeGuards": ["传入 map.addSource 的 data 必须是 FeatureCollection/Feature 对象，禁止传 features 数组"]
+}
+\`\`\`
+`
+
+const runtimeJsonObjectContext = `
+文件: a.json
+文件获取链接URL: http://localhost:3000/uploads/example.json
+## 运行时文件契约（唯一可信，代码必须只按本节读取）
+\`\`\`json
+{
+  "version": "json-runtime-contract-v1",
+  "kind": "json",
+  "fileUrl": "http://localhost:3000/uploads/example.json",
+  "responseShape": "object",
+  "rootKeys": ["中央红军（红一方面军）", "红二方面军", "红四方面军"],
+  "canonicalAccess": [
+    "rawData[\\"中央红军（红一方面军）\\"]",
+    "rawData[\\"红二方面军\\"]",
+    "rawData[\\"红四方面军\\"]",
+    "item[\\"地点坐标\\"] -> [lng, lat]"
+  ],
+  "forbiddenPatterns": ["rawData[0]", "data[0]"],
+  "encodingNormalized": true,
+  "safeGuards": [
+    "根结构是对象；不要使用 rawData[0] 或 data[0]。",
+    "顶层 key、字段名只允许来自运行时契约或自动数据理解结果。"
+  ]
+}
+\`\`\`
+`
+
+const runtimeJsonArrayContext = `
+文件: events.json
+文件获取链接URL: http://localhost:3000/uploads/events.json
+## 运行时文件契约（唯一可信，代码必须只按本节读取）
+\`\`\`json
+{
+  "version": "json-runtime-contract-v1",
+  "kind": "json",
+  "fileUrl": "http://localhost:3000/uploads/events.json",
+  "responseShape": "array",
+  "arrayLength": 12,
+  "canonicalAccess": ["Array.isArray(rawData)", "rawData[0]", "item[\\"地点坐标\\"] -> [lng, lat]"],
+  "forbiddenPatterns": ["rawData.someKey", "data.someKey"],
+  "encodingNormalized": true,
+  "safeGuards": [
+    "根结构是数组；不要直接假设 rawData.someKey。",
+    "访问数组元素前必须判空。"
+  ]
+}
+\`\`\`
+`
+
+describe('CodeVerifier symbol text font checks', () => {
+  it('flags symbol text layers without explicit text-font', () => {
+    const issues = analyzeGeneratedCode(`
+      map.addLayer({
+        id: 'labels',
+        type: 'symbol',
+        source: 'points',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-size': 12
+        }
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'symbol-text-font-missing')).toBe(true)
+  })
+
+  it('flags unsupported symbol text fonts', () => {
+    const issues = analyzeGeneratedCode(`
+      map.addLayer({
+        id: 'labels',
+        type: 'symbol',
+        source: 'points',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['Microsoft YaHei'],
+          'text-size': 12
+        }
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'symbol-text-font-unsupported')).toBe(true)
+  })
+
+  it('accepts supported symbol text font while keeping an advisory warning', () => {
+    const issues = analyzeGeneratedCode(`
+      map.addLayer({
+        id: 'labels',
+        type: 'symbol',
+        source: 'points',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['WenQuanYi Micro Hei Mono'],
+          'text-size': 12
+        }
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'symbol-text-font-missing')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'symbol-text-font-unsupported')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'symbol-text-font')).toBe(true)
+  })
+
+  it('flags forbidden GeoJSON wrapper paths from runtime file contract', () => {
+    const issues = analyzeGeneratedCode(`
+      fetch(url)
+        .then((res) => res.json())
+        .then((rawData) => {
+          var geojson = rawData.data
+          map.addSource('village-data', { type: 'geojson', data: geojson })
+        })
+    `, { fileData: runtimeFileContext })
+
+    expect(issues.some((issue) => issue.code === 'runtime-geojson-path-violated')).toBe(true)
+  })
+
+  it('allows iterating feature collections when source data stays a FeatureCollection', () => {
+    const issues = analyzeGeneratedCode(`
+      fetch(url)
+        .then((res) => res.json())
+        .then((rawData) => {
+          var geojson = rawData
+          geojson.features.forEach(function(feature) {
+            console.log(feature.properties)
+          })
+          map.addSource('village-data', { type: 'geojson', data: geojson })
+        })
+    `, { fileData: runtimeFileContext })
+
+    expect(issues.some((issue) => issue.code === 'runtime-geojson-path-violated')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'geojson-features-array-passed')).toBe(false)
+  })
+
+  it('flags passing features array directly into geojson source', () => {
+    const issues = analyzeGeneratedCode(`
+      var geojson = { type: 'FeatureCollection', features: [] }
+      map.addSource('village-data', {
+        type: 'geojson',
+        data: geojson.features
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'geojson-features-array-passed')).toBe(true)
+  })
+
+  it('flags unsupported fill paint properties such as fill-width', () => {
+    const issues = analyzeGeneratedCode(`
+      map.on('load', function() {
+        map.addLayer({
+          id: 'village-fill',
+          type: 'fill',
+          source: 'village-data',
+          paint: {
+            'fill-color': '#ff0000',
+            'fill-outline-color': '#333333',
+            'fill-width': 1
+          }
+        })
+      })
+    `)
+
+    const issue = issues.find((entry) => entry.code === 'layer-paint-property-invalid')
+    expect(issue).toBeDefined()
+    expect(issue?.message).toContain('fill-width')
+  })
+
+  it('allows line-width on line layers', () => {
+    const issues = analyzeGeneratedCode(`
+      map.on('load', function() {
+        map.addLayer({
+          id: 'village-outline',
+          type: 'line',
+          source: 'village-data',
+          paint: {
+            'line-color': '#333333',
+            'line-width': 2
+          }
+        })
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'layer-paint-property-invalid')).toBe(false)
+  })
+
+  it('blocks object-root JSON from being accessed as an array', () => {
+    const issues = analyzeGeneratedCode(`
+      fetch(url)
+        .then((res) => res.json())
+        .then((data) => {
+          const rawData = data[0]
+          console.log(rawData["中央红军（红一方面军）"])
+        })
+    `, { fileData: runtimeJsonObjectContext })
+
+    expect(issues.some((issue) => issue.code === 'runtime-json-root-object-violated')).toBe(true)
+  })
+
+  it('warns when object-root JSON uses invented top-level keys', () => {
+    const issues = analyzeGeneratedCode(`
+      fetch(url)
+        .then((res) => res.json())
+        .then((rawData) => {
+          const teams = rawData["队伍列表"]
+          console.log(teams)
+        })
+    `, { fileData: runtimeJsonObjectContext })
+
+    expect(issues.some((issue) => issue.code === 'runtime-json-unknown-root-key')).toBe(true)
+  })
+
+  it('blocks array-root JSON from being accessed as an object root', () => {
+    const issues = analyzeGeneratedCode(`
+      fetch(url)
+        .then((res) => res.json())
+        .then((rawData) => {
+          rawData.events.forEach(function(item) {
+            console.log(item)
+          })
+        })
+    `, { fileData: runtimeJsonArrayContext })
+
+    expect(issues.some((issue) => issue.code === 'runtime-json-root-array-violated')).toBe(true)
+  })
+
+  it('blocks map source/layer mutations when no load guard exists', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [116.4, 39.9], zoom: 6 })
+      map.addSource('route', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      })
+      map.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route'
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-load-guard-missing')).toBe(true)
+  })
+
+  it('blocks suspicious load order when fetch/render starts before load registration', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [105, 34], zoom: 4 })
+
+      fetch(url)
+        .then((res) => res.json())
+        .then((rawData) => {
+          map.addSource('events', {
+            type: 'geojson',
+            data: rawData
+          })
+        })
+
+      map.on('load', function() {
+        map.addControl(new TMapGL.NavigationControl(), 'top-right')
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-load-order-suspicious')).toBe(true)
+  })
+
+  it('warns when named route planning hardcodes start/end coordinates without geocoding', () => {
+    const issues = analyzeGeneratedCode(`
+      var startCoords = [116.39751, 39.90854]
+      var endCoords = [116.404, 39.915]
+      var startName = '国家基础地理信息中心'
+      var endName = '自然资源部'
+      var url = new URL('/api/tianditu/drive', window.location.origin)
+      url.searchParams.set('origLng', String(startCoords[0]))
+      url.searchParams.set('origLat', String(startCoords[1]))
+      url.searchParams.set('destLng', String(endCoords[0]))
+      url.searchParams.set('destLat', String(endCoords[1]))
+    `)
+
+    expect(issues.some((issue) => issue.code === 'named-route-geocode-recommended')).toBe(true)
+  })
+
+  it('does not warn when named route planning already geocodes locations first', () => {
+    const issues = analyzeGeneratedCode(`
+      async function geocodePlace(name) {
+        var url = new URL('/api/tianditu/geocode', window.location.origin)
+        url.searchParams.set('address', name)
+        return fetch(url.toString()).then(function(res) { return res.json() })
+      }
+      Promise.all([
+        geocodePlace('国家基础地理信息中心'),
+        geocodePlace('自然资源部')
+      ]).then(function(result) {
+        var routeUrl = new URL('/api/tianditu/drive', window.location.origin)
+        console.log(routeUrl, result)
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'named-route-geocode-recommended')).toBe(false)
+  })
+})

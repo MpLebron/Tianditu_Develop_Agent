@@ -1,10 +1,18 @@
 import multer from 'multer'
 import { v4 as uuidv4 } from 'uuid'
-import { extname } from 'path'
+import { mkdir } from 'fs/promises'
+import { extname, resolve } from 'path'
 import { config } from '../config.js'
+import { getRequestContext } from './requestContext.js'
 
 const storage = multer.diskStorage({
-  destination: config.upload.dir,
+  destination: (req, _file, cb) => {
+    const sessionId = getRequestContext(req).sessionId
+    const targetDir = resolve(config.upload.dir, sessionId)
+    mkdir(targetDir, { recursive: true })
+      .then(() => cb(null, targetDir))
+      .catch((err) => cb(err, targetDir))
+  },
   filename: (_req, file, cb) => {
     const ext = extname(file.originalname)
     cb(null, `${uuidv4()}${ext}`)

@@ -23,7 +23,7 @@ export class DocLoader {
   /**
    * 加载 skill 包入口文件（SKILL.md）
    */
-  async loadSkillEntry(packageId = 'tianditu-js-api-v5'): Promise<string> {
+  async loadSkillEntry(packageId = 'tianditu-jsapi'): Promise<string> {
     return (await this.skillStore.loadSkillEntry(packageId)) || ''
   }
 

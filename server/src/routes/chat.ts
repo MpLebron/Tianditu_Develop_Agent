@@ -1,7 +1,6 @@
 import { Router, type Request } from 'express'
 import { constants as fsConstants } from 'fs'
-import { access, stat, writeFile } from 'fs/promises'
-import { randomUUID } from 'crypto'
+import { access, stat } from 'fs/promises'
 import { basename, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { MapAgent } from '../agent/MapAgent.js'
@@ -17,6 +16,18 @@ import {
   resolveLlmSelection,
   type LlmSelection,
 } from '../provider/index.js'
+import {
+  buildRuntimeGeojsonContract,
+  buildRuntimeJsonContract,
+  formatRuntimeGeojsonContract,
+  formatRuntimeJsonContract,
+} from '../agent/FileContextContract.js'
+import { getRequestContext } from '../middleware/requestContext.js'
+import {
+  buildUploadRelativeUrl,
+  normalizeStructuredRuntime,
+  saveNormalizedStructuredData,
+} from '../services/StructuredFileRuntime.js'
 
 const router = Router()
 const agent = new MapAgent()
@@ -30,6 +41,7 @@ const visualRenderService = new VisualRenderService({
   waitAfterLoadMs: config.visualInspection.waitAfterLoadMs,
   viewportWidth: config.visualInspection.viewportWidth,
   viewportHeight: config.visualInspection.viewportHeight,
+  maxConcurrentRenders: config.visualInspection.maxConcurrentRenders,
 })
 const visualInspectionService = new VisualInspectionService({
   timeoutMs: config.visualInspection.llmTimeoutMs,
@@ -59,6 +71,7 @@ const BUILTIN_SAMPLE_FILES = {
   'village-renovation': resolve(builtinSampleDir, 'village-renovation.geojson'),
   'fulian-centers': resolve(builtinSampleDir, 'fulian-centers.geojson'),
   'china-flood-events': resolve(builtinSampleDir, 'china-flood-events.geojson'),
+  'long-march': resolve(builtinSampleDir, 'long-march.json'),
 } as const
 
 type BuiltinSampleId = keyof typeof BUILTIN_SAMPLE_FILES
@@ -101,23 +114,6 @@ function buildAbsoluteFileUrl(req: Request, relativePath: string): string | unde
   } catch {
     return undefined
   }
-}
-
-function ensureFeatureCollection(geojson: any): any {
-  if (!geojson || typeof geojson !== 'object') return geojson
-  if (geojson.type === 'FeatureCollection') return geojson
-  if (geojson.type === 'Feature') {
-    return { type: 'FeatureCollection', features: [geojson] }
-  }
-  return geojson
-}
-
-async function saveNormalizedGeoJSON(req: Request, geojson: any): Promise<string> {
-  const normalizedName = `${randomUUID()}.geojson`
-  const relativeUrl = `/uploads/${normalizedName}`
-  const filePath = `${config.upload.dir}/${normalizedName}`
-  await writeFile(filePath, JSON.stringify(geojson), 'utf-8')
-  return buildAbsoluteFileUrl(req, relativeUrl) || relativeUrl
 }
 
 function truncateText(value: string, maxLen = MAX_SAMPLE_STRING_LEN): string {
@@ -225,54 +221,6 @@ function summarizeFeatureForSample(feature: any): any {
   }
 }
 
-function getGeometryTypeStats(features: any[]): Record<string, number> {
-  const stats: Record<string, number> = {}
-  for (const feature of features || []) {
-    const t = feature?.geometry?.type || 'Unknown'
-    stats[t] = (stats[t] || 0) + 1
-  }
-  return stats
-}
-
-function buildGeojsonContract(params: {
-  geojsonPath: string
-  featureCollection: any
-}): string {
-  const features = Array.isArray(params.featureCollection?.features)
-    ? params.featureCollection.features
-    : []
-
-  const contract = {
-    version: 'geojson-contract-v1',
-    geojsonPath: params.geojsonPath,
-    featureCount: features.length,
-    geometryTypeStats: getGeometryTypeStats(features),
-    pointAccessorByGeometryType: {
-      Point: 'geometry.coordinates',
-      MultiPoint: 'geometry.coordinates[0]',
-      LineString: 'geometry.coordinates[0]',
-      MultiLineString: 'geometry.coordinates[0][0]',
-      Polygon: 'geometry.coordinates[0][0]',
-      MultiPolygon: 'geometry.coordinates[0][0][0]',
-    },
-    safeGuards: [
-      '访问数组索引前必须判空：Array.isArray(x) && x.length > 0',
-      '运行时禁止使用预览字段 coordinatesPreview',
-      '对 e.features 访问前必须判空：if (!e.features || !e.features.length) return',
-      '传入 map.addSource 的 data 必须是 FeatureCollection/Feature 对象',
-    ],
-  }
-
-  return [
-    '数据契约(JSON，运行时优先遵循):',
-    JSON.stringify(contract, null, 2),
-    '运行时强约束:',
-    '- 运行时禁止字段: coordinatesPreview',
-    '- Point/MultiPoint 提取规则: Point 用 geometry.coordinates；MultiPoint 用 geometry.coordinates[0]',
-    '- 访问 [0] 前必须先判空：Array.isArray(x) && x.length > 0',
-  ].join('\n')
-}
-
 function buildGeojsonFileContext(params: {
   fileName: string
   fileUrl: string
@@ -282,7 +230,8 @@ function buildGeojsonFileContext(params: {
   const featureSamples = Array.isArray(params.normalizedGeoJSON?.features)
     ? params.normalizedGeoJSON.features.slice(0, SAMPLE_FEATURE_COUNT).map(summarizeFeatureForSample)
     : []
-  const contract = buildGeojsonContract({
+  const contract = buildRuntimeGeojsonContract({
+    fileUrl: params.fileUrl,
     geojsonPath: 'rawData',
     featureCollection: params.normalizedGeoJSON,
   })
@@ -290,13 +239,61 @@ function buildGeojsonFileContext(params: {
   return [
     `文件: ${params.fileName}`,
     `文件获取链接URL: ${params.fileUrl}`,
-    '返回结构: 标准 GeoJSON FeatureCollection',
-    'GeoJSON提取路径: rawData',
-    `原始文件结构说明: ${params.originalSummaryLine}`,
-    contract,
-    `GeoJSON 数据样例（前 ${SAMPLE_FEATURE_COUNT} 个要素，已截断长字段/坐标）:`,
+    formatRuntimeGeojsonContract(contract),
+    '## 运行时强约束',
+    '- fetch(url).json() 的结果变量记为 rawData 时，必须直接把 rawData 当作 GeoJSON 使用。',
+    '- 禁止根据原始来源去猜测 rawData.data、rawData.rawData 等额外包装层。',
+    '- 允许为了遍历、统计、热力图权重计算而读取 FeatureCollection.features；但禁止把 features 数组直接传给 map.addSource。',
+    '- coordinatesPreview 仅用于预览；运行时代码统一读取 geometry.coordinates。',
+    '- 传给 map.addSource({ type: "geojson", data }) 的 data 必须是 FeatureCollection/Feature 对象，禁止传 features 数组。',
+    `## GeoJSON 数据样例（前 ${SAMPLE_FEATURE_COUNT} 个要素，已截断长字段/坐标）`,
     JSON.stringify(featureSamples, null, 2),
+    '## 原始来源附注（仅供溯源，禁止作为运行时代码读取路径）',
+    `- 原始文件结构说明: ${params.originalSummaryLine}`,
+    '- 后端已经将该文件归一化为新的 GeoJSON 文件 URL；运行时代码只能按“运行时文件契约”中的 fileUrl 与 geojsonPath 读取。',
   ].join('\n')
+}
+
+function buildJsonFileContext(params: {
+  fileName: string
+  fileUrl: string
+  originalSummaryLine: string
+  normalizedJson: any
+}): string {
+  const contract = buildRuntimeJsonContract({
+    fileUrl: params.fileUrl,
+    jsonData: params.normalizedJson,
+  })
+  const sample = sanitizeForSample(params.normalizedJson)
+  const sampleLabel = Array.isArray(params.normalizedJson)
+    ? `JSON 数据样例（前 ${Math.min(params.normalizedJson.length, SAMPLE_ROW_COUNT)} 项，已截断长字段）`
+    : 'JSON 数据样例（根对象节选，已截断长字段）'
+
+  return [
+    `文件: ${params.fileName}`,
+    `文件获取链接URL: ${params.fileUrl}`,
+    formatRuntimeJsonContract(contract),
+    '## 运行时强约束',
+    '- fetch(url).json() 的结果变量记为 rawData 时，必须严格按 canonicalAccess 访问，不要自行猜测根结构。',
+    '- responseShape=object 时，禁止使用 rawData[0] / data[0] 这类数组根写法。',
+    '- responseShape=array 时，禁止直接假设 rawData.someKey；应先访问数组元素再读取字段。',
+    '- 顶层 key、字段名、坐标字段只允许来自运行时契约或自动数据理解结果，禁止凭空发明“第一支队伍/第二支队伍/队伍列表”等别名。',
+    `## ${sampleLabel}`,
+    JSON.stringify(sample, null, 2),
+    '## 原始来源附注（仅供溯源，禁止作为运行时代码读取路径）',
+    `- 原始文件结构说明: ${params.originalSummaryLine}`,
+    '- 后端已经将该文件归一化为新的 UTF-8 JSON 文件 URL；运行时代码只能按“运行时文件契约”中的 fileUrl 读取。',
+  ].join('\n')
+}
+
+async function saveNormalizedRuntimeFile(req: Request, normalizedData: any, ext: '.json' | '.geojson'): Promise<string> {
+  const sessionId = getRequestContext(req).sessionId
+  const relativeUrl = await saveNormalizedStructuredData({
+    sessionId,
+    normalizedData,
+    ext,
+  })
+  return buildAbsoluteFileUrl(req, relativeUrl) || relativeUrl
 }
 
 /** 解析上传的文件为文本摘要（含文件访问 URL） */
@@ -304,52 +301,39 @@ async function parseUploadedFile(file: Express.Multer.File, req: Request): Promi
   try {
     const parsed = await fileParser.parse(file.path)
     // 构建原始文件 URL（仅兜底使用）
-    const rawFileUrl = `/uploads/${file.filename}`
+    const rawFileUrl = buildUploadRelativeUrl(file.path)
     const rawPreferredFileUrl = buildAbsoluteFileUrl(req, rawFileUrl) || rawFileUrl
+    const normalizedRuntime = normalizeStructuredRuntime(parsed)
+    const originalSummaryLine = parsed.summary.split('\n')[0] || parsed.summary
 
-    if (parsed.geojson) {
-      const converted = GeoJSONParser.convertGeoJSON(parsed.geojson)
-      const normalizedGeoJSON = ensureFeatureCollection(converted)
-      const normalizedFileUrl = await saveNormalizedGeoJSON(req, normalizedGeoJSON)
-      const originalSummaryLine = parsed.summary.split('\n')[0] || parsed.summary
+    if (normalizedRuntime?.runtimeKind === 'geojson') {
+      const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.geojson')
       return buildGeojsonFileContext({
         fileName: file.originalname,
         fileUrl: normalizedFileUrl,
         originalSummaryLine,
-        normalizedGeoJSON,
+        normalizedGeoJSON: normalizedRuntime.normalizedData,
       })
-    } else {
-      const geojson = GeoJSONParser.fromTableData(parsed.rows)
-      const rowSamples = parsed.rows.slice(0, SAMPLE_ROW_COUNT).map((row) => sanitizeForSample(row))
-      const normalizedTableGeojson = geojson
-        ? ensureFeatureCollection(GeoJSONParser.convertGeoJSON(geojson))
-        : null
-      const normalizedFileUrl = normalizedTableGeojson
-        ? await saveNormalizedGeoJSON(req, normalizedTableGeojson)
-        : null
-      let result = [
-        `文件: ${file.originalname}`,
-        `文件获取链接URL: ${normalizedFileUrl || rawPreferredFileUrl}`,
-        ...(normalizedFileUrl
-          ? [
-            '返回结构: 标准 GeoJSON FeatureCollection',
-            'GeoJSON提取路径: rawData',
-            '来源: 由表格数据自动转换生成规范化 GeoJSON',
-            buildGeojsonContract({
-              geojsonPath: 'rawData',
-              featureCollection: normalizedTableGeojson,
-            }),
-          ]
-          : []),
-        parsed.summary,
-        `前 ${SAMPLE_ROW_COUNT} 行数据（已截断长字段）:`,
-        JSON.stringify(rowSamples, null, 2),
-      ].join('\n')
-      if (geojson) {
-        result += `\n\n自动检测到经纬度字段，已生成 GeoJSON（${geojson.features.length} 个点）`
-      }
-      return result
     }
+
+    if (normalizedRuntime?.runtimeKind === 'json') {
+      const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.json')
+      return buildJsonFileContext({
+        fileName: file.originalname,
+        fileUrl: normalizedFileUrl,
+        originalSummaryLine,
+        normalizedJson: normalizedRuntime.normalizedData,
+      })
+    }
+
+    const rowSamples = parsed.rows.slice(0, SAMPLE_ROW_COUNT).map((row) => sanitizeForSample(row))
+    return [
+      `文件: ${file.originalname}`,
+      `文件获取链接URL: ${rawPreferredFileUrl}`,
+      parsed.summary,
+      `前 ${SAMPLE_ROW_COUNT} 行数据（已截断长字段）:`,
+      JSON.stringify(rowSamples, null, 2),
+    ].join('\n')
   } catch (err: any) {
     return `文件解析失败: ${err.message}`
   }
@@ -360,42 +344,33 @@ async function parseBuiltinSampleFile(sampleId: BuiltinSampleId, req: Request): 
   await access(filePath, fsConstants.R_OK)
   const parsed = await fileParser.parse(filePath)
   const fileName = basename(filePath)
+  const normalizedRuntime = normalizeStructuredRuntime(parsed)
+  const originalSummaryLine = parsed.summary.split('\n')[0] || parsed.summary
 
-  if (parsed.geojson) {
-    const converted = GeoJSONParser.convertGeoJSON(parsed.geojson)
-    const normalizedGeoJSON = ensureFeatureCollection(converted)
-    const normalizedFileUrl = await saveNormalizedGeoJSON(req, normalizedGeoJSON)
-    const originalSummaryLine = parsed.summary.split('\n')[0] || parsed.summary
+  if (normalizedRuntime?.runtimeKind === 'geojson') {
+    const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.geojson')
     return buildGeojsonFileContext({
       fileName,
       fileUrl: normalizedFileUrl,
       originalSummaryLine,
-      normalizedGeoJSON,
+      normalizedGeoJSON: normalizedRuntime.normalizedData,
     })
   }
 
-  const geojson = GeoJSONParser.fromTableData(parsed.rows)
+  if (normalizedRuntime?.runtimeKind === 'json') {
+    const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.json')
+    return buildJsonFileContext({
+      fileName,
+      fileUrl: normalizedFileUrl,
+      originalSummaryLine,
+      normalizedJson: normalizedRuntime.normalizedData,
+    })
+  }
+
   const rowSamples = parsed.rows.slice(0, SAMPLE_ROW_COUNT).map((row) => sanitizeForSample(row))
-  const normalizedTableGeojson = geojson
-    ? ensureFeatureCollection(GeoJSONParser.convertGeoJSON(geojson))
-    : null
-  const normalizedFileUrl = normalizedTableGeojson
-    ? await saveNormalizedGeoJSON(req, normalizedTableGeojson)
-    : null
   return [
     `文件: ${fileName}`,
-    `文件获取链接URL: ${normalizedFileUrl || 'N/A'}`,
-    ...(normalizedFileUrl
-      ? [
-        '返回结构: 标准 GeoJSON FeatureCollection',
-        'GeoJSON提取路径: rawData',
-        '来源: 由表格数据自动转换生成规范化 GeoJSON',
-        buildGeojsonContract({
-          geojsonPath: 'rawData',
-          featureCollection: normalizedTableGeojson,
-        }),
-      ]
-      : []),
+    '文件获取链接URL: N/A',
     parsed.summary,
     `前 ${SAMPLE_ROW_COUNT} 行数据（已截断长字段）:`,
     JSON.stringify(rowSamples, null, 2),
