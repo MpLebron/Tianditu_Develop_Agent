@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { shareApi } from '../../services/shareApi'
 import { useChatStore } from '../../stores/useChatStore'
-import { useMapStore } from '../../stores/useMapStore'
 import type { Message } from '../../types/chat'
 import type { ShareCreateResult, ShareSuggestResult, ShareVisibility } from '../../types/share'
 import { copyText } from '../../utils/copyText'
+import { isLikelyBlankThumbnailBase64 } from '../../utils/isLikelyBlankThumbnail'
+import { captureMapPreviewPngBase64 } from '../../utils/mapPreviewCapture'
 
 interface ShareModalProps {
   open: boolean
   code: string | null
   onClose: () => void
 }
+
+const PUBLISH_CAPTURE_ATTEMPTS = 4
+const PUBLISH_CAPTURE_RETRY_MS = 700
 
 function defaultTitle() {
   return `地图快照 ${new Date().toLocaleString('zh-CN', { hour12: false })}`
@@ -51,7 +55,6 @@ function buildSuggestionPrompt(messages: Message[]): string {
 
 export function ShareModal({ open, code, onClose }: ShareModalProps) {
   const messages = useChatStore((s) => s.messages)
-  const cachedThumbnailBase64 = useMapStore((s) => s.shareThumbnailBase64)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<ShareVisibility>('unlisted')
@@ -86,6 +89,25 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
 
   if (!open) return null
 
+  const captureThumbnailOnPublish = async (): Promise<string | undefined> => {
+    for (let attempt = 0; attempt < PUBLISH_CAPTURE_ATTEMPTS; attempt += 1) {
+      try {
+        const captured = await captureMapPreviewPngBase64()
+        const blank = await isLikelyBlankThumbnailBase64(captured.base64)
+        if (!blank) return captured.base64
+      } catch (err: any) {
+        console.warn('[ShareModal] 发布时地图截图失败，将继续重试:', err?.message || err)
+      }
+
+      if (attempt < PUBLISH_CAPTURE_ATTEMPTS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, PUBLISH_CAPTURE_RETRY_MS))
+      }
+    }
+
+    console.warn('[ShareModal] 发布时未拿到可用地图截图，将退回 SVG 缩略图')
+    return undefined
+  }
+
   const handlePublish = async () => {
     if (!code || !code.trim()) {
       setError('当前没有可分享的地图代码，请先生成地图')
@@ -95,12 +117,13 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
     setError(null)
     setCopyHint(null)
     try {
+      const thumbnailBase64 = await captureThumbnailOnPublish()
       const created = await shareApi.create({
         code,
         title,
         description,
         visibility,
-        thumbnailBase64: cachedThumbnailBase64 || undefined,
+        thumbnailBase64,
       })
       setResult(created)
     } catch (err: any) {
