@@ -135,6 +135,10 @@ export class ReferencePlanner {
     if (params.mode === 'fix') {
       pushIfAvailable('javascript-runtime-errors')
       pushIfAvailable('fix-playbook')
+      if (/marker|popup|覆盖物|map\.add|addto|seticon/.test(text)) {
+        pushIfAvailable('marker')
+        pushIfAvailable('popup')
+      }
       if (/geojson|featurecollection|数据格式/.test(text)) pushIfAvailable('bindGeoJSON')
       if (/行政区|boundary|district|wkt|administrative/.test(text)) pushIfAvailable('search-admin')
       if (/geocoder|地理编码|逆地理/.test(text)) pushIfAvailable('geocoder')

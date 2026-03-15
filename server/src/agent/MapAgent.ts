@@ -1192,6 +1192,19 @@ function diagnoseRuntimeError(error: string, _code: string): RuntimeDiagnosis {
     }
   }
 
+  if (/map\.add is not a function|seticon is not a function/.test(lower)) {
+    return {
+      category: 'api',
+      likelyCause: '覆盖物 API 混入了其他地图 SDK 的写法；TMapGL 的 Marker/Popup 不能通过 map.add(...) 挂载，也不要依赖 marker.setIcon(...)。',
+      confidence: 0.95,
+      fixChecklist: [
+        '检查是否写了 map.add(marker) / map.add(popup)；应改为 marker.addTo(map) / popup.addTo(map)。',
+        '检查 TMapGL.Marker 是否误用了 position/icon 等其他 SDK 的构造参数；优先改为 new TMapGL.Marker({ element }).setLngLat([lng, lat]).addTo(map)。',
+        '如果只是想高亮点位，优先考虑 GeoJSON + circle 图层，避免依赖未验证的 Marker API。',
+      ],
+    }
+  }
+
   if (/identifier .* has already been declared|syntaxerror|unexpected token/.test(lower)) {
     return {
       category: 'syntax',

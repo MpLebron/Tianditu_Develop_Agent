@@ -188,6 +188,38 @@ describe('CodeVerifier symbol text font checks', () => {
     expect(issue?.message).toContain('fill-width')
   })
 
+  it('flags map.add(marker) overlay mounting that mixes non-TMapGL APIs', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })
+      map.on('load', function() {
+        var marker = new TMapGL.Marker().setLngLat([118.78, 32.04])
+        map.add(marker)
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'overlay-added-via-map-add')).toBe(true)
+  })
+
+  it('flags marker constructor options borrowed from other SDKs', () => {
+    const issues = analyzeGeneratedCode(`
+      var marker = new TMapGL.Marker({
+        position: [118.78, 32.04],
+        icon: document.createElement('div')
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'marker-constructor-options-invalid')).toBe(true)
+  })
+
+  it('flags marker.setIcon usage that is not part of the verified examples', () => {
+    const issues = analyzeGeneratedCode(`
+      var marker = new TMapGL.Marker().setLngLat([118.78, 32.04]).addTo(map)
+      marker.setIcon(document.createElement('div'))
+    `)
+
+    expect(issues.some((issue) => issue.code === 'marker-seticon-unsupported')).toBe(true)
+  })
+
   it('allows line-width on line layers', () => {
     const issues = analyzeGeneratedCode(`
       map.on('load', function() {

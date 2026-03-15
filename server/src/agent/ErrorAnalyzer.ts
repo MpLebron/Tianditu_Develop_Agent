@@ -137,6 +137,8 @@ function formatEvidence(evidence: ReturnType<typeof extractErrorEvidence>): stri
 
 function fallbackCategory(evidence: ReturnType<typeof extractErrorEvidence>): ErrorAnalysisResult['category'] {
   if (evidence.matchedSignals.includes('missing-sdk')) return 'api'
+  if (evidence.matchedSignals.includes('overlay-api')) return 'api'
+  if (evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))) return 'api'
   if (evidence.matchedSignals.includes('syntax')) return 'syntax'
   if (evidence.matchedSignals.includes('runtime-nullish')) return 'runtime'
   if (evidence.matchedSignals.includes('network')) return 'network'
@@ -150,6 +152,14 @@ function fallbackLikelyCause(
   evidence: ReturnType<typeof extractErrorEvidence>,
   runtimeFileContract?: RuntimeFileContract | null,
 ): string {
+  const hasOverlayApiMismatch =
+    evidence.matchedSignals.includes('overlay-api')
+    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))
+
+  if (hasOverlayApiMismatch) {
+    return '覆盖物写法混入了其他地图 SDK 的 API：TMapGL 的 Marker/Popup 应使用 setLngLat(...).addTo(map)，不能用 map.add(marker) 或 marker.setIcon(...) 这类未验证写法。'
+  }
+
   const category = fallbackCategory(evidence)
   if (category === 'api' && evidence.matchedSignals.includes('missing-sdk')) {
     return '页面未正确引入天地图 JS SDK，或 SDK 加载顺序晚于业务脚本。'
@@ -192,7 +202,13 @@ function fallbackSuggestedPackages(evidence: ReturnType<typeof extractErrorEvide
   if (evidence.matchedSignals.some((signal) => ['geocoder', 'search', 'drive', 'transit', 'administrative'].includes(signal))) {
     packages.add('tianditu-lbs')
   }
-  if (evidence.matchedSignals.includes('geojson') || evidence.codeSignals.includes('mapbox-constructor') || evidence.matchedSignals.includes('missing-sdk')) {
+  if (
+    evidence.matchedSignals.includes('geojson')
+    || evidence.codeSignals.includes('mapbox-constructor')
+    || evidence.matchedSignals.includes('missing-sdk')
+    || evidence.matchedSignals.includes('overlay-api')
+    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))
+  ) {
     packages.add('tianditu-jsapi')
   }
   return Array.from(packages)
@@ -214,6 +230,10 @@ function fallbackSuggestedReferences(skillStore: SkillStore, evidence: ReturnTyp
   if (evidence.matchedSignals.includes('drive')) push('search-route')
   if (evidence.matchedSignals.includes('transit')) push('search-transit')
   if (evidence.matchedSignals.includes('missing-sdk') || evidence.codeSignals.includes('mapbox-constructor')) push('map-init')
+  if (evidence.matchedSignals.includes('overlay-api') || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))) {
+    push('marker')
+    push('popup')
+  }
   return refs
 }
 
@@ -234,6 +254,16 @@ function fallbackChecklist(
   const checklist = ['优先做最小修复，不要整体重写页面。']
   if (evidence.matchedSignals.includes('missing-sdk')) checklist.push('补齐天地图 SDK 并确保位于业务脚本之前。')
   if (evidence.codeSignals.includes('mapbox-constructor')) checklist.push('将地图构造改成 new TMapGL.Map("map", { ... })。')
+  if (evidence.matchedSignals.includes('overlay-api') || evidence.codeSignals.includes('generic-map-add')) {
+    checklist.push('检查是否误用了 map.add(marker/popup)；TMapGL 覆盖物必须使用 marker.addTo(map) / popup.addTo(map)。')
+  }
+  if (evidence.codeSignals.includes('marker-constructor-mixed')) {
+    checklist.push('检查 TMapGL.Marker 是否误用了 position/icon 等其他地图 SDK 的构造参数。')
+    checklist.push('优先改成 new TMapGL.Marker({ element }).setLngLat([lng, lat]).addTo(map)。')
+  }
+  if (evidence.codeSignals.includes('marker-seticon-mixed')) {
+    checklist.push('不要依赖 marker.setIcon(...)；需要改图标时移除旧 marker 并重新创建，或改用 GeoJSON 图层控制样式。')
+  }
   if (evidence.matchedSignals.includes('geojson')) checklist.push('确认传给 addSource 的 data 是 FeatureCollection/Feature。')
   if (runtimeFileContract?.kind === 'geojson') {
     checklist.push(`严格按运行时文件契约读取 GeoJSON：${runtimeFileContract.geojsonPath}。`)

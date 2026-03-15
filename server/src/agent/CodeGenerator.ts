@@ -610,12 +610,16 @@ export class CodeGenerator {
 2. Token：使用 \${TIANDITU_TOKEN} 占位符
 2.2 若代码中出现 TMapGL（包括 new TMapGL.Map / TMapGL.Marker / TMapGL.Popup 等），必须包含天地图 SDK 引入脚本：\`<script src="https://api.tianditu.gov.cn/api/v5/js?tk=\${TIANDITU_TOKEN}"></script>\`
 2.1 地图构造函数必须使用天地图 v5 写法：\`new TMapGL.Map('map', { ... })\`，禁止使用 mapbox 风格 \`new TMapGL.Map({ container: 'map', ... })\`
+2.3 只能使用当前已加载 reference 文档/示例中已经出现并可直接对照的 TMapGL API；未在 reference 中看到明确示例的 API 不要猜写
+2.4 如果当前 reference 没有给出某个能力的明确用法，必须退回到已有示例能覆盖的实现路径；例如没有可靠 Marker 示例时，优先改用 GeoJSON + circle/symbol 图层，不要自行发明覆盖物 API
 3. 控件/图层：必须在 map.on("load", ...) 回调内
 3.1 任何 \`map.addSource\`、\`map.addLayer\`、\`map.addControl\`、\`map.fitBounds\`、\`map.setPaintProperty\`、\`map.setLayoutProperty\`、基于图层 ID 的事件绑定（如 \`map.on('click', 'layer-id', ...)\`）默认都必须在 \`map.on("load", ...)\` 之后执行
 3.2 如果需要加载远程数据，优先采用固定骨架：先创建 \`map\`，再在 \`map.on("load", async function () { ... })\` 内 fetch 数据并渲染
 3.3 不要写“先 fetch 并 addSource/addLayer，最后才注册 map.on('load')”的时序；这会导致 SDK 内部状态未就绪并触发难以解释的运行时错误
 3.4 图层类型与样式属性必须匹配：\`fill\` 图层只使用 \`fill-*\` 样式，\`line\` 图层只使用 \`line-*\` 样式，\`circle\` 图层只使用 \`circle-*\` 样式
 3.5 面边框颜色可以直接用 \`fill-outline-color\`，但边框宽度若需要可调，必须额外新增一个 \`line\` 图层；禁止在 \`fill\` 图层的 paint 中写 \`fill-width\`
+3.6 覆盖物强约束：Marker/Popup 必须使用 reference 中出现过的标准链式写法，例如 \`new TMapGL.Marker(...).setLngLat([lng, lat]).addTo(map)\`、\`popup.addTo(map)\`
+3.7 禁止生成未经 reference 验证的覆盖物调用：如 \`map.add(marker)\`、\`map.add(popup)\`、\`new TMapGL.Marker({ position, icon })\`、\`marker.setIcon(...)\`
 4. 坐标格式：[经度, 纬度]
 5. 输出：完整可运行 HTML 文件
 6. 中文注释
@@ -690,6 +694,8 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 5. 如果是异步加载/事件时序问题，要增加必要的判空和时机保护
 5.1 如果提供了“错误诊断”信息，必须先遵循诊断中的根因与检查清单再改代码
 5.2 对地图渲染时序，优先检查是否在 \`map.on("load")\` 之前调用了 \`map.addSource\` / \`map.addLayer\` / \`map.addControl\` / \`map.fitBounds\`
+5.3 修复时只能使用当前已加载 reference 文档中已经明确出现的 TMapGL API；没有示例支撑的 API 不要猜写
+5.4 如果当前 reference 没有覆盖某个 API 能力，优先改成已有示例能完成的实现，不要硬修成另一个未经验证的写法
 6. 若错误涉及 GeoJSON/数据格式（如 "not a valid GeoJSON object"、"无法识别的数据格式"）：
    - 优先检查是否严格遵循了“运行时文件契约（唯一可信）”中的 geojsonPath 与 forbiddenPaths
    - 优先检查传给 map.addSource 的 data 是否误传成 features 数组
@@ -718,6 +724,10 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
    - 先检查并补齐天地图 SDK 引入：
      \`<script src="https://api.tianditu.gov.cn/api/v5/js?tk=\${TIANDITU_TOKEN}"></script>\`
    - 确保该脚本位于业务脚本之前执行
+11.1 如果报错包含 \`map.add is not a function\`、\`setIcon is not a function\` 或代码里出现 \`map.add(marker)\`：
+   - 优先判断是否混入了其他地图 SDK 的覆盖物 API
+   - Marker/Popup 必须回到 reference 示例中的链式写法：\`new TMapGL.Marker(...).setLngLat([lng, lat]).addTo(map)\` / \`popup.addTo(map)\`
+   - 禁止继续使用 \`map.add(marker)\`、\`map.add(popup)\`、\`new TMapGL.Marker({ position, icon })\`、\`marker.setIcon(...)\`
 12. 如果是 POI/地名搜索错误：
    - 禁止改成直连官方搜索端点；必须回到 GET /api/tianditu/search 代理契约
    - 禁止把代理搜索改为 POST + body(postStr)；必须改成 query string

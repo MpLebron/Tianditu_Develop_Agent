@@ -31,6 +31,8 @@ export function analyzeGeneratedCode(code: string, options?: { fileData?: string
     })
   }
 
+  issues.push(...analyzeOverlayApiCompatibility(code))
+
   const mapMutationTimingIssues = analyzeMapLoadTiming(code)
   issues.push(...mapMutationTimingIssues)
   issues.push(...analyzeLayerPropertyCompatibility(code))
@@ -364,6 +366,48 @@ function analyzeLayerPropertyCompatibility(code: string): VerificationIssue[] {
         })
       }
     }
+  }
+
+  return issues
+}
+
+function analyzeOverlayApiCompatibility(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+  if (!/\bTMapGL\b/.test(code)) return issues
+
+  if (/\bmap\.add\s*\(/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'overlay-added-via-map-add',
+      message: '检测到使用 map.add(...) 挂载覆盖物；天地图 JSAPI v5 地图实例没有这个通用添加入口。',
+      suggestion: 'Marker/Popup 请改用 marker.addTo(map) / popup.addTo(map)；图层与数据源分别使用 map.addLayer(...) / map.addSource(...)。',
+    })
+  }
+
+  const markerCtorMatch = code.match(/new\s+TMapGL\.Marker\s*\(\s*\{[\s\S]{0,400}?\}\s*\)/)
+  if (markerCtorMatch) {
+    const invalidOptions = [
+      /\bposition\s*:/.test(markerCtorMatch[0]) ? 'position' : null,
+      /\bicon\s*:/.test(markerCtorMatch[0]) ? 'icon' : null,
+    ].filter((item): item is string => Boolean(item))
+
+    if (invalidOptions.length > 0) {
+      issues.push({
+        severity: 'error',
+        code: 'marker-constructor-options-invalid',
+        message: `检测到 TMapGL.Marker 使用了未验证的构造参数：${invalidOptions.join(', ')}。`,
+        suggestion: 'TMapGL.Marker 请改为 new TMapGL.Marker({ element }).setLngLat([lng, lat]).addTo(map)，不要把其他地图 SDK 的 position/icon 构造写法混进来。',
+      })
+    }
+  }
+
+  if (/\.\s*setIcon\s*\(/.test(code) && /\bTMapGL\.Marker\b/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'marker-seticon-unsupported',
+      message: '检测到对 TMapGL.Marker 调用 setIcon(...)；当前已验证示例中不使用该 API。',
+      suggestion: '需要切换图标时，请移除旧 marker 后重新创建，或改用 GeoJSON 图层控制点样式；不要依赖 marker.setIcon(...)。',
+    })
   }
 
   return issues
