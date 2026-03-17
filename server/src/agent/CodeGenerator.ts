@@ -633,8 +633,12 @@ export class CodeGenerator {
    - 禁止调用 https://api.tianditu.gov.cn/v2/search 或 https://api.tianditu.gov.cn/search/v1/poi
    - 禁止 POST + body(postStr) 调 /api/tianditu/search
    - URL 必须使用绝对地址：new URL('/api/tianditu/search', window.location.origin).toString()
+   - 新代码优先沿用官方字段名：keyWord、queryType、level、mapBound、pointLonlat、queryRadius、polygon、specify、dataTypes、show
+   - 新代码必须显式传 queryType，不要默认写 keyword、type=nearby/view/polygon/category/stats/admin-area、lng/lat/radius 这类兼容别名
+   - queryType=13（分类搜索）新代码显式传 mapBound，不要依赖代理默认值
    - 读取结果前必须先解包代理层：payload.success===true 后使用 payload.data（不可直接把 payload 当 result）
    - 业务字段必须从 data 读取：Number(data.resultType)、data.pois、data.status.infocode
+   - queryType=13 若一次请求多个 dataTypes，要兼容“标准 resultType 外壳”和“按分类名分组对象”两种返回结构
    - data.pois[*].distance 是字符串（如 319m/1.1km），不要默认按数字除以 1000
 11.1 路线规划的软引导：
    - 如果起终点来自地点名、机构名或详细地址，而不是用户明确给出的经纬度，优先先调用 /api/tianditu/geocode 获取真实坐标，再调用 /api/tianditu/drive 或 /api/tianditu/transit
@@ -731,7 +735,9 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 12. 如果是 POI/地名搜索错误：
    - 禁止改成直连官方搜索端点；必须回到 GET /api/tianditu/search 代理契约
    - 禁止把代理搜索改为 POST + body(postStr)；必须改成 query string
+   - 优先检查参数名和 queryType 是否回到了官方语义：keyWord / queryType / mapBound / pointLonlat / queryRadius / polygon / specify / dataTypes
    - 检查是否漏掉代理层解包：必须先判 payload.success，再从 payload.data 读取 resultType/pois/status
+   - 如果是 queryType=13，多分类结果要检查是否误按单一 data.pois 解析，必要时兼容分类分组对象
    - 检查 distance 展示：若来自天地图周边搜索，distance 为字符串（m/km），不要强行数值计算
 13. 如果是路线规划相关错误且起终点看起来是地点名、机构名或地址：
    - 优先回看是否漏了地理编码这一步
@@ -1132,12 +1138,16 @@ function __buildTiandituSearchProxyUrl(baseUrl, payload) {
     q.set(k, String(v));
   };
 
-  add('keyword', p.keyWord != null ? p.keyWord : p.keyword);
+  add('keyWord', p.keyWord != null ? p.keyWord : p.keyword);
   add('queryType', p.queryType);
   add('start', p.start);
   add('count', p.count);
   add('level', p.level);
-  add('mapBound', p.mapBound);
+  if (Number(p.queryType) === 13 && (p.mapBound == null || p.mapBound === '')) {
+    add('mapBound', '73.0,3.0,135.0,54.0');
+  } else {
+    add('mapBound', p.mapBound);
+  }
   add('specify', p.specify);
   add('dataTypes', p.dataTypes);
   add('show', p.show);

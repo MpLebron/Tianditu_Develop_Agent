@@ -116,6 +116,9 @@ export const CONTRACT_REGISTRY: ContractDescriptor[] = [
     required: [
       '优先调用代理：GET /api/tianditu/search?...',
       '必须使用 GET + query string 传参（不要 POST body postStr）',
+      '新代码优先沿用官方字段名：keyWord、queryType、level、mapBound、pointLonlat、queryRadius、polygon、specify、dataTypes、show',
+      '新代码必须显式传 queryType，不要依赖 type=nearby/view/polygon/category/stats/admin-area 这类兼容推断',
+      'queryType=13（分类搜索）新代码显式传 mapBound，不要依赖代理默认值',
       '运行沙箱中 URL 必须使用绝对地址：new URL("/api/tianditu/search", window.location.origin).toString()',
       '按场景设置 queryType：视野内=2、周边=3、多边形=10、行政区=12、分类=13、统计=14',
     ],
@@ -123,11 +126,13 @@ export const CONTRACT_REGISTRY: ContractDescriptor[] = [
       '代理返回成功条件：res.success === true',
       '必须先解包代理层：const data = res.data || {}',
       'POI 成功条件：Number(data.resultType)===1 且 Array.isArray(data.pois)',
+      '分类搜索（queryType=13）若一次传多个 dataTypes，需要兼容“按分类名分组对象”与标准 resultType 外壳两种返回结构',
       '服务状态判定：以 data.status.infocode===1000 为成功',
       '空结果分支：展示无结果状态并关闭 loading',
     ],
     forbidden: [
       '禁止 queryType 与参数组合不匹配',
+      '禁止把 keyword、type=nearby/view/polygon/category/stats/admin-area、lng/lat/radius 作为新代码默认写法',
       '禁止前端直连 https://api.tianditu.gov.cn/v2/search 或 /search/v1/poi',
       '禁止 /api/tianditu/search 使用 POST + JSON.stringify(postStr)',
     ],

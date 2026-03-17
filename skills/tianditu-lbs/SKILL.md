@@ -41,9 +41,12 @@ allowed-tools: Read Bash(node *)
 ## 关键约束
 
 1. 默认优先走当前项目代理：`/api/tianditu/*`
-2. 解释接口时可以说明官方端点，但运行时代码默认不要直连官方接口
-3. 搜索、路线、地理编码结果必须先按代理 envelope 解包
-4. 坐标顺序统一为“经度, 纬度”
-5. 如果任务重点变成地图渲染、图层、控件或 Popup，应切换回 `tianditu-jsapi`
-6. 阅读顺序默认是：先看 `lbs/api-overview`，再看对应 `scene*.md`；如果需要运行时代码模板，再补旧版兼容 reference
-7. 如果路线规划的起终点是地点名、机构名或详细地址，而不是明确经纬度，优先补读 `lbs/scene5-geocoding`，默认先做地理编码再做驾车/公交规划
+2. 对搜索 V2 来说，当前项目代理仍优先使用官方字段名与 `queryType` 语义：
+   - 推荐直接传 `keyWord`、`queryType`、`level`、`mapBound`、`pointLonlat`、`queryRadius`、`polygon`、`specify`、`dataTypes`、`show`、`start`、`count`
+   - `type=nearby/view/polygon/category/stats` 这类代理别名只作兼容兜底，不作为第一选择
+3. 解释接口时可以说明官方端点，但运行时代码默认不要直连官方接口
+4. 搜索、路线、地理编码结果必须先按代理 envelope 解包
+5. 坐标顺序统一为“经度, 纬度”
+6. 如果任务重点变成地图渲染、图层、控件或 Popup，应切换回 `tianditu-jsapi`
+7. 阅读顺序默认是：先看 `lbs/api-overview`，再看对应 `scene*.md`；如果需要运行时代码模板，再补旧版兼容 reference
+8. 如果路线规划的起终点是地点名、机构名或详细地址，而不是明确经纬度，优先补读 `lbs/scene5-geocoding`，默认先做地理编码再做驾车/公交规划

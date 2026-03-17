@@ -25,6 +25,17 @@
 - 搜索端点：`http://api.tianditu.gov.cn/v2/search`
 - 默认 key：`4043dde46add842282bacc412299311d`
 
+## 当前项目代理推荐写法
+
+```text
+GET /api/tianditu/search?keyWord=医院&queryType=2&level=12&mapBound=116.02524,39.83833,116.65592,39.99185&start=0&count=10
+GET /api/tianditu/search?keyWord=学校&queryType=10&polygon=x1,y1,...,x1,y1&start=0&count=10
+GET /api/tianditu/search?keyWord=商厦&queryType=12&specify=156110108&start=0&count=10
+```
+
+- 推荐优先显式传 `queryType`
+- `type=view`、`type=polygon`、`type=admin-area` 仅是当前项目兼容别名，不作为第一选择
+
 ## 三种子场景
 
 ### 1. 行政区划区域搜索
@@ -138,6 +149,7 @@ curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"keyWord\":\"学校\",\"
 - `polygon` 首尾坐标对必须相同
 - `mapBound` 格式固定为 `minx,miny,maxx,maxy`
 - 坐标仍然是 `经度,纬度`
+- 当前项目里不要优先依赖 `type=view/polygon/admin-area` 这类代理别名；优先继续使用官方字段名和 `queryType`
 - 不要让用户自己再去找行政区编码表，skill 已内置 `AdminCode.csv`
 
 ## 输出模板

@@ -25,6 +25,16 @@
 - 搜索端点：`http://api.tianditu.gov.cn/v2/search`
 - 默认 key：`4043dde46add842282bacc412299311d`
 
+## 当前项目代理推荐写法
+
+```text
+GET /api/tianditu/search?keyWord=北京大学&queryType=1&level=12&mapBound=116.02524,39.83833,116.65592,39.99185&start=0&count=10&show=2
+```
+
+- 推荐继续使用官方字段名：`keyWord`、`queryType`、`level`、`mapBound`、`start`、`count`、`show`
+- `keyword` 是当前项目兼容参数，不作为第一选择
+- `type=normal` 不是首选写法；关键词搜索请直接传 `queryType=1` 或 `7`
+
 ## 必填参数
 
 | 参数 | 说明 |
@@ -198,6 +208,7 @@ curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"keyWord\":\"博物馆\"
 - 不要把 `附近` 场景误用成普通搜索
 - 不要默认把所有搜索都写成 `queryType=7`
 - 对 `queryType=1/7`，不要只给 `keyWord` 就直接发请求；优先补 `level + mapBound`
+- 当前项目里不要优先依赖 `type=normal` 这类代理别名；优先显式传 `queryType`
 - 不要忘记 `type=query`
 - 需要更多字段时才补 `show=2`
 

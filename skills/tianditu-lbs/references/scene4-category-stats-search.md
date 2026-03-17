@@ -24,17 +24,28 @@
 - 搜索端点：`http://api.tianditu.gov.cn/v2/search`
 - 默认 key：`4043dde46add842282bacc412299311d`
 
+## 当前项目代理推荐写法
+
+```text
+GET /api/tianditu/search?queryType=13&specify=156110000&mapBound=73,3,135,54&dataTypes=法院,公园&start=0&count=5
+GET /api/tianditu/search?keyWord=学校&queryType=14&specify=156110108
+```
+
+- 推荐继续使用官方字段名：`queryType`、`specify`、`mapBound`、`dataTypes`、`keyWord`
+- `type=category`、`type=stats` 只作当前项目兼容别名，不作为新代码首选
+
 ## 两种子场景
 
 ### 1. 数据分类搜索
 
 - `queryType=13`
 - 核心参数：`dataTypes`
+- 与官方参数表保持一致时，建议显式补上 `mapBound`
 
 最小模板：
 
 ```bash
-curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"queryType\":13,\"start\":0,\"count\":5,\"specify\":\"156110000\",\"dataTypes\":\"法院,公园\"}&type=query&tk=4043dde46add842282bacc412299311d"
+curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"queryType\":13,\"start\":0,\"count\":5,\"specify\":\"156110000\",\"mapBound\":\"73,3,135,54\",\"dataTypes\":\"法院,公园\"}&type=query&tk=4043dde46add842282bacc412299311d"
 ```
 
 适合：
@@ -73,7 +84,7 @@ curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"keyWord\":\"学校\",\"
 
 ### `queryType=13`：分类搜索
 
-通常返回 `resultType=1`，结构接近普通搜索：
+官方说明通常把它描述成标准搜索外壳，结构接近普通搜索：
 
 ```json
 {
@@ -96,6 +107,25 @@ curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"keyWord\":\"学校\",\"
     "infocode": 1000
   },
   "keyWord": "医院"
+}
+```
+
+但当前 live / 当前项目代理在一次请求传多个 `dataTypes`（如 `法院,公园`）时，经常返回“按分类名分组”的对象：
+
+```json
+{
+  "法院": {
+    "count": 119,
+    "resultType": 1,
+    "pois": [{ "name": "中华人民共和国最高人民法院" }],
+    "status": { "infocode": 1000, "cndesc": "服务正常" }
+  },
+  "公园": {
+    "count": 1655,
+    "resultType": 1,
+    "pois": [{ "name": "颐和园" }],
+    "status": { "infocode": 1000, "cndesc": "服务正常" }
+  }
 }
 ```
 
@@ -154,13 +184,17 @@ curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"keyWord\":\"学校\",\"
   - `statistics.adminCount`
   - `statistics.priorityCitys`
   - `statistics.allAdmins`
-- `resultType=1` 时，按分类搜索结果去读 `pois[]`
+- `queryType=13` 时，代码要同时兼容两种结果：
+  - 标准外壳：`resultType=1` 后直接读 `pois[]`
+  - 多分类分组：遍历顶层分类名，再分别读每组里的 `pois[]`
 - `status.infocode=1000` 时通常表示服务正常
 
 ## 常见错误
 
 - 不要把 `dataTypes` 当成关键词 `keyWord`
 - 分类搜索和统计搜索虽然都走 `search2`，但 `queryType` 不一样
+- `queryType=13` 的官方参数表与官方示例在 `mapBound` 上有出入；当前项目新代码请显式传 `mapBound`
+- 当前项目里不要优先使用 `type=category` / `type=stats` 代理别名；优先继续使用官方字段名与 `queryType`
 - 如果用户要 POI 明细列表，不要只返回统计结果
 - 不要让用户单独去下载分类编码表，skill 已内置 `Type.csv`
 

@@ -153,4 +153,40 @@ describe('CodeGenerator truncated HTML recovery', () => {
     expect(plan.reset).toBe(true)
     expect(plan.streamCode).toContain('<!DOCTYPE html>')
   })
+
+  it('builds search proxy urls with official field names and category-search mapBound fallback', () => {
+    const html = generator.injectSearchProxyHelper('<!DOCTYPE html><html><body></body></html>')
+    const scriptMatch = html.match(/<script>\n([\s\S]*?)\n<\/script>/)
+    expect(scriptMatch?.[1]).toBeTruthy()
+
+    const buildUrlFactory = new Function(
+      'window',
+      `${scriptMatch?.[1] || ''}; return __buildTiandituSearchProxyUrl;`,
+    ) as (window: { location: { origin: string } }) => (baseUrl: string, payload: Record<string, unknown>) => string
+
+    const buildUrl = buildUrlFactory({ location: { origin: 'http://localhost:3000' } })
+
+    const nearbyUrl = buildUrl('/api/tianditu/search', {
+      keyWord: '医院',
+      queryType: 3,
+      pointLonlat: '116.404,39.915',
+      queryRadius: 3000,
+    })
+
+    expect(nearbyUrl).toContain('keyWord=')
+    expect(nearbyUrl).not.toContain('keyword=')
+    expect(nearbyUrl).toContain('queryType=3')
+    expect(nearbyUrl).toContain('pointLonlat=116.404%2C39.915')
+    expect(nearbyUrl).toContain('queryRadius=3000')
+
+    const categoryUrl = buildUrl('/api/tianditu/search', {
+      queryType: 13,
+      specify: '156110000',
+      dataTypes: '法院,公园',
+    })
+
+    expect(categoryUrl).toContain('queryType=13')
+    expect(categoryUrl).toContain('mapBound=73.0%2C3.0%2C135.0%2C54.0')
+    expect(categoryUrl).toContain('specify=156110000')
+  })
 })

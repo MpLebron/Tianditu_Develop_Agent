@@ -31,6 +31,26 @@
 | 驾车规划 | `/api/tianditu/drive?origLng=...&origLat=...&destLng=...&destLat=...&style=0` | `/api/tianditu/drive?orig=...&dest=...` |
 | 公交 / 地铁 | `/api/tianditu/transit?startLng=...&startLat=...&endLng=...&endLat=...` | `/api/tianditu/transit?orig=...&dest=...` |
 
+## 当前项目搜索代理推荐写法
+
+搜索 V2 在当前项目里仍然建议保持“官方字段名 + 官方 `queryType`”不变，只是把官方 `postStr` 拆成 query string：
+
+```text
+GET /api/tianditu/search?keyWord=北京大学&queryType=1&level=12&mapBound=116.02,39.83,116.65,39.99&start=0&count=10
+GET /api/tianditu/search?keyWord=医院&queryType=2&level=12&mapBound=116.02,39.83,116.65,39.99&start=0&count=10
+GET /api/tianditu/search?keyWord=公园&queryType=3&pointLonlat=116.48016,39.93136&queryRadius=5000&start=0&count=10
+GET /api/tianditu/search?keyWord=学校&queryType=10&polygon=x1,y1,...,x1,y1&start=0&count=10
+GET /api/tianditu/search?keyWord=商厦&queryType=12&specify=156110108&start=0&count=10
+GET /api/tianditu/search?queryType=13&specify=156110000&mapBound=73,3,135,54&dataTypes=法院,公园&start=0&count=5
+GET /api/tianditu/search?keyWord=学校&queryType=14&specify=156110108
+```
+
+补充说明：
+
+- 推荐优先使用 `keyWord`，这样和官方 `postStr` 字段完全一致；`keyword` 仅是当前项目兼容写法。
+- 推荐优先显式传 `queryType`，不要把 `type=nearby/view/polygon/category/stats` 当主写法。
+- `type=nearby/view/...` 仍可兼容，但只建议用于历史代码，不建议再作为新生成代码模板。
+
 ## 当前项目代理读取速查
 
 | 场景 | 正确读取方式 | 常见误读 |
@@ -92,6 +112,23 @@ rg "咖啡馆|110303" references/data/Type.csv
 | `12` | 行政区划区域搜索 | 已知行政区名称或国标码时使用 |
 | `13` | 数据分类搜索 | 只按分类筛数据时使用 |
 | `14` | 统计搜索 | 只想要数量或统计时使用 |
+
+## 与官方搜索说明保持一致时要注意的点
+
+1. `queryType=13`（数据分类搜索）
+   - 官方参数表写 `mapBound` 必填
+   - 官方示例 `1.5.3` 又省略了 `mapBound`
+   - 当前项目代理为了兼容性可以补默认范围，但新代码仍建议显式传 `mapBound`，这样最接近官方参数表
+2. `queryType=13` 的返回
+   - 官方说明把它描述成标准搜索外壳（`resultType=1` + `pois[]`）
+   - 当前 live / 当前项目代理在一次请求传多个 `dataTypes`（如 `法院,公园`）时，常见返回是按分类名分组的对象
+   - 因此当前项目运行时代码建议同时兼容两种形态：
+     - 标准外壳：`payload.data.resultType / payload.data.pois`
+     - 多分类分组：`payload.data["法院"] / payload.data["公园"]`
+3. `queryType=3`（周边搜索）
+   - 官方参数表不要求 `level`
+   - 官方示例里出现了 `level`
+   - 当前项目代码如果没有明确缩放级别依赖，可以不传 `level`
 
 ## bus 接口的三类请求
 

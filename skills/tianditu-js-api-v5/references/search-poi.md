@@ -1,20 +1,27 @@
 # POI 搜索（V2，代理优先）
 
 基于天地图搜索服务 V2 做 POI 检索。  
-**默认优先后端代理**：`/api/tianditu/search`（避免 token 暴露、参数拼写差异和跨域问题）。
+**默认优先后端代理**：`/api/tianditu/search`（避免 token 暴露和跨域问题），但新代码仍应尽量保持与官方 `/v2/search` 一致的字段名和 `queryType` 语义。
 
-## 推荐接口（代理）
+## 推荐接口（代理，推荐沿用官方字段名）
 
 ```text
-GET /api/tianditu/search?keyword=医院&type=nearby&lng=116.404&lat=39.915&radius=3000&count=20&show=2
+GET /api/tianditu/search?keyWord=医院&queryType=3&pointLonlat=116.404,39.915&queryRadius=3000&count=20&show=2
 ```
 
-常用 `type`（代理会映射 queryType）：
+当前项目代理兼容以下历史别名，但它们只用于适配旧代码，不应作为新代码默认写法：
 
-- `type=normal` -> `queryType=1`（普通搜索）
-- `type=view` -> `queryType=2`（视野内搜索）
-- `type=nearby` -> `queryType=3`（周边搜索）
-- `type=polygon` -> `queryType=10`（多边形搜索）
+- `keyword` -> `keyWord`
+- `type=normal/view/nearby/polygon` -> 由代理推断 `queryType`
+- `lng + lat + radius` -> `pointLonlat + queryRadius`
+
+新代码优先显式传：
+
+- `keyWord`
+- `queryType`
+- `pointLonlat`
+- `queryRadius`
+- 其他官方字段：`level`、`mapBound`、`polygon`、`specify`、`dataTypes`、`show`
 
 ## 官方直连（仅调试）
 
@@ -126,7 +133,7 @@ function extractPoiList(data) {
 }
 ```
 
-## 周边 POI 搜索示例（代理 + 四态）
+## 周边 POI 搜索示例（代理 + 四态，官方字段名）
 
 ```javascript
 var state = 'loading'; // loading | ready | empty | error
@@ -151,11 +158,10 @@ function searchNearbyPois(keyword, center, radius) {
   setState('loading', '正在搜索');
 
   var url = new URL('/api/tianditu/search', window.location.origin);
-  url.searchParams.set('keyword', keyword);
-  url.searchParams.set('type', 'nearby');
-  url.searchParams.set('lng', String(center[0]));
-  url.searchParams.set('lat', String(center[1]));
-  url.searchParams.set('radius', String(radius));
+  url.searchParams.set('keyWord', keyword);
+  url.searchParams.set('queryType', '3');
+  url.searchParams.set('pointLonlat', center[0] + ',' + center[1]);
+  url.searchParams.set('queryRadius', String(radius));
   url.searchParams.set('count', '20');
   url.searchParams.set('show', '2');
 
@@ -208,7 +214,7 @@ function searchNearbyPois(keyword, center, radius) {
 ## 红线规则（必须遵守）
 
 1. 优先走 `/api/tianditu/search` 代理，不要默认直连官方接口。
-2. `queryType=3` 必须有 `pointLonlat` + `queryRadius`（或代理的 `lng/lat/radius`）。
+2. 新代码里 `queryType=3` 必须显式传 `keyWord + queryType + pointLonlat + queryRadius`；`type=nearby`、`lng/lat/radius` 仅用于兼容历史代码。
 3. `infocode=1000` 视为成功；`cndesc="服务正常"` 不是异常。
 4. `resultType !== 1` 时不要强行按 POI 渲染点图层。
 5. 请求结束必须收敛状态到 `ready/empty/error`，不得卡在 `loading`。

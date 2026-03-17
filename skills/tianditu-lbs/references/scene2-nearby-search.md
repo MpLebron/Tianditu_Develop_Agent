@@ -24,6 +24,15 @@
 - 对应 `queryType=3`
 - 默认 key：`4043dde46add842282bacc412299311d`
 
+## 当前项目代理推荐写法
+
+```text
+GET /api/tianditu/search?keyWord=公园&queryType=3&pointLonlat=116.48016,39.93136&queryRadius=5000&start=0&count=10&show=2
+```
+
+- 推荐继续使用官方字段名：`keyWord`、`queryType`、`pointLonlat`、`queryRadius`、`start`、`count`、`show`
+- `lng/lat/radius`、`type=nearby` 属于当前项目兼容别名，不作为新代码首选
+
 ## 必填参数
 
 | 参数 | 说明 |
@@ -48,6 +57,7 @@
 - 如果用户给的是地址或地名，先做地理编码，再把结果填进 `pointLonlat`
 - 半径默认 `1000`
 - 用户明确要求“3 公里内”“5 公里内”时，按用户半径改写
+- 官方参数表没有把 `level` 列为周边搜索必填；如果当前代码没有缩放级别依赖，可以不传 `level`
 
 ## 最小请求模板
 
@@ -121,6 +131,7 @@ curl -s "http://api.tianditu.gov.cn/v2/search?postStr={\"keyWord\":\"医院\",\"
 - `pointLonlat` 顺序不要写反，必须是 `经度,纬度`
 - 半径最大 10 公里，不要无上限放大
 - 周边搜索的核心是有中心点，没有中心点不要硬写
+- 当前项目里不要优先使用 `type=nearby&lng=...&lat=...` 这种代理别名模板；优先显式传 `queryType=3` 和官方字段名
 
 ## 输出模板
 

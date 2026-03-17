@@ -7,8 +7,20 @@
 优先调用后端代理：
 
 ```text
-GET /api/tianditu/search?...（由后端映射 queryType 与参数）
+GET /api/tianditu/search?...（新代码推荐显式传官方字段名和 queryType）
 ```
+
+当前项目代理推荐写法：
+
+```text
+GET /api/tianditu/search?keyWord=医院&queryType=2&level=12&mapBound=116.02524,39.83833,116.65592,39.99185&start=0&count=20
+```
+
+兼容说明：
+
+- 代理兼容 `keyword`、`type=view/nearby/polygon/category/stats/admin-area`、`lng/lat/radius` 等历史别名
+- 新代码不要优先使用这些别名；应优先沿用官方 `/v2/search` 的参数名与 `queryType` 语义
+- `queryType=13` 官方参数表要求 `mapBound`，虽然官方示例与当前代理在部分情况下可省略，但新代码仍应显式传 `mapBound`
 
 前端只在调试时直连官方接口。
 
@@ -152,6 +164,12 @@ function buildSearchV2Url(postStr) {
 - `lineData`：`resultType=5` 时返回
 - `status.infocode` / `status.cndesc`：服务状态码与中文描述
 
+补充说明：
+
+- 大多数场景按标准壳结构返回：`resultType + pois/statistics/area/lineData`
+- `queryType=13` 且一次请求多个 `dataTypes` 时，当前代理与实测服务可能返回“按分类名分组”的对象结构，而不是单一顶层 `resultType=1` + `pois`
+- 因此分类搜索代码需要同时兼容“标准壳结构”和“分类分组结构”
+
 解析函数：
 
 ```javascript
@@ -287,9 +305,11 @@ function searchNearby(keyword, center, radius) {
    - `3` 必须有 `pointLonlat` + `queryRadius`
    - `10` 必须有闭合 `polygon`
    - `12/13/14` 涉及行政区时需 `specify`
+   - `13` 新代码显式传 `mapBound`，不要依赖代理默认值
 4. `resultType` 不同要走不同渲染分支，禁止把统计/行政结果当 POI 画点。
-5. `status.infocode !== 1000` 或 `3001` 无数据时要给可见提示，不要静默失败。
-6. 必须维护 `loading / ready / empty / error` 四态，禁止请求结束后仍显示 loading。
+5. `queryType=13` 若一次传多个 `dataTypes`，必须兼容“按分类名分组”的返回结构。
+6. `status.infocode !== 1000` 或 `3001` 无数据时要给可见提示，不要静默失败。
+7. 必须维护 `loading / ready / empty / error` 四态，禁止请求结束后仍显示 loading。
 
 ## 与现有文档的关系
 
