@@ -192,8 +192,10 @@ map.on('load', function () {
         throw new Error('未获取到可绘制的路线坐标');
       }
 
-      if (map.getLayer('route-line')) map.removeLayer('route-line');
-      if (map.getSource('route')) map.removeSource('route');
+      var hasLayerApi = map && map.getLayer;
+      var hasSourceApi = map && map.getSource;
+      if (hasLayerApi && map.getLayer('route-line')) map.removeLayer('route-line');
+      if (hasSourceApi && map.getSource('route')) map.removeSource('route');
 
       map.addSource('route', {
         type: 'geojson',

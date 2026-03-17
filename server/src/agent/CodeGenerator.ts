@@ -617,6 +617,7 @@ export class CodeGenerator {
 3.2 远程/文件数据允许在 \`map.on("load")\` 之前发起 fetch；但真正的渲染提交（如 \`map.addSource\` / \`map.addLayer\` / \`map.getSource(...).setData(...)\` / \`map.fitBounds(...)\`）只能在地图 ready 之后执行
 3.3 如果 source 是在 \`map.on("load")\` 里创建的，任何 \`map.getSource('id')\` / \`.setData(...)\` 都必须先确认 source 已存在；可以采用“缓存数据 -> load 后再 apply”或“load 与 fetch 并行，汇合后再 setData”的模式，但不要写成 \`initMap(); loadData();\` 后立刻 \`map.getSource(...).setData(...)\`
 3.4 不要写“先 fetch 并 addSource/addLayer，最后才注册 map.on('load')”的时序；这会导致 SDK 内部状态未就绪并触发难以解释的运行时错误
+3.4.1 如果需要清理旧图层/旧数据源，不要直接写 \`if (map.getLayer('id')) map.removeLayer('id')\` 或 \`if (map.getSource('id')) map.removeSource('id')\`；必须先确认 \`map\` 实例已存在并且对应方法可用，例如 \`if (map && map.getLayer && map.getLayer('id')) ...\`
 3.5 图层类型与样式属性必须匹配：\`fill\` 图层只使用 \`fill-*\` 样式，\`line\` 图层只使用 \`line-*\` 样式，\`circle\` 图层只使用 \`circle-*\` 样式
 3.6 面边框颜色可以直接用 \`fill-outline-color\`，但边框宽度若需要可调，必须额外新增一个 \`line\` 图层；禁止在 \`fill\` 图层的 paint 中写 \`fill-width\`
 3.7 覆盖物强约束：Marker/Popup 必须使用 reference 中出现过的标准链式写法，例如 \`new TMapGL.Marker(...).setLngLat([lng, lat]).addTo(map)\`、\`new TMapGL.Popup(...).setLngLat([lng, lat]).setHTML(html).addTo(map)\`
@@ -699,6 +700,7 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 5. 如果是异步加载/事件时序问题，要增加必要的判空和时机保护
 5.1 如果提供了“错误诊断”信息，必须先遵循诊断中的根因与检查清单再改代码
 5.2 对地图渲染时序，优先检查是否在 \`map.on("load")\` 之前调用了 \`map.addSource\` / \`map.addLayer\` / \`map.addControl\` / \`map.fitBounds\`，以及是否在 source 未创建时就直接 \`map.getSource(...).setData(...)\`
+5.2.1 如果代码需要清理旧图层/旧 source，先检查是否在 \`map\` 可能尚未初始化时直接调用了 \`map.getLayer(...)\` / \`map.getSource(...)\` / \`map.removeLayer(...)\` / \`map.removeSource(...)\`
 5.3 修复时只能使用当前已加载 reference 文档中已经明确出现的 TMapGL API；没有示例支撑的 API 不要猜写
 5.4 如果当前 reference 没有覆盖某个 API 能力，优先改成已有示例能完成的实现，不要硬修成另一个未经验证的写法
 6. 若错误涉及 GeoJSON/数据格式（如 "not a valid GeoJSON object"、"无法识别的数据格式"）：
@@ -714,6 +716,7 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 7.2 如果文件上下文包含“自动数据理解结果（系统已读取真实文件，高优先级）”，修复时优先遵循其中的 geometry 类型、字段画像和安全坐标提取方式
 7.3 如果错误是 \`Cannot read properties of undefined (reading '...')\`，优先检查根结构、顶层 key 和字段路径是否与运行时契约一致，不要自由猜测字段名
 7.4 如果错误来自天地图 SDK 内部（如 \`js?tk=...:32\`）且没有明确业务字段名，优先排查地图/source ready 时序：图层、控件和 fitBounds 是否在 \`map.on("load")\` 之前执行，以及 \`map.getSource(...).setData(...)\` 是否发生在 source 尚未创建时
+7.4.1 如果错误表现为 \`Cannot read properties of undefined (reading 'getLayer')\` / \`'getSource'\`，优先检查是否在清理旧图层/旧 source 时漏掉了 \`map\` 判空与方法存在性校验
 7.5 如果错误发生在 \`map.addLayer\` 附近或表现为 SDK 内部属性读取异常，优先检查图层类型与 \`paint/layout\` 属性是否匹配；例如 \`fill\` 图层不能使用 \`fill-width\`，若要可调边框宽度应新增 \`line\` 图层
 8. 如果错误包含 "AJAXError: Not Found (404): default"，优先检查并移除/修正 style: 'default'（默认样式应省略 style 字段）
 9. 如果错误包含 "Identifier 'map' has already been declared"：

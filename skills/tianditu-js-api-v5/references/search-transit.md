@@ -169,11 +169,19 @@ var lines = (typeResult && typeResult.lines) || [];
 if (!lines.length) { /* empty */ }
 ```
 
-4. 渲染路线前先清理旧图层/数据源，避免 `Source already exists`：
+4. 渲染路线前先清理旧图层/数据源，避免 `Source already exists`。清理时也要先确认 `map` 已经可用，避免在异步分支里直接读 `map.getLayer/getSource`：
 
 ```javascript
-if (map.getLayer('route-main')) map.removeLayer('route-main');
-if (map.getSource('transit-line')) map.removeSource('transit-line');
+function safeRemoveLayer(id) {
+  if (map && map.getLayer && map.getLayer(id)) map.removeLayer(id);
+}
+
+function safeRemoveSource(id) {
+  if (map && map.getSource && map.getSource(id)) map.removeSource(id);
+}
+
+safeRemoveLayer('route-main');
+safeRemoveSource('transit-line');
 ```
 
 5. 添加图层时不要写死不存在的锚点层（例如 `waterway-label`）：

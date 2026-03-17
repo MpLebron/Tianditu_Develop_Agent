@@ -36,6 +36,7 @@ export function analyzeGeneratedCode(code: string, options?: { fileData?: string
   const mapMutationTimingIssues = analyzeMapLoadTiming(code)
   issues.push(...mapMutationTimingIssues)
   issues.push(...analyzeSourceReadyTiming(code))
+  issues.push(...analyzeMapCleanupGuards(code))
   issues.push(...analyzeLayerPropertyCompatibility(code))
 
   if (/api\.tianditu\.gov\.cn\/v5\/geocoder/i.test(code)) {
@@ -369,6 +370,40 @@ function analyzeSourceReadyTiming(code: string): VerificationIssue[] {
       suggestion: '不要把唯一安全模式强制写死成“fetch 一定在 load 里”；但必须满足 map ready + source ready。可以采用“缓存数据 -> load 后 apply”或“load 与 fetch 并行，汇合后再 setData”的模式。',
     })
     break
+  }
+
+  return issues
+}
+
+function analyzeMapCleanupGuards(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+  const hasTMap = /\bnew\s+TMapGL\.Map\s*\(/.test(code)
+  if (!hasTMap) return issues
+
+  const riskyCleanupPatterns: Array<{ pattern: RegExp; code: string; message: string; suggestion: string }> = [
+    {
+      pattern: /if\s*\(\s*map\.getLayer\s*\(\s*['"`][^'"`]+['"`]\s*\)\s*\)\s*map\.removeLayer\s*\(/,
+      code: 'map-cleanup-getlayer-unguarded',
+      message: '检测到直接使用 if (map.getLayer(...)) map.removeLayer(...) 清理旧图层；如果 map 尚未初始化，这里会直接抛出 undefined.getLayer 错误。',
+      suggestion: '改为先判断 map 实例和方法存在：if (map && map.getLayer && map.getLayer("id")) map.removeLayer("id")，或封装 safeRemoveLayer(id)。',
+    },
+    {
+      pattern: /if\s*\(\s*map\.getSource\s*\(\s*['"`][^'"`]+['"`]\s*\)\s*\)\s*map\.removeSource\s*\(/,
+      code: 'map-cleanup-getsource-unguarded',
+      message: '检测到直接使用 if (map.getSource(...)) map.removeSource(...) 清理旧数据源；如果 map 尚未初始化，这里会直接抛出 undefined.getSource 错误。',
+      suggestion: '改为先判断 map 实例和方法存在：if (map && map.getSource && map.getSource("id")) map.removeSource("id")，或封装 safeRemoveSource(id)。',
+    },
+  ]
+
+  for (const item of riskyCleanupPatterns) {
+    if (item.pattern.test(code)) {
+      issues.push({
+        severity: 'error',
+        code: item.code,
+        message: item.message,
+        suggestion: item.suggestion,
+      })
+    }
   }
 
   return issues

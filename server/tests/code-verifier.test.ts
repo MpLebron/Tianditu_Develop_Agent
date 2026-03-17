@@ -231,6 +231,44 @@ describe('CodeVerifier symbol text font checks', () => {
     expect(issues.some((issue) => issue.code === 'popup-setelement-unsupported')).toBe(true)
   })
 
+  it('flags unguarded map.getLayer cleanup that can explode before map is ready', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })
+      function redrawRoute() {
+        if (map.getLayer('route-line')) map.removeLayer('route-line')
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-cleanup-getlayer-unguarded')).toBe(true)
+  })
+
+  it('flags unguarded map.getSource cleanup that can explode before map is ready', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })
+      function redrawRoute() {
+        if (map.getSource('route')) map.removeSource('route')
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-cleanup-getsource-unguarded')).toBe(true)
+  })
+
+  it('allows guarded cleanup helpers for layers and sources', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })
+      function safeRemoveLayer(id) {
+        if (map && map.getLayer && map.getLayer(id)) map.removeLayer(id)
+      }
+
+      function safeRemoveSource(id) {
+        if (map && map.getSource && map.getSource(id)) map.removeSource(id)
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-cleanup-getlayer-unguarded')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'map-cleanup-getsource-unguarded')).toBe(false)
+  })
+
   it('allows line-width on line layers', () => {
     const issues = analyzeGeneratedCode(`
       map.on('load', function() {

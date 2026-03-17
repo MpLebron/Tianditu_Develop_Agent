@@ -119,9 +119,9 @@ async function loadAdministrative(keyword) {
     return;
   }
 
-  if (map.getSource('admin-boundary')) {
-    if (map.getLayer('admin-fill')) map.removeLayer('admin-fill');
-    if (map.getLayer('admin-line')) map.removeLayer('admin-line');
+  if (map && map.getSource && map.getSource('admin-boundary')) {
+    if (map.getLayer && map.getLayer('admin-fill')) map.removeLayer('admin-fill');
+    if (map.getLayer && map.getLayer('admin-line')) map.removeLayer('admin-line');
     map.removeSource('admin-boundary');
   }
 
