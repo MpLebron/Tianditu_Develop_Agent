@@ -14,13 +14,83 @@ router.get('/', async (req, res, next) => {
     const pageSize = Number(req.query.pageSize || 20)
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const phase = typeof req.query.phase === 'string' ? req.query.phase : undefined
+    const outcome = typeof req.query.outcome === 'string' ? req.query.outcome : undefined
+    const entrySource = typeof req.query.entrySource === 'string' ? req.query.entrySource : undefined
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined
     const result = await runDossierStore.listRuns({
       page,
       pageSize,
       status: status as any,
       phase: phase as any,
+      outcome: outcome as any,
+      entrySource: entrySource as any,
+      q,
     })
     res.json({ success: true, data: result })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.get('/:id/artifacts/:artifactId/raw', async (req, res, next) => {
+  try {
+    if (!config.runDossiers.enabled) {
+      return res.status(404).json({ success: false, error: '运行档案功能未启用' })
+    }
+    const result = await runDossierStore.readArtifact(String(req.params.id || ''), String(req.params.artifactId || ''))
+    if (!result) {
+      return res.status(404).json({ success: false, error: '产物不存在' })
+    }
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('Content-Type', result.artifact.contentType || 'application/octet-stream')
+    res.send(result.buffer)
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.get('/:id/artifacts/:artifactId', async (req, res, next) => {
+  try {
+    if (!config.runDossiers.enabled) {
+      return res.status(404).json({ success: false, error: '运行档案功能未启用' })
+    }
+    const runId = String(req.params.id || '')
+    const artifactId = String(req.params.artifactId || '')
+    const result = await runDossierStore.readArtifact(runId, artifactId)
+    if (!result) {
+      return res.status(404).json({ success: false, error: '产物不存在' })
+    }
+
+    const isTextLike = /^text\//i.test(result.artifact.contentType) || /json/i.test(result.artifact.contentType)
+    if (!isTextLike) {
+      return res.json({
+        success: true,
+        data: {
+          artifact: result.artifact,
+          rawUrl: `/api/run-dossiers/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}/raw`,
+        },
+      })
+    }
+
+    const content = result.buffer.toString('utf-8')
+    let parsedJson: unknown
+    if (/json/i.test(result.artifact.contentType)) {
+      try {
+        parsedJson = JSON.parse(content)
+      } catch {
+        parsedJson = undefined
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        artifact: result.artifact,
+        content,
+        parsedJson,
+        rawUrl: `/api/run-dossiers/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}/raw`,
+      },
+    })
   } catch (err) {
     next(err)
   }

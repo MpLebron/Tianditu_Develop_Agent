@@ -76,4 +76,49 @@ describe('RunDossierStore', () => {
     expect(record?.summary.status).toBe('failed')
     expect(record?.summary.outcome).toBe('runtime_error')
   })
+
+  it('filters runs and reads artifact content', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'run-dossier-'))
+    tempDirs.push(dir)
+    const store = new RunDossierStore(dir)
+
+    const sampleRun = await store.createRun({
+      phase: 'generate',
+      entrySource: 'sample',
+      sampleId: 'fulian-centers',
+      userPrompt: '生成妇联中心专题图',
+      verifierEnabled: true,
+      requestId: 'req-3',
+      sessionId: 'sid-3',
+    })
+
+    const uploadRun = await store.createRun({
+      phase: 'fix_visual',
+      entrySource: 'upload',
+      userPrompt: '修复空白地图',
+      verifierEnabled: true,
+      requestId: 'req-4',
+      sessionId: 'sid-4',
+    })
+
+    await store.appendError(uploadRun.summary.id, {
+      source: 'visual',
+      message: '页面空白',
+      markFailed: true,
+      outcome: 'visual_error',
+    })
+    const artifact = await store.attachTextArtifact(uploadRun.summary.id, 'generated-code', '<html>ok</html>')
+
+    const filtered = await store.listRuns({ entrySource: 'upload', outcome: 'visual_error', q: '空白地图' })
+    expect(filtered.total).toBe(1)
+    expect(filtered.items[0]?.id).toBe(uploadRun.summary.id)
+
+    const read = await store.readArtifact(uploadRun.summary.id, artifact?.id || '')
+    expect(read?.artifact.kind).toBe('generated-code')
+    expect(read?.buffer.toString('utf-8')).toContain('<html>ok</html>')
+
+    const unmatched = await store.listRuns({ q: 'fulian-centers' })
+    expect(unmatched.total).toBe(1)
+    expect(unmatched.items[0]?.id).toBe(sampleRun.summary.id)
+  })
 })

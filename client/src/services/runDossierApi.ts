@@ -1,3 +1,13 @@
+import type {
+  RunArtifactContentResult,
+  RunDossierListResult,
+  RunDossierRecord,
+  RunEntrySource,
+  RunOutcome,
+  RunPhase,
+  RunStatus,
+} from '../types/runDossier'
+
 interface RuntimeErrorPayload {
   runId: string
   previewRunId?: string
@@ -27,5 +37,45 @@ export const runDossierApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
+  },
+
+  listRuns(options?: {
+    page?: number
+    pageSize?: number
+    status?: RunStatus | 'all'
+    phase?: RunPhase | 'all'
+    outcome?: RunOutcome | 'all'
+    entrySource?: RunEntrySource | 'all'
+    q?: string
+  }) {
+    const query = new URLSearchParams()
+    if (options?.page) query.set('page', String(options.page))
+    if (options?.pageSize) query.set('pageSize', String(options.pageSize))
+    if (options?.status && options.status !== 'all') query.set('status', options.status)
+    if (options?.phase && options.phase !== 'all') query.set('phase', options.phase)
+    if (options?.outcome && options.outcome !== 'all') query.set('outcome', options.outcome)
+    if (options?.entrySource && options.entrySource !== 'all') query.set('entrySource', options.entrySource)
+    if (options?.q?.trim()) query.set('q', options.q.trim())
+    const qs = query.toString()
+    return requestJson<RunDossierListResult>(`/api/run-dossiers${qs ? `?${qs}` : ''}`, {
+      method: 'GET',
+    })
+  },
+
+  getRun(runId: string) {
+    return requestJson<RunDossierRecord>(`/api/run-dossiers/${encodeURIComponent(runId)}`, {
+      method: 'GET',
+    })
+  },
+
+  getArtifact(runId: string, artifactId: string) {
+    return requestJson<RunArtifactContentResult>(
+      `/api/run-dossiers/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      { method: 'GET' },
+    )
+  },
+
+  getArtifactRawUrl(runId: string, artifactId: string) {
+    return `/api/run-dossiers/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}/raw`
   },
 }

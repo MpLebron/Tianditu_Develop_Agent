@@ -140,6 +140,7 @@ function fallbackCategory(evidence: ReturnType<typeof extractErrorEvidence>): Er
   if (evidence.matchedSignals.includes('overlay-api')) return 'api'
   if (evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))) return 'api'
   if (evidence.matchedSignals.includes('syntax')) return 'syntax'
+  if (evidence.matchedSignals.includes('layer-style-mismatch') || evidence.codeSignals.includes('fill-width-invalid')) return 'runtime'
   if (evidence.matchedSignals.includes('missing-before-layer')) return 'runtime'
   if (evidence.matchedSignals.includes('runtime-nullish')) return 'runtime'
   if (evidence.matchedSignals.includes('network')) return 'network'
@@ -163,6 +164,10 @@ function fallbackLikelyCause(
 
   if (evidence.matchedSignals.includes('missing-before-layer') || evidence.codeSignals.includes('layer-beforeid-literal')) {
     return '代码在 map.addLayer(layer, beforeId) 中写死了不存在的锚点层（例如 waterway-label）；当前底图样式里没有这个图层，所以业务图层在渲染时直接失败。'
+  }
+
+  if (evidence.matchedSignals.includes('layer-style-mismatch') || evidence.codeSignals.includes('fill-width-invalid')) {
+    return '图层类型和样式属性不匹配：当前代码把不受支持的样式属性写进了图层 paint/layout（这次最可能是 fill 图层误用了 fill-width），导致 TMapGL 在 addLayer 时进入内部属性解析异常。'
   }
 
   const category = fallbackCategory(evidence)
@@ -212,8 +217,9 @@ function fallbackSuggestedPackages(evidence: ReturnType<typeof extractErrorEvide
     || evidence.codeSignals.includes('mapbox-constructor')
     || evidence.matchedSignals.includes('missing-sdk')
     || evidence.matchedSignals.includes('missing-before-layer')
+    || evidence.matchedSignals.includes('layer-style-mismatch')
     || evidence.matchedSignals.includes('overlay-api')
-    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed', 'layer-beforeid-literal'].includes(signal))
+    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed', 'layer-beforeid-literal', 'fill-width-invalid'].includes(signal))
   ) {
     packages.add('tianditu-jsapi')
   }
@@ -237,6 +243,11 @@ function fallbackSuggestedReferences(skillStore: SkillStore, evidence: ReturnTyp
   if (evidence.matchedSignals.includes('transit')) push('search-transit')
   if (evidence.matchedSignals.includes('missing-sdk') || evidence.codeSignals.includes('mapbox-constructor')) push('map-init')
   if (evidence.matchedSignals.includes('missing-before-layer') || evidence.codeSignals.includes('layer-beforeid-literal')) push('map-init')
+  if (evidence.matchedSignals.includes('layer-style-mismatch') || evidence.codeSignals.includes('fill-width-invalid')) {
+    push('bindPolygonLayer')
+    push('bindLineLayer')
+    push('bindGeoJSON')
+  }
   if (evidence.matchedSignals.includes('overlay-api') || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))) {
     push('marker')
     push('popup')
@@ -274,6 +285,11 @@ function fallbackChecklist(
   if (evidence.matchedSignals.includes('missing-before-layer') || evidence.codeSignals.includes('layer-beforeid-literal')) {
     checklist.push('检查是否把 map.addLayer(layer, beforeId) 的第二个参数写死成了不存在的底图锚点层（如 waterway-label）。')
     checklist.push('只有在 map.getLayer(beforeId) 为真时才传 beforeId；否则直接调用 map.addLayer(layer)。')
+  }
+  if (evidence.matchedSignals.includes('layer-style-mismatch') || evidence.codeSignals.includes('fill-width-invalid')) {
+    checklist.push('检查 addLayer 的图层类型与 paint/layout 属性是否匹配，不要把其他图层的样式键混进来。')
+    checklist.push('如果是 fill 图层，禁止使用 fill-width；需要面边框宽度时，额外新增一个 line 图层，并在 line 图层上设置 line-width。')
+    checklist.push('优先对照 bindPolygonLayer / bindLineLayer 示例修正图层样式，而不是先怀疑数据结构。')
   }
   if (evidence.matchedSignals.includes('geojson')) checklist.push('确认传给 addSource 的 data 是 FeatureCollection/Feature。')
   if (runtimeFileContract?.kind === 'geojson') {

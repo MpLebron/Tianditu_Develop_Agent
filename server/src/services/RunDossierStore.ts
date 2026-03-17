@@ -130,6 +130,9 @@ export interface ListRunsOptions {
   pageSize?: number
   status?: RunStatus
   phase?: RunPhase
+  outcome?: RunOutcome
+  entrySource?: RunEntrySource
+  q?: string
 }
 
 function nowTs() {
@@ -441,6 +444,28 @@ export class RunDossierStore {
     let items = [...this.indexData.items].sort((a, b) => b.startedAt - a.startedAt)
     if (options?.status) items = items.filter((item) => item.status === options.status)
     if (options?.phase) items = items.filter((item) => item.phase === options.phase)
+    if (options?.outcome) items = items.filter((item) => item.outcome === options.outcome)
+    if (options?.entrySource) items = items.filter((item) => item.entrySource === options.entrySource)
+    if (options?.q) {
+      const needle = String(options.q).trim().toLowerCase()
+      if (needle) {
+        items = items.filter((item) => {
+          const haystack = [
+            item.id,
+            item.sampleId,
+            item.fileName,
+            item.userPrompt,
+            item.modelName,
+            item.latestErrorMessage,
+            item.latestErrorFingerprint,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .toLowerCase()
+          return haystack.includes(needle)
+        })
+      }
+    }
     const total = items.length
     const start = (page - 1) * pageSize
     return {
@@ -458,6 +483,21 @@ export class RunDossierStore {
     } catch {
       return null
     }
+  }
+
+  async getArtifact(runId: string, artifactId: string): Promise<RunArtifactRecord | null> {
+    const record = await this.getRun(runId)
+    if (!record) return null
+    return record.artifacts.find((item) => item.id === artifactId) || null
+  }
+
+  async readArtifact(runId: string, artifactId: string): Promise<{ artifact: RunArtifactRecord; buffer: Buffer } | null> {
+    await this.init()
+    const artifact = await this.getArtifact(runId, artifactId)
+    if (!artifact) return null
+    const absolutePath = resolve(this.artifactsDir, artifact.relativePath)
+    const buffer = await readFile(absolutePath)
+    return { artifact, buffer }
   }
 
   private async attachArtifact(

@@ -42,4 +42,26 @@ describe('extractErrorEvidence', () => {
     expect(evidence.matchedSignals).toContain('overlay-api')
     expect(evidence.codeSignals).toContain('popup-setelement-mixed')
   })
+
+  it('captures fill-width style mismatch signals behind sdk property-read errors', () => {
+    const evidence = extractErrorEvidence(
+      "TypeError: Cannot read properties of undefined (reading 'property')",
+      `
+        map.addLayer({
+          id: 'village-fill',
+          type: 'fill',
+          source: 'village-data',
+          paint: {
+            'fill-color': '#4285F4',
+            'fill-outline-color': '#1a73e8',
+            'fill-width': 1
+          }
+        })
+      `,
+    )
+
+    expect(evidence.matchedSignals).toContain('sdk-property-read')
+    expect(evidence.matchedSignals).toContain('layer-style-mismatch')
+    expect(evidence.codeSignals).toContain('fill-width-invalid')
+  })
 })

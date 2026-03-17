@@ -9,6 +9,7 @@ export function extractErrorEvidence(error: string, code: string): ErrorEvidence
   if (/tmapgl is not defined/.test(lowerText)) matchedSignals.push('missing-sdk')
   if (/identifier .* has already been declared|syntaxerror|unexpected token/.test(lowerText)) matchedSignals.push('syntax')
   if (/cannot read properties of undefined|undefined \(reading '0'\)|is not a function|null/.test(lowerText)) matchedSignals.push('runtime-nullish')
+  if (/reading 'property'|reading "property"/.test(lowerText)) matchedSignals.push('sdk-property-read')
   if (/cannot add layer .* before non-existing layer|before non-existing layer/.test(lowerText)) matchedSignals.push('missing-before-layer')
   if (/map\.add is not a function|seticon is not a function|setelement is not a function/.test(lowerText)) matchedSignals.push('overlay-api')
   if (/ajaxerror|fetcherror|404|500|failed to fetch|network|cors|timeout/.test(lowerText)) matchedSignals.push('network')
@@ -25,10 +26,17 @@ export function extractErrorEvidence(error: string, code: string): ErrorEvidence
   if (/new\s+TMapGL\.Marker\s*\(\s*\{[\s\S]{0,300}?\b(?:position|icon)\s*:/.test(code)) codeSignals.push('marker-constructor-mixed')
   if (/\.\s*setIcon\s*\(/.test(code) && /\bTMapGL\.Marker\b/.test(code)) codeSignals.push('marker-seticon-mixed')
   if (/\.\s*setElement\s*\(/.test(code) && /\bTMapGL\.Popup\b/.test(code)) codeSignals.push('popup-setelement-mixed')
+  if (/\btype\s*:\s*['"]fill['"][\s\S]{0,800}?['"]fill-width['"]\s*:/.test(code)) codeSignals.push('fill-width-invalid')
   if (/map\.addLayer\s*\([\s\S]{0,2000}?,\s*['"`][^'"`]+['"`]\s*\)/.test(code)) codeSignals.push('layer-beforeid-literal')
   if (/api\.tianditu\.gov\.cn\/v2\/search|api\.tianditu\.gov\.cn\/search\/v1\/poi/i.test(code)) codeSignals.push('direct-search-endpoint')
   if (/style\s*:\s*['"]default['"]/.test(code)) codeSignals.push('invalid-default-style')
   if (/coordinatesPreview/.test(code)) codeSignals.push('preview-field')
+  if (
+    matchedSignals.includes('sdk-property-read')
+    && (codeSignals.includes('fill-width-invalid') || /\bmap\.addLayer\s*\(/.test(code))
+  ) {
+    matchedSignals.push('layer-style-mismatch')
+  }
 
   const urls = Array.from(new Set(errorText.match(/https?:\/\/[^\s"'`]+|\/api\/[^\s"'`]+/g) || []))
 
