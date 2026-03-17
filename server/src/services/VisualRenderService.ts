@@ -115,6 +115,7 @@ export class VisualRenderService {
             '--disable-dev-shm-usage',
             '--ignore-gpu-blocklist',
             '--enable-webgl',
+            '--use-gl=swiftshader',
             '--use-angle=swiftshader',
             '--font-render-hinting=medium',
           ],

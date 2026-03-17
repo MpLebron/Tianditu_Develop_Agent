@@ -484,6 +484,16 @@ function isBlankLikeDiagnosis(text: string): boolean {
   return /空白|未显示|没有显示|无内容|未渲染|blank|empty|not rendered|no data/.test(value)
 }
 
+function isLoadingLikeDiagnosis(text: string): boolean {
+  const value = String(text || '').toLowerCase()
+  return /加载中|正在加载|请稍候|请稍等|loading|initializing|rendering|fetching|waiting/.test(value)
+}
+
+function hasExplicitFailureSignal(text: string): boolean {
+  const value = String(text || '').toLowerCase()
+  return /错误|报错|异常|崩溃|失败|黑屏|404|500|exception|undefined|not found|failed/.test(value)
+}
+
 function normalizeVisualInspectByCaptureMeta(
   inspected: any,
   captureMeta: {
@@ -492,14 +502,25 @@ function normalizeVisualInspectByCaptureMeta(
     largestCanvasArea?: number
     canvasReadable?: boolean
     canvasTainted?: boolean
+    blankLikely?: boolean
+    loadingHintDetected?: boolean
+    captureAttempts?: number
+    captureFailed?: boolean
   } | null,
 ) {
   if (!captureMeta) return inspected
-  if (inspected.status !== 'ok' || inspected.anomalous !== true) return inspected
+  if (inspected.status !== 'ok') return inspected
+
+  const combinedText = `${inspected.summary || ''}\n${inspected.diagnosis || ''}\n${inspected.repairHint || ''}`
+  const loadingLike = captureMeta.loadingHintDetected === true || isLoadingLikeDiagnosis(combinedText)
+  const failureLike = hasExplicitFailureSignal(combinedText)
+  if (loadingLike && !failureLike) {
+    return visualInspectUnavailable('页面仍处于加载阶段，当前截图不适合触发自动补修。')
+  }
 
   const likelyCanvasMap = Number(captureMeta.canvasCount || 0) > 0 && Number(captureMeta.largestCanvasArea || 0) >= 120000
   const tainted = captureMeta.canvasTainted === true && captureMeta.canvasReadable !== true
-  const blankLike = isBlankLikeDiagnosis(`${inspected.summary}\n${inspected.diagnosis}`)
+  const blankLike = captureMeta.blankLikely === true || isBlankLikeDiagnosis(combinedText)
   if (!(likelyCanvasMap && tainted && blankLike)) return inspected
 
   return visualInspectUnavailable('前端截图受跨域画布限制影响，当前截图无法可靠反映地图渲染内容。')
@@ -531,6 +552,10 @@ router.post('/visual-inspect', async (req, res) => {
         largestCanvasArea?: number
         canvasReadable?: boolean
         canvasTainted?: boolean
+        blankLikely?: boolean
+        loadingHintDetected?: boolean
+        captureAttempts?: number
+        captureFailed?: boolean
       }
     : null
 

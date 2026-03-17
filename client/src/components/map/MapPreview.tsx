@@ -39,6 +39,11 @@ const DEFAULT_MAP_HTML = `<!DOCTYPE html>
 </html>`
 
 const MIN_CAPTURE_BASE64_LEN = 800
+const VISUAL_LOADING_TEXT_RE = /加载中|正在加载|请稍候|请稍等|loading|initializing|rendering|fetching|waiting/i
+const MAX_VISUAL_CAPTURE_ATTEMPTS = 8
+const VISUAL_CAPTURE_RETRY_WAIT_MS = 900
+const VISUAL_DEFERRED_RETRY_DELAY_MS = 3000
+const MAX_VISUAL_DEFERRED_RETRIES = 1
 
 function dataUrlToBase64(dataUrl: string): string | null {
   const raw = String(dataUrl || '')
@@ -51,6 +56,19 @@ function dataUrlToBase64(dataUrl: string): string | null {
 
 function isCaptureValid(base64?: string | null): base64 is string {
   return typeof base64 === 'string' && base64.length >= MIN_CAPTURE_BASE64_LEN
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function extractVisualText(doc: Document | null | undefined): string {
+  const raw = doc?.body?.innerText || doc?.documentElement?.innerText || ''
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 600)
+}
+
+function isLikelyLoadingText(text: string): boolean {
+  return VISUAL_LOADING_TEXT_RE.test(String(text || ''))
 }
 
 function pickLargestCanvas(doc: Document): { canvas: HTMLCanvasElement | null; count: number; maxArea: number } {
@@ -145,6 +163,97 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promis
   throw new Error('无法从前端页面捕获有效截图')
 }
 
+async function captureVisualInspectionCandidate(iframe: HTMLIFrameElement | null): Promise<{
+  imageBase64?: string
+  preferServerRender: boolean
+  captureMeta: {
+    mode?: 'dom' | 'canvas'
+    canvasCount?: number
+    largestCanvasArea?: number
+    canvasReadable?: boolean
+    canvasTainted?: boolean
+    blankLikely?: boolean
+    loadingHintDetected?: boolean
+    captureAttempts?: number
+    captureFailed?: boolean
+  }
+}> {
+  let loadingHintDetected = false
+  let lastError: Error | null = null
+  let fallbackMeta: {
+    mode?: 'dom' | 'canvas'
+    canvasCount?: number
+    largestCanvasArea?: number
+    canvasReadable?: boolean
+    canvasTainted?: boolean
+    blankLikely?: boolean
+    loadingHintDetected?: boolean
+    captureAttempts?: number
+    captureFailed?: boolean
+  } = {}
+
+  for (let attempt = 1; attempt <= MAX_VISUAL_CAPTURE_ATTEMPTS; attempt += 1) {
+    const doc = iframe?.contentDocument
+    const visibleText = extractVisualText(doc)
+    const loadingNow = isLikelyLoadingText(visibleText)
+    if (loadingNow) loadingHintDetected = true
+
+    try {
+      const captured = await captureIframeScreenshot(iframe)
+      const blankLikely = await isLikelyBlankThumbnailBase64(captured.imageBase64).catch(() => false)
+      const taintedLargeMap = captured.mode === 'dom'
+        && captured.canvasTainted === true
+        && captured.canvasReadable !== true
+        && captured.canvasCount > 0
+        && captured.largestCanvasArea >= 120000
+
+      fallbackMeta = {
+        mode: captured.mode,
+        canvasCount: captured.canvasCount,
+        largestCanvasArea: captured.largestCanvasArea,
+        canvasReadable: captured.canvasReadable,
+        canvasTainted: captured.canvasTainted,
+        blankLikely,
+        loadingHintDetected,
+        captureAttempts: attempt,
+      }
+
+      const shouldRetry = attempt < MAX_VISUAL_CAPTURE_ATTEMPTS && (loadingNow || blankLikely)
+      if (!shouldRetry) {
+        return {
+          imageBase64: captured.imageBase64,
+          preferServerRender: taintedLargeMap && blankLikely,
+          captureMeta: fallbackMeta,
+        }
+      }
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err || '未知错误'))
+      fallbackMeta = {
+        ...fallbackMeta,
+        loadingHintDetected,
+        captureAttempts: attempt,
+        captureFailed: true,
+      }
+    }
+
+    if (attempt < MAX_VISUAL_CAPTURE_ATTEMPTS) {
+      await sleep(VISUAL_CAPTURE_RETRY_WAIT_MS)
+    }
+  }
+
+  if (lastError) {
+    return {
+      preferServerRender: true,
+      captureMeta: {
+        ...fallbackMeta,
+        captureFailed: true,
+      },
+    }
+  }
+
+  throw new Error('无法从前端页面捕获有效截图')
+}
+
 export function MapPreview() {
   const {
     currentRunId,
@@ -164,10 +273,13 @@ export function MapPreview() {
   const [showError, setShowError] = useState(true)
   const fixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const visualRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const thumbnailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualInFlightRef = useRef(false)
   const thumbnailInFlightRef = useRef(false)
   const defaultLoaded = useRef(false)
+  const deferredVisualRetryRef = useRef<{ codeHash: string; count: number }>({ codeHash: '', count: 0 })
+  const [visualRetryNonce, setVisualRetryNonce] = useState(0)
   const MAX_FIX_RETRIES = 2
   const MAX_VISUAL_FIX_RETRIES = 2
   const VISUAL_STABLE_DELAY_MS = 1200
@@ -184,6 +296,30 @@ export function MapPreview() {
       hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
     }
     return `h${(hash >>> 0).toString(16)}`
+  }
+
+  const scheduleDeferredVisualRetry = (codeHash: string) => {
+    const entry = deferredVisualRetryRef.current.codeHash === codeHash
+      ? deferredVisualRetryRef.current
+      : { codeHash, count: 0 }
+
+    if (entry.count >= MAX_VISUAL_DEFERRED_RETRIES) return false
+    deferredVisualRetryRef.current = { codeHash, count: entry.count + 1 }
+
+    if (visualRetryTimerRef.current) {
+      clearTimeout(visualRetryTimerRef.current)
+      visualRetryTimerRef.current = null
+    }
+
+    visualRetryTimerRef.current = setTimeout(() => {
+      const latestState = useMapStore.getState()
+      if (!latestState.currentCode) return
+      if (hashCode(latestState.currentCode) !== codeHash) return
+      latestState.markVisualChecked(null)
+      setVisualRetryNonce((value) => value + 1)
+    }, VISUAL_DEFERRED_RETRY_DELAY_MS)
+
+    return true
   }
 
   // 加载默认地图或用户代码
@@ -334,6 +470,14 @@ export function MapPreview() {
 
   // 渲染稳定后自动触发视觉巡检
   useEffect(() => {
+    deferredVisualRetryRef.current = { codeHash: '', count: 0 }
+    if (visualRetryTimerRef.current) {
+      clearTimeout(visualRetryTimerRef.current)
+      visualRetryTimerRef.current = null
+    }
+  }, [currentCode])
+
+  useEffect(() => {
     if (visualTimerRef.current) {
       clearTimeout(visualTimerRef.current)
       visualTimerRef.current = null
@@ -353,46 +497,23 @@ export function MapPreview() {
       if (visualInFlightRef.current) return
 
       visualInFlightRef.current = true
-      useMapStore.setState({ visualChecking: true, lastVisualCheckedCodeHash: codeHash })
+      useMapStore.setState({ visualChecking: true })
 
       try {
         const messages = useChatStore.getState().messages
         const latestUser = [...messages].reverse().find((m) => m.role === 'user')
         const hint = latestUser?.content?.trim() || ''
         const runId = `${Date.now()}-${codeHash.slice(0, 8)}`
-        let imageBase64: string
-        let captureMeta:
-          | {
-              mode: 'dom' | 'canvas'
-              canvasCount: number
-              largestCanvasArea: number
-              canvasReadable: boolean
-              canvasTainted: boolean
-            }
-          | undefined
-        try {
-          const captured = await captureIframeScreenshot(iframeRef.current)
-          imageBase64 = captured.imageBase64
-          useMapStore.getState().setShareThumbnailBase64(captured.imageBase64)
-          captureMeta = {
-            mode: captured.mode,
-            canvasCount: captured.canvasCount,
-            largestCanvasArea: captured.largestCanvasArea,
-            canvasReadable: captured.canvasReadable,
-            canvasTainted: captured.canvasTainted,
-          }
-        } catch (captureErr: any) {
+        const capture = await captureVisualInspectionCandidate(iframeRef.current)
+        const captureMeta = capture.captureMeta
+        if (capture.imageBase64) {
+          useMapStore.getState().setShareThumbnailBase64(capture.imageBase64)
+        } else {
           useMapStore.getState().setShareThumbnailBase64(null)
-          useChatStore.getState().addAssistantMessage([
-            '视觉巡检结果：不可用',
-            `诊断：前端截图采样失败（${captureErr?.message || '未知原因'}）。`,
-            '本轮不会触发自动补修。',
-          ].join('\n'))
-          return
         }
         const result = await visualQaApi.inspect({
-          imageBase64,
           code: state.currentCode,
+          imageBase64: capture.preferServerRender ? undefined : capture.imageBase64,
           dossierRunId: state.currentRunId || undefined,
           captureMeta,
           hint,
@@ -403,6 +524,15 @@ export function MapPreview() {
         if (latestState.execError || latestState.executing) return
 
         if (result.status === 'unavailable') {
+          if (captureMeta.loadingHintDetected && scheduleDeferredVisualRetry(codeHash)) {
+            useChatStore.getState().addAssistantMessage([
+              '视觉巡检结果：暂缓',
+              `诊断：${result.diagnosis}`,
+              `页面仍处于加载阶段，${Math.round(VISUAL_DEFERRED_RETRY_DELAY_MS / 1000)} 秒后自动重试一次。`,
+            ].join('\n'))
+            return
+          }
+          useMapStore.getState().markVisualChecked(codeHash)
           useChatStore.getState().addAssistantMessage([
             '视觉巡检结果：不可用',
             `诊断：${result.diagnosis}`,
@@ -412,6 +542,7 @@ export function MapPreview() {
         }
 
         if (!result.anomalous) {
+          useMapStore.getState().markVisualChecked(codeHash)
           useChatStore.getState().addAssistantMessage([
             '视觉巡检结果：通过',
             `结论：${result.summary}`,
@@ -422,6 +553,7 @@ export function MapPreview() {
         }
 
         if (!result.shouldRepair) {
+          useMapStore.getState().markVisualChecked(codeHash)
           useChatStore.getState().addAssistantMessage([
             `视觉巡检结果：发现异常（${result.severity}）`,
             `结论：${result.summary}`,
@@ -431,6 +563,7 @@ export function MapPreview() {
           return
         }
 
+        useMapStore.getState().markVisualChecked(codeHash)
         useChatStore.getState().addAssistantMessage([
           `视觉巡检结果：发现异常（${result.severity}）`,
           `结论：${result.summary}`,
@@ -479,6 +612,7 @@ export function MapPreview() {
     execError,
     lastVisualCheckedCodeHash,
     visualFixRetryCount,
+    visualRetryNonce,
   ])
 
   useEffect(() => {
@@ -486,6 +620,10 @@ export function MapPreview() {
       if (visualTimerRef.current) {
         clearTimeout(visualTimerRef.current)
         visualTimerRef.current = null
+      }
+      if (visualRetryTimerRef.current) {
+        clearTimeout(visualRetryTimerRef.current)
+        visualRetryTimerRef.current = null
       }
     }
   }, [])

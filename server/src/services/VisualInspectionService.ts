@@ -36,6 +36,14 @@ const MAX_SUMMARY_CHARS = 120
 const MAX_DIAGNOSIS_CHARS = 500
 const MAX_REPAIR_HINT_CHARS = 500
 
+function isLoadingLikeText(text: string): boolean {
+  return /加载中|正在加载|请稍候|请稍等|loading|initializing|rendering|fetching|waiting|spinner|skeleton/i.test(String(text || ''))
+}
+
+function hasExplicitFailureSignal(text: string): boolean {
+  return /错误|报错|异常|崩溃|失败|黑屏|404|500|exception|undefined|not found|failed/i.test(String(text || ''))
+}
+
 function buildDefaultSelection(): LlmSelection {
   const fallback = (() => {
     try {
@@ -193,6 +201,7 @@ export class VisualInspectionService {
       '7) 若你判断页面正常且证据充分，confidence 通常应在 0.80~0.98。',
       '8) 若你判断页面异常且证据充分，confidence 通常应在 0.70~0.98。',
       '9) 只有当截图模糊、被遮挡、信息不足或难以判断时，confidence 才应低于 0.50，并在 diagnosis 说明不确定性来源。',
+      '10) 如果截图主要呈现“加载中 / loading / 等待中 / 骨架屏”等加载态，而没有明确错误证据，不要触发自动修复：anomalous=false，shouldRepair=false。',
     ].join('\n')
 
     const userPrompt = [
@@ -204,7 +213,7 @@ export class VisualInspectionService {
     try {
       const llm = createLLM({
         llmSelection: this.llmSelection,
-        temperature: 0.1,
+        temperature: 0,
         maxTokens: 500,
         timeoutMs: this.timeoutMs,
       })
@@ -227,9 +236,9 @@ export class VisualInspectionService {
         return unavailableResult('视觉诊断输出解析失败。')
       }
 
-      const summary = normalizeSummary(parsed.summary)
-      const diagnosis = normalizeDiagnosis(parsed.diagnosis)
-      const repairHint = normalizeRepairHint(parsed.repairHint)
+      let summary = normalizeSummary(parsed.summary)
+      let diagnosis = normalizeDiagnosis(parsed.diagnosis)
+      let repairHint = normalizeRepairHint(parsed.repairHint)
       let anomalous = parsed.anomalous === true
       let shouldRepair = normalizeShouldRepair(parsed.shouldRepair)
       if (shouldRepair && !anomalous) {
@@ -239,7 +248,16 @@ export class VisualInspectionService {
         shouldRepair = false
       }
 
-      const severity = anomalous ? normalizeSeverity(parsed.severity) : 'low'
+      let severity = anomalous ? normalizeSeverity(parsed.severity) : 'low'
+      const combinedText = `${summary}\n${diagnosis}\n${repairHint}`
+      if (isLoadingLikeText(combinedText) && !hasExplicitFailureSignal(combinedText)) {
+        anomalous = false
+        shouldRepair = false
+        severity = 'low'
+        summary = '页面处于加载阶段，暂不判定为需要修复的异常。'
+        diagnosis = normalizeDiagnosis(`${diagnosis} 当前画面更接近加载态，而不是明确故障。`)
+        repairHint = '无'
+      }
       const confidence = resolveVisualInspectionConfidence(parsed.confidence, {
         anomalous,
         shouldRepair,

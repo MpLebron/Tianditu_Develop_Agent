@@ -23,6 +23,10 @@ export interface VisualInspectRequest {
     largestCanvasArea?: number
     canvasReadable?: boolean
     canvasTainted?: boolean
+    blankLikely?: boolean
+    loadingHintDetected?: boolean
+    captureAttempts?: number
+    captureFailed?: boolean
   }
   hint?: string
   runId?: string
