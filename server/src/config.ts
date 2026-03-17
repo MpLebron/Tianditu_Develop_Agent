@@ -57,6 +57,21 @@ function resolveShareDir(): string {
   return candidates[0] || resolve(import.meta.dirname, '../data/share')
 }
 
+function resolveRunDossierDir(): string {
+  const candidates = [
+    process.env.RUN_DOSSIER_DIR,
+    resolve(import.meta.dirname, '../data/run-dossiers'),
+    '/app/run-dossiers',
+    '/run-dossiers',
+  ].filter((p): p is string => Boolean(p && p.trim()))
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+
+  return candidates[0] || resolve(import.meta.dirname, '../data/run-dossiers')
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -101,6 +116,11 @@ export const config = {
       waitAfterLoadMs: parseInt(process.env.SHARE_THUMBNAIL_WAIT_MS || '600'),
       maxConcurrentRenders: parseInt(process.env.SHARE_THUMBNAIL_MAX_CONCURRENT || '2'),
     },
+  },
+
+  runDossiers: {
+    enabled: process.env.RUN_DOSSIER_ENABLED !== 'false',
+    dir: resolveRunDossierDir(),
   },
 
   visualInspection: {

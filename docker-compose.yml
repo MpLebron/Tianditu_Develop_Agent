@@ -17,6 +17,7 @@ services:
     volumes:
       - api_uploads:/app/uploads
       - api_share:/app/share
+      - api_run_dossiers:/app/run-dossiers
     networks:
       - tianditu_net
 
@@ -36,6 +37,7 @@ services:
 volumes:
   api_uploads:
   api_share:
+  api_run_dossiers:
 
 networks:
   tianditu_net:

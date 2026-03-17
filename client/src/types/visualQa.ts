@@ -16,6 +16,7 @@ export interface VisualInspectResult {
 export interface VisualInspectRequest {
   code?: string
   imageBase64?: string
+  dossierRunId?: string
   captureMeta?: {
     mode?: 'dom' | 'canvas'
     canvasCount?: number

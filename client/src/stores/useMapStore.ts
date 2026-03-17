@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 interface MapStore {
+  currentRunId: string | null
   currentCode: string | null
   /** 首份可运行 HTML 的预渲染代码 */
   previewCode: string | null
@@ -33,12 +34,14 @@ interface MapStore {
   setVisualChecking: (v: boolean) => void
   markVisualChecked: (hash: string | null) => void
   setShareThumbnailBase64: (base64: string | null) => void
+  setCurrentRunId: (runId: string | null) => void
   autoFix: (userInput?: string) => Promise<void>
 }
 
 const MAX_FIX_RETRIES = 2
 
 export const useMapStore = create<MapStore>((set, get) => ({
+  currentRunId: null,
   currentCode: null,
   previewCode: null,
   streamingCode: null,
@@ -111,6 +114,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
   setVisualChecking: (v) => set({ visualChecking: v }),
   markVisualChecked: (hash) => set({ lastVisualCheckedCodeHash: hash }),
   setShareThumbnailBase64: (base64) => set({ shareThumbnailBase64: base64 }),
+  setCurrentRunId: (runId) => set({ currentRunId: runId }),
 
   autoFix: async (userInput?: string) => {
     const { currentCode, execError, fixRetryCount, fixing } = get()

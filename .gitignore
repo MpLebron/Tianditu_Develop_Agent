@@ -40,3 +40,4 @@ coverage/
 # Local automation / visual-check artifacts
 .playwright-cli/
 output/
+server/data/run-dossiers/

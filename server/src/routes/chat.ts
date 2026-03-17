@@ -19,6 +19,7 @@ import {
 import {
   buildRuntimeGeojsonContract,
   buildRuntimeJsonContract,
+  extractRuntimeFileContract,
   formatRuntimeGeojsonContract,
   formatRuntimeJsonContract,
 } from '../agent/FileContextContract.js'
@@ -28,6 +29,7 @@ import {
   normalizeStructuredRuntime,
   saveNormalizedStructuredData,
 } from '../services/StructuredFileRuntime.js'
+import { runDossierStore, type RunEntrySource, type RunOutcome, type RunPhase } from '../services/RunDossierStore.js'
 
 const router = Router()
 const agent = new MapAgent()
@@ -441,6 +443,28 @@ function resolveRequestLlmSelection(body: any): LlmSelection {
   )
 }
 
+function detectEntrySource(params: { file?: Express.Multer.File; sampleId?: unknown; fileContext?: unknown }): RunEntrySource {
+  if (params.file) return 'upload'
+  if (params.sampleId != null) return 'sample'
+  if (typeof params.fileContext === 'string' && params.fileContext.trim()) return 'inline'
+  return 'none'
+}
+
+function resolveContractInfo(fileData?: string): {
+  fileKind?: string
+  contractVersion?: string
+  runtimeContractKind?: string
+} {
+  if (!fileData) return {}
+  const contract = extractRuntimeFileContract(fileData)
+  if (!contract) return {}
+  return {
+    fileKind: contract.kind,
+    contractVersion: contract.version,
+    runtimeContractKind: contract.kind,
+  }
+}
+
 function visualInspectUnavailable(reason: string) {
   return {
     status: 'unavailable' as const,
@@ -499,6 +523,7 @@ router.post('/visual-inspect', async (req, res) => {
   const rawImageBase64 = typeof req.body?.imageBase64 === 'string' ? req.body.imageBase64 : ''
   const hint = typeof req.body?.hint === 'string' ? req.body.hint : ''
   const runId = typeof req.body?.runId === 'string' ? req.body.runId : ''
+  const dossierRunId = typeof req.body?.dossierRunId === 'string' ? req.body.dossierRunId.trim() : ''
   const captureMeta = typeof req.body?.captureMeta === 'object' && req.body.captureMeta
     ? req.body.captureMeta as {
         mode?: string
@@ -521,10 +546,27 @@ router.post('/visual-inspect', async (req, res) => {
   const imageBase64 = rawImageBase64.trim()
 
   try {
+    if (config.runDossiers.enabled && dossierRunId) {
+      await runDossierStore.appendEvent(dossierRunId, {
+        type: 'visual_inspect_requested',
+        status: 'running',
+        payload: { runId, hint, captureMeta },
+      })
+    }
+
     let finalImageBase64 = imageBase64
     if (!finalImageBase64) {
       const rendered = await visualRenderService.render({ code, runId })
       if (!rendered.ok || !rendered.imageBase64) {
+        if (config.runDossiers.enabled && dossierRunId) {
+          const unavailable = visualInspectUnavailable(rendered.reason || '地图截图失败。')
+          await runDossierStore.appendEvent(dossierRunId, {
+            type: 'visual_inspect_result',
+            status: 'done',
+            payload: unavailable,
+          })
+          await runDossierStore.attachJsonArtifact(dossierRunId, 'visual-result', unavailable)
+        }
         res.json({
           success: true,
           data: visualInspectUnavailable(rendered.reason || '地图截图失败。'),
@@ -539,11 +581,50 @@ router.post('/visual-inspect', async (req, res) => {
       hint,
       runId,
     })
+    const normalized = normalizeVisualInspectByCaptureMeta(inspected, captureMeta)
+    if (config.runDossiers.enabled && dossierRunId) {
+      await runDossierStore.appendEvent(dossierRunId, {
+        type: 'visual_inspect_result',
+        status: normalized.anomalous ? 'error' : 'done',
+        payload: normalized,
+      })
+      await runDossierStore.attachJsonArtifact(dossierRunId, 'visual-result', normalized, { runId, hint })
+      if (finalImageBase64 && (normalized.status !== 'ok' || normalized.anomalous)) {
+        await runDossierStore.attachPngBase64Artifact(dossierRunId, 'visual-screenshot', finalImageBase64, {
+          runId,
+          captureMeta,
+        })
+      }
+      if (normalized.status === 'ok' && normalized.anomalous) {
+        await runDossierStore.appendError(dossierRunId, {
+          source: 'visual',
+          kind: normalized.severity,
+          message: `[视觉巡检异常] ${normalized.summary}\n${normalized.diagnosis}`,
+          markFailed: true,
+          outcome: 'visual_error',
+          details: {
+            runId,
+            captureMeta,
+            repairHint: normalized.repairHint,
+            confidence: normalized.confidence,
+          },
+        })
+      }
+    }
     res.json({
       success: true,
-      data: normalizeVisualInspectByCaptureMeta(inspected, captureMeta),
+      data: normalized,
     })
   } catch (err: any) {
+    if (config.runDossiers.enabled && dossierRunId) {
+      await runDossierStore.appendError(dossierRunId, {
+        source: 'server',
+        kind: 'visual-inspect',
+        message: err?.message || '视觉巡检失败',
+        markFailed: false,
+        details: { runId, hint },
+      })
+    }
     res.json({
       success: true,
       data: visualInspectUnavailable(err?.message || '视觉巡检失败。'),
@@ -594,6 +675,45 @@ router.post('/stream', upload.single('file'), async (req, res) => {
     return
   }
 
+  const requestContext = getRequestContext(req)
+  const entrySource = detectEntrySource({
+    file: req.file || undefined,
+    sampleId,
+    fileContext,
+  })
+  let dossierRunId = ''
+  if (config.runDossiers.enabled) {
+    const created = await runDossierStore.createRun({
+      phase: 'generate',
+      entrySource,
+      sampleId: isBuiltinSampleId(sampleId) ? sampleId : undefined,
+      userPrompt: message,
+      conversationHistory: typeof conversationHistory === 'string' ? conversationHistory : undefined,
+      existingCodeChars: typeof existingCode === 'string' ? existingCode.length : undefined,
+      modelProvider: llmSelection.providerId,
+      modelName: llmSelection.model,
+      agentMode: String(config.agentRuntime.mode || ''),
+      verifierEnabled: config.agentRuntime.enableVerifier,
+      requestId: requestContext.requestId,
+      sessionId: requestContext.sessionId,
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size,
+    })
+    dossierRunId = created.summary.id
+    await runDossierStore.attachJsonArtifact(dossierRunId, 'request-snapshot', {
+      message,
+      sampleId: isBuiltinSampleId(sampleId) ? sampleId : undefined,
+      entrySource,
+      conversationHistory: typeof conversationHistory === 'string' ? conversationHistory : '',
+      existingCodeChars: typeof existingCode === 'string' ? existingCode.length : 0,
+      llmSelection,
+      requestContext,
+      uploadedFile: req.file
+        ? { originalname: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype }
+        : null,
+    })
+  }
+
   // SSE 响应头
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -606,6 +726,9 @@ router.post('/stream', upload.single('file'), async (req, res) => {
   res.on('close', () => { clientDisconnected = true })
 
   try {
+    if (dossierRunId && !clientDisconnected) {
+      res.write(`data: ${JSON.stringify({ type: 'run_context', runId: dossierRunId, phase: 'generate' })}\n\n`)
+    }
     const resolvedFile = await resolveRequestFileData({
       req,
       file: req.file || undefined,
@@ -613,6 +736,32 @@ router.post('/stream', upload.single('file'), async (req, res) => {
       fileContext,
     })
     const fileData = resolvedFile.fileData
+
+    if (config.runDossiers.enabled && dossierRunId) {
+      let resolvedFileName = req.file?.originalname
+      let resolvedFileSize = req.file?.size
+      if (!resolvedFileName && isBuiltinSampleId(sampleId)) {
+        const meta = await getBuiltinSampleMeta(sampleId)
+        resolvedFileName = meta.file.name
+        resolvedFileSize = meta.file.size
+      }
+      const contractInfo = resolveContractInfo(fileData)
+      await runDossierStore.updateRun(dossierRunId, {
+        fileName: resolvedFileName,
+        fileSize: resolvedFileSize,
+        fileKind: contractInfo.fileKind,
+        requestPatch: {
+          fileName: resolvedFileName,
+          fileSize: resolvedFileSize,
+          fileKind: contractInfo.fileKind,
+          fileContractVersion: contractInfo.contractVersion,
+          runtimeContractKind: contractInfo.runtimeContractKind,
+        },
+      })
+      if (resolvedFile.emittedFileContext) {
+        await runDossierStore.attachTextArtifact(dossierRunId, 'file-context', resolvedFile.emittedFileContext)
+      }
+    }
 
     if (!clientDisconnected && resolvedFile.emittedFileContext) {
       res.write(`data: ${JSON.stringify({ type: 'file_context', content: resolvedFile.emittedFileContext })}\n\n`)
@@ -626,8 +775,55 @@ router.post('/stream', upload.single('file'), async (req, res) => {
       llmSelection,
     })
 
+    let receivedFinalCode = false
     for await (const chunk of stream) {
       if (clientDisconnected) break
+
+      if (config.runDossiers.enabled && dossierRunId) {
+        if (chunk.type === 'tool_execution_start') {
+          await runDossierStore.appendEvent(dossierRunId, {
+            type: 'tool_execution_start',
+            toolCallId: String((chunk as any).toolCallId || ''),
+            toolName: String((chunk as any).toolName || ''),
+            status: 'running',
+            payload: {
+              args: (chunk as any).args,
+              startedAtMs: (chunk as any).startedAtMs,
+            },
+          })
+        } else if (chunk.type === 'tool_execution_end') {
+          await runDossierStore.appendEvent(dossierRunId, {
+            type: 'tool_execution_end',
+            toolCallId: String((chunk as any).toolCallId || ''),
+            toolName: String((chunk as any).toolName || ''),
+            status: (chunk as any).isError ? 'error' : 'done',
+            payload: {
+              result: (chunk as any).result,
+              isError: (chunk as any).isError,
+              endedAtMs: (chunk as any).endedAtMs,
+              decisionSource: (chunk as any).decisionSource,
+              selectedPackages: (chunk as any).selectedPackages,
+              selectedReferences: (chunk as any).selectedReferences,
+              selectedContracts: (chunk as any).selectedContracts,
+              fallbackReason: (chunk as any).fallbackReason,
+              vetoApplied: (chunk as any).vetoApplied,
+            },
+          })
+        } else if (chunk.type === 'code' && chunk.content) {
+          receivedFinalCode = true
+          await runDossierStore.attachHtmlArtifact(dossierRunId, 'generated-code', String(chunk.content || ''), {
+            codeChars: String(chunk.content || '').length,
+          })
+        } else if (chunk.type === 'error' && chunk.content) {
+          await runDossierStore.appendError(dossierRunId, {
+            source: 'server',
+            kind: 'stream',
+            message: String(chunk.content || ''),
+            markFailed: true,
+            outcome: 'request_error',
+          })
+        }
+      }
 
       let data = chunk
       // 对 code 类型注入 token
@@ -640,8 +836,27 @@ router.post('/stream', upload.single('file'), async (req, res) => {
     if (!clientDisconnected) {
       res.write('data: [DONE]\n\n')
     }
+    if (config.runDossiers.enabled && dossierRunId) {
+      await runDossierStore.updateRun(dossierRunId, {
+        status: clientDisconnected && !receivedFinalCode ? 'failed' : 'succeeded',
+        outcome: clientDisconnected && !receivedFinalCode
+          ? 'client_disconnected'
+          : (receivedFinalCode ? 'generated' : 'request_error'),
+        finishedAt: Date.now(),
+      })
+    }
     res.end()
   } catch (err: any) {
+    if (config.runDossiers.enabled && dossierRunId) {
+      await runDossierStore.appendError(dossierRunId, {
+        source: 'server',
+        kind: 'stream',
+        message: err?.message || '聊天流执行失败',
+        markFailed: true,
+        outcome: 'request_error',
+        details: { stack: typeof err?.stack === 'string' ? err.stack.slice(0, 4000) : undefined },
+      })
+    }
     if (!clientDisconnected) {
       res.write(`data: ${JSON.stringify({ type: 'error', content: err.message })}\n\n`)
       res.write('data: [DONE]\n\n')
@@ -747,7 +962,7 @@ router.post('/fix', async (req, res, next) => {
 
 // POST /api/chat/fix/stream — 流式代码修复（用于前端展示修复过程）
 router.post('/fix/stream', async (req, res) => {
-  const { code, error, userInput, fileContext } = req.body
+  const { code, error, userInput, fileContext, parentRunId, source } = req.body
 
   if (!code || !error) {
     res.status(400).json({ success: false, error: '缺少代码或错误信息' })
@@ -762,6 +977,40 @@ router.post('/fix/stream', async (req, res) => {
     return
   }
 
+  const requestContext = getRequestContext(req)
+  let dossierRunId = ''
+  const phase: RunPhase = source === 'visual' ? 'fix_visual' : 'fix_runtime'
+  if (config.runDossiers.enabled) {
+    const contractInfo = resolveContractInfo(typeof fileContext === 'string' ? fileContext : undefined)
+    const created = await runDossierStore.createRun({
+      parentRunId: typeof parentRunId === 'string' && parentRunId.trim() ? parentRunId.trim() : undefined,
+      phase,
+      entrySource: typeof fileContext === 'string' && fileContext.trim() ? 'inline' : 'none',
+      userPrompt: typeof userInput === 'string' && userInput.trim() ? userInput : '[auto-fix]',
+      existingCodeChars: typeof code === 'string' ? code.length : undefined,
+      modelProvider: llmSelection.providerId,
+      modelName: llmSelection.model,
+      agentMode: String(config.agentRuntime.mode || ''),
+      verifierEnabled: config.agentRuntime.enableVerifier,
+      requestId: requestContext.requestId,
+      sessionId: requestContext.sessionId,
+      fileKind: contractInfo.fileKind,
+    })
+    dossierRunId = created.summary.id
+    await runDossierStore.attachJsonArtifact(dossierRunId, 'fix-request', {
+      parentRunId: typeof parentRunId === 'string' ? parentRunId : '',
+      source: source === 'visual' ? 'visual' : 'runtime',
+      error,
+      userInput: userInput || '',
+      llmSelection,
+      requestContext,
+    })
+    await runDossierStore.attachHtmlArtifact(dossierRunId, 'input-code', String(code || ''))
+    if (typeof fileContext === 'string' && fileContext.trim()) {
+      await runDossierStore.attachTextArtifact(dossierRunId, 'file-context', fileContext)
+    }
+  }
+
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -772,6 +1021,9 @@ router.post('/fix/stream', async (req, res) => {
   res.on('close', () => { clientDisconnected = true })
 
   try {
+    if (dossierRunId && !clientDisconnected) {
+      res.write(`data: ${JSON.stringify({ type: 'run_context', runId: dossierRunId, phase, parentRunId: parentRunId || undefined })}\n\n`)
+    }
     const stream = agent.fixCodeStream({
       code,
       error,
@@ -780,8 +1032,56 @@ router.post('/fix/stream', async (req, res) => {
       llmSelection,
     })
 
+    let receivedFinalCode = false
     for await (const chunk of stream) {
       if (clientDisconnected) break
+
+      if (config.runDossiers.enabled && dossierRunId) {
+        if (chunk.type === 'tool_execution_start') {
+          await runDossierStore.appendEvent(dossierRunId, {
+            type: 'tool_execution_start',
+            toolCallId: String((chunk as any).toolCallId || ''),
+            toolName: String((chunk as any).toolName || ''),
+            status: 'running',
+            payload: {
+              args: (chunk as any).args,
+              startedAtMs: (chunk as any).startedAtMs,
+            },
+          })
+        } else if (chunk.type === 'tool_execution_end') {
+          await runDossierStore.appendEvent(dossierRunId, {
+            type: 'tool_execution_end',
+            toolCallId: String((chunk as any).toolCallId || ''),
+            toolName: String((chunk as any).toolName || ''),
+            status: (chunk as any).isError ? 'error' : 'done',
+            payload: {
+              result: (chunk as any).result,
+              isError: (chunk as any).isError,
+              endedAtMs: (chunk as any).endedAtMs,
+              decisionSource: (chunk as any).decisionSource,
+              selectedPackages: (chunk as any).selectedPackages,
+              selectedReferences: (chunk as any).selectedReferences,
+              selectedContracts: (chunk as any).selectedContracts,
+              fallbackReason: (chunk as any).fallbackReason,
+              vetoApplied: (chunk as any).vetoApplied,
+            },
+          })
+        } else if (chunk.type === 'code' && chunk.content) {
+          receivedFinalCode = true
+          await runDossierStore.attachHtmlArtifact(dossierRunId, 'fixed-code', String(chunk.content || ''), {
+            codeChars: String(chunk.content || '').length,
+            source: source === 'visual' ? 'visual' : 'runtime',
+          })
+        } else if (chunk.type === 'error' && chunk.content) {
+          await runDossierStore.appendError(dossierRunId, {
+            source: 'server',
+            kind: 'fix-stream',
+            message: String(chunk.content || ''),
+            markFailed: true,
+            outcome: 'request_error',
+          })
+        }
+      }
 
       let data = chunk
       if (chunk.type === 'code' && chunk.content) {
@@ -793,8 +1093,26 @@ router.post('/fix/stream', async (req, res) => {
     if (!clientDisconnected) {
       res.write('data: [DONE]\n\n')
     }
+    if (config.runDossiers.enabled && dossierRunId) {
+      const outcome: RunOutcome = receivedFinalCode ? 'fixed' : (clientDisconnected ? 'client_disconnected' : 'request_error')
+      await runDossierStore.updateRun(dossierRunId, {
+        status: clientDisconnected && !receivedFinalCode ? 'failed' : 'succeeded',
+        outcome,
+        finishedAt: Date.now(),
+      })
+    }
     res.end()
   } catch (err: any) {
+    if (config.runDossiers.enabled && dossierRunId) {
+      await runDossierStore.appendError(dossierRunId, {
+        source: 'server',
+        kind: 'fix-stream',
+        message: err?.message || '代码修复流失败',
+        markFailed: true,
+        outcome: 'request_error',
+        details: { stack: typeof err?.stack === 'string' ? err.stack.slice(0, 4000) : undefined },
+      })
+    }
     if (!clientDisconnected) {
       res.write(`data: ${JSON.stringify({ type: 'error', content: err.message })}\n\n`)
       res.write('data: [DONE]\n\n')

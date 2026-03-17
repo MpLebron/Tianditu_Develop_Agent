@@ -51,6 +51,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const activeFileContext = get().activeFileContext
     const existingCode = useMapStore.getState().currentCode || undefined
     const modelSelection = useModelStore.getState().getRequestSelection()
+    useMapStore.getState().setCurrentRunId(null)
 
     set((s) => ({ messages: [...s.messages, userMsg], loading: true, error: null }))
 
@@ -158,6 +159,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const content = typeof chunk.content === 'string' ? chunk.content.trim() : ''
           if (content) {
             set({ activeFileContext: content })
+          }
+          return
+        }
+
+        if (chunk.type === 'run_context') {
+          const runId = typeof chunk.runId === 'string' ? chunk.runId.trim() : ''
+          if (runId) {
+            useMapStore.getState().setCurrentRunId(runId)
           }
           return
         }
@@ -391,6 +400,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     const attempt = currentRetryCount + 1
     const modelSelection = useModelStore.getState().getRequestSelection()
+    const parentRunId = useMapStore.getState().currentRunId || undefined
     const assistantId = createId()
     let assistantCreated = false
     let receivedCode = false
@@ -498,6 +508,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           error: effectiveError,
           userInput: options?.userInputHint || '',
           fileContext: get().activeFileContext || undefined,
+          parentRunId,
+          source,
           provider: modelSelection?.provider,
           model: modelSelection?.model,
         }),
@@ -527,6 +539,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               status: 'running',
               startedAt: typeof chunk.startedAtMs === 'number' ? chunk.startedAtMs : Date.now(),
             })
+            return
+          }
+
+          if (chunk.type === 'run_context') {
+            const runId = typeof chunk.runId === 'string' ? chunk.runId.trim() : ''
+            if (runId) {
+              useMapStore.getState().setCurrentRunId(runId)
+            }
             return
           }
 

@@ -7,6 +7,7 @@ import chatRouter from './routes/chat.js'
 import uploadRouter from './routes/upload.js'
 import tiandituRouter from './routes/tianditu.js'
 import shareRouter from './routes/share.js'
+import runDossiersRouter from './routes/runDossiers.js'
 import { mkdirSync } from 'fs'
 import { resolve } from 'path'
 
@@ -15,6 +16,8 @@ mkdirSync(config.upload.dir, { recursive: true })
 // 确保分享目录存在
 mkdirSync(config.share.dir, { recursive: true })
 mkdirSync(resolve(config.share.dir, 'snapshots'), { recursive: true })
+// 确保运行档案目录存在
+mkdirSync(config.runDossiers.dir, { recursive: true })
 
 const app = express()
 
@@ -42,6 +45,7 @@ app.use('/api/chat', chatRouter)
 app.use('/api/upload', uploadRouter)
 app.use('/api/tianditu', tiandituRouter)
 app.use('/api/share', shareRouter)
+app.use('/api/run-dossiers', runDossiersRouter)
 
 // 健康检查
 app.get('/', (_req, res) => {

@@ -3,6 +3,7 @@ import { useMapStore } from '../../stores/useMapStore'
 import { useChatStore } from '../../stores/useChatStore'
 import { useCodeRunner } from '../../hooks/useCodeRunner'
 import { visualQaApi } from '../../services/visualQaApi'
+import { runDossierApi } from '../../services/runDossierApi'
 import html2canvas from 'html2canvas'
 import { DEFAULT_TIANDITU_TOKEN } from '../../constants/tianditu'
 import { isLikelyBlankThumbnailBase64 } from '../../utils/isLikelyBlankThumbnail'
@@ -146,6 +147,7 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promis
 
 export function MapPreview() {
   const {
+    currentRunId,
     previewCode,
     currentCode,
     codeStreaming,
@@ -216,8 +218,28 @@ export function MapPreview() {
           ? `\n请求: ${method ? `${method} ` : ''}${requestUrl || '[unknown]'}${status ? ` (${status})` : ''}`
           : ''
         const location = src ? `\n来源: ${src}${line ? `:${line}` : ''}${col ? `:${col}` : ''}` : ''
-        useMapStore.getState().setExecError(`${e.data.message || '执行错误'}${kindInfo}${requestInfo}${location}`)
-        useMapStore.getState().setVisualChecking(false)
+        const finalMessage = `${e.data.message || '执行错误'}${kindInfo}${requestInfo}${location}`
+        useMapStore.getState().setExecError(finalMessage)
+        const latestState = useMapStore.getState()
+        if (latestState.currentRunId) {
+          const codeHash = latestState.currentCode ? hashCode(latestState.currentCode) : ''
+          void runDossierApi.reportRuntimeError({
+            runId: latestState.currentRunId,
+            previewRunId: runId,
+            message: finalMessage,
+            kind,
+            src,
+            line,
+            col,
+            requestUrl,
+            method,
+            status,
+            codeHash,
+          }).catch((err) => {
+            console.warn('[MapPreview] runtime error dossier report failed:', err?.message || err)
+          })
+        }
+        latestState.setVisualChecking(false)
         visualInFlightRef.current = false
         setShowError(true)
       }
@@ -371,6 +393,7 @@ export function MapPreview() {
         const result = await visualQaApi.inspect({
           imageBase64,
           code: state.currentCode,
+          dossierRunId: state.currentRunId || undefined,
           captureMeta,
           hint,
           runId,
@@ -449,6 +472,7 @@ export function MapPreview() {
     }
   }, [
     currentCode,
+    currentRunId,
     previewing,
     executing,
     fixing,
