@@ -158,7 +158,7 @@ export function MapPreview() {
     visualFixRetryCount,
     lastVisualCheckedCodeHash,
   } = useMapStore()
-  const { iframeRef, run } = useCodeRunner()
+  const { iframeRef, run, activeRunIdRef } = useCodeRunner()
   const [showError, setShowError] = useState(true)
   const fixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -200,6 +200,10 @@ export function MapPreview() {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'map-error') {
+        const runId = typeof e.data.runId === 'string' ? e.data.runId : ''
+        if (!runId || runId !== activeRunIdRef.current) {
+          return
+        }
         const src = typeof e.data.src === 'string' ? e.data.src : ''
         const line = typeof e.data.line === 'number' ? e.data.line : 0
         const col = typeof e.data.col === 'number' ? e.data.col : 0
@@ -220,7 +224,7 @@ export function MapPreview() {
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [])
+  }, [activeRunIdRef])
 
   // 错误出现时自动触发修复（延迟 1.5s，避免瞬间错误）
   useEffect(() => {

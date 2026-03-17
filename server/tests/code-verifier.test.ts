@@ -220,6 +220,17 @@ describe('CodeVerifier symbol text font checks', () => {
     expect(issues.some((issue) => issue.code === 'marker-seticon-unsupported')).toBe(true)
   })
 
+  it('flags popup.setElement usage borrowed from other SDKs', () => {
+    const issues = analyzeGeneratedCode(`
+      new TMapGL.Popup()
+        .setLngLat([118.78, 32.04])
+        .setElement(document.createElement('div'))
+        .addTo(map)
+    `)
+
+    expect(issues.some((issue) => issue.code === 'popup-setelement-unsupported')).toBe(true)
+  })
+
   it('allows line-width on line layers', () => {
     const issues = analyzeGeneratedCode(`
       map.on('load', function() {
@@ -314,6 +325,83 @@ describe('CodeVerifier symbol text font checks', () => {
     `)
 
     expect(issues.some((issue) => issue.code === 'map-load-order-suspicious')).toBe(true)
+  })
+
+  it('blocks eager source updates that race with load-created sources', () => {
+    const issues = analyzeGeneratedCode(`
+      var map
+
+      document.addEventListener('DOMContentLoaded', function() {
+        initMap()
+        loadData()
+      })
+
+      function initMap() {
+        map = new TMapGL.Map('map', { center: [105, 34], zoom: 4 })
+        map.on('load', function() {
+          map.addSource('centers', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          })
+        })
+      }
+
+      function loadData() {
+        fetch(url)
+          .then((res) => res.json())
+          .then((rawData) => {
+            if (map && map.getSource) {
+              map.getSource('centers').setData(rawData)
+            }
+          })
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-source-ready-race')).toBe(true)
+  })
+
+  it('allows parallel fetch when source updates are explicitly gated by readiness', () => {
+    const issues = analyzeGeneratedCode(`
+      var map
+      var mapLoaded = false
+      var pendingGeojson = null
+
+      document.addEventListener('DOMContentLoaded', function() {
+        initMap()
+        loadData()
+      })
+
+      function initMap() {
+        map = new TMapGL.Map('map', { center: [105, 34], zoom: 4 })
+        map.on('load', function() {
+          map.addSource('centers', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+          })
+          mapLoaded = true
+          applyPendingGeojson()
+        })
+      }
+
+      function loadData() {
+        fetch(url)
+          .then((res) => res.json())
+          .then((rawData) => {
+            pendingGeojson = rawData
+            applyPendingGeojson()
+          })
+      }
+
+      function applyPendingGeojson() {
+        if (!mapLoaded || !pendingGeojson) return
+        var source = map && map.getSource ? map.getSource('centers') : null
+        if (!source || typeof source.setData !== 'function') return
+        source.setData(pendingGeojson)
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'map-source-ready-race')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'map-load-order-suspicious')).toBe(false)
   })
 
   it('warns when named route planning hardcodes start/end coordinates without geocoding', () => {

@@ -12,7 +12,7 @@ interface ChatStore {
   loading: boolean
   error: string | null
   activeFileContext: string | null
-  sendMessage: (content: string, file?: File, syntheticFile?: { name: string; size: number }) => Promise<void>
+  sendMessage: (content: string, file?: File, syntheticFile?: { name: string; size: number }, sampleId?: string) => Promise<void>
   autoFixMapError: (options?: {
     userInputHint?: string
     overrideError?: string
@@ -37,7 +37,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   error: null,
   activeFileContext: null,
 
-  sendMessage: async (content, file, syntheticFile) => {
+  sendMessage: async (content, file, syntheticFile, sampleId) => {
     const displayFile = file ? { name: file.name, size: file.size } : syntheticFile
     const userMsg: Message = {
       id: createId(),
@@ -310,7 +310,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (file) formData.append('file', file)
       if (existingCode) formData.append('existingCode', existingCode)
       if (history) formData.append('conversationHistory', history)
-      if (!file && activeFileContext) formData.append('fileContext', activeFileContext)
+      if (sampleId) {
+        formData.append('sampleId', sampleId)
+      } else if (!file && activeFileContext) {
+        formData.append('fileContext', activeFileContext)
+      }
       if (modelSelection?.provider) formData.append('provider', modelSelection.provider)
       if (modelSelection?.model) formData.append('model', modelSelection.model)
 

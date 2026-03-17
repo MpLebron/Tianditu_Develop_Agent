@@ -37,21 +37,18 @@ export function WorkspacePage() {
           })
           if (response.ok) {
             const data = await response.json()
-            const fileContext = data?.data?.fileContext
             const fileMeta = data?.data?.file
-            if (typeof fileContext === 'string' && fileContext.trim()) {
-              useChatStore.setState({ activeFileContext: fileContext })
-              if (
-                fileMeta &&
-                typeof fileMeta.name === 'string' &&
-                fileMeta.name.trim() &&
-                typeof fileMeta.size === 'number'
-              ) {
-                sampleFile = { name: fileMeta.name, size: fileMeta.size }
-              }
+            if (
+              fileMeta &&
+              typeof fileMeta.name === 'string' &&
+              fileMeta.name.trim() &&
+              typeof fileMeta.size === 'number'
+            ) {
+              useChatStore.setState({ activeFileContext: null })
+              sampleFile = { name: fileMeta.name, size: fileMeta.size }
             } else {
               sampleReady = false
-              useChatStore.setState({ error: `样例数据 ${sampleId} 加载失败：未返回文件上下文` })
+              useChatStore.setState({ error: `样例数据 ${sampleId} 加载失败：未返回文件信息` })
             }
           } else {
             sampleReady = false
@@ -60,7 +57,7 @@ export function WorkspacePage() {
         }
 
         if (!sampleReady) return
-        await sendMessage(prompt, undefined, sampleFile)
+        await sendMessage(prompt, undefined, sampleFile, sampleId)
       } finally {
         window.history.replaceState({}, '')
       }

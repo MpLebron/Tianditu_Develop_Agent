@@ -28,4 +28,18 @@ describe('extractErrorEvidence', () => {
     expect(evidence.codeSignals).toContain('marker-constructor-mixed')
     expect(evidence.codeSignals).toContain('marker-seticon-mixed')
   })
+
+  it('captures overlay API mismatch signals for popup.setElement', () => {
+    const evidence = extractErrorEvidence(
+      "TypeError: popup.setLngLat(...).setElement is not a function",
+      `
+        var popup = new TMapGL.Popup()
+          .setLngLat([118.78, 32.04])
+          .setElement(document.createElement('div'))
+      `,
+    )
+
+    expect(evidence.matchedSignals).toContain('overlay-api')
+    expect(evidence.codeSignals).toContain('popup-setelement-mixed')
+  })
 })

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useMapStore } from '../stores/useMapStore'
 
-function buildCaptureScriptTag() {
+function buildCaptureScriptTag(runId: string) {
   return `<script>
     (function() {
+      var __codexRunId = ${JSON.stringify(runId)};
+
       function patchCanvasContexts() {
         function patch(proto) {
           if (!proto || typeof proto.getContext !== 'function' || proto.__codexCapturePatched) return;
@@ -97,6 +99,7 @@ function buildCaptureScriptTag() {
         if (shouldDedup(msg, meta)) return;
         window.parent.postMessage({
           type: 'map-error',
+          runId: __codexRunId,
           message: String(msg),
           src: src,
           line: meta && meta.line ? meta.line : 0,
@@ -337,8 +340,8 @@ function buildCaptureScriptTag() {
   </script>`
 }
 
-function injectCaptureScript(code: string) {
-  const captureScript = buildCaptureScriptTag()
+function injectCaptureScript(code: string, runId: string) {
+  const captureScript = buildCaptureScriptTag(runId)
   if (/<head[^>]*>/i.test(code)) {
     return code.replace(/<head[^>]*>/i, (m) => `${m}${captureScript}`)
   }
@@ -359,6 +362,7 @@ function injectCaptureScript(code: string) {
 export function useCodeRunner() {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const runSeqRef = useRef(0)
+  const activeRunIdRef = useRef('')
   const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const blobUrlRef = useRef<string | null>(null)
   const { setExecError, setExecuting } = useMapStore()
@@ -370,8 +374,11 @@ export function useCodeRunner() {
     setExecuting(true)
     setExecError(null)
 
+    const runId = `run-${Date.now()}-${runSeqRef.current + 1}`
+    activeRunIdRef.current = runId
+
     // 注入错误捕获脚本（同步错误/Promise/console/fetch/xhr）
-    const wrappedCode = injectCaptureScript(code)
+    const wrappedCode = injectCaptureScript(code, runId)
     const runSeq = ++runSeqRef.current
 
     if (finishTimerRef.current) {
@@ -417,6 +424,7 @@ export function useCodeRunner() {
         clearTimeout(finishTimerRef.current)
         finishTimerRef.current = null
       }
+      activeRunIdRef.current = ''
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current)
         blobUrlRef.current = null
@@ -424,5 +432,5 @@ export function useCodeRunner() {
     }
   }, [])
 
-  return { iframeRef, run }
+  return { iframeRef, run, activeRunIdRef }
 }

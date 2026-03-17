@@ -35,6 +35,7 @@ export function analyzeGeneratedCode(code: string, options?: { fileData?: string
 
   const mapMutationTimingIssues = analyzeMapLoadTiming(code)
   issues.push(...mapMutationTimingIssues)
+  issues.push(...analyzeSourceReadyTiming(code))
   issues.push(...analyzeLayerPropertyCompatibility(code))
 
   if (/api\.tianditu\.gov\.cn\/v5\/geocoder/i.test(code)) {
@@ -307,23 +308,67 @@ function analyzeMapLoadTiming(code: string): VerificationIssue[] {
     ...MAP_LOAD_GUARDED_APIS,
     /\bmap\.on\s*\(\s*['"](?:click|mouseenter|mouseleave|mousemove|dblclick|contextmenu)['"]\s*,\s*['"`][^'"`]+['"`]\s*,/,
   ])
-  const firstFetchIndex = code.search(/\bfetch\s*\(/)
-
   const suspiciousImmediateFlow =
     mapInitIndex >= 0 &&
     loadIndex > mapInitIndex &&
-    (
-      (firstMutationIndex >= 0 && firstMutationIndex < loadIndex) ||
-      (firstFetchIndex >= 0 && firstFetchIndex > mapInitIndex && firstFetchIndex < loadIndex)
-    )
+    firstMutationIndex >= 0 &&
+    firstMutationIndex < loadIndex
 
   if (suspiciousImmediateFlow) {
     issues.push({
       severity: 'error',
       code: 'map-load-order-suspicious',
-      message: '检测到在注册 map.on("load") 之前就开始 fetch 或执行图层/控件相关操作，存在地图状态未就绪的风险。',
-      suggestion: '把 fetch 和渲染主流程也移动到 map.on("load", async function () { ... }) 内，或确保所有 map.addSource / map.addLayer / map.addControl / fitBounds 都只在 load 之后触发。',
+      message: '检测到在注册 map.on("load") 之前就执行图层/控件相关操作，存在地图状态未就绪的风险。',
+      suggestion: '允许提前 fetch，但所有 map.addSource / map.addLayer / map.addControl / fitBounds 和图层事件绑定都必须在 load 之后触发。',
     })
+  }
+
+  return issues
+}
+
+function analyzeSourceReadyTiming(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+  const hasTMap = /\bnew\s+TMapGL\.Map\s*\(/.test(code)
+  if (!hasTMap) return issues
+
+  const weakSourceGuardPattern = /if\s*\(\s*map\s*&&\s*map\.getSource\s*\)\s*\{[\s\S]{0,220}?map\.getSource\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\s*\.setData\s*\(/g
+  const weakGuardSourceIds = new Set<string>()
+  let weakGuardMatch: RegExpExecArray | null
+  while ((weakGuardMatch = weakSourceGuardPattern.exec(code)) !== null) {
+    weakGuardSourceIds.add(String(weakGuardMatch[1] || '').trim())
+  }
+
+  if (weakGuardSourceIds.size > 0) {
+    issues.push({
+      severity: 'error',
+      code: 'map-source-ready-race',
+      message: `检测到使用弱保护更新 source：${Array.from(weakGuardSourceIds).join(', ')}。当前写法只判断了 map.getSource 方法存在，却没有确认具体 source 已创建，容易间歇性触发 undefined 错误。`,
+      suggestion: '允许 fetch 提前启动，但更新数据前必须先拿到具体 source：const source = map && map.getSource ? map.getSource("id") : null；只有 source && source.setData 时才 setData。若 source 尚未创建，应缓存数据并在 map.on("load") 创建 source 后再 apply。',
+    })
+  }
+
+  const loadRanges = extractLoadHandlerRanges(code)
+  const sourceIdsCreatedInLoad = collectSourceIdsInRanges(code, loadRanges)
+  const hasImmediateStartupFlow = /DOMContentLoaded[\s\S]{0,1200}?initMap\s*\(\s*\)\s*;[\s\S]{0,320}?(?:await\s+)?(?:load|fetch|update|render)\w*\s*\(/.test(code)
+    || /(?:^|[\n;])\s*initMap\s*\(\s*\)\s*;[\s\S]{0,220}?(?:await\s+)?(?:load|fetch|update|render)\w*\s*\(/.test(code)
+
+  const directSetDataPattern = /\bmap\.getSource\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\s*\.setData\s*\(/g
+  let directSetDataMatch: RegExpExecArray | null
+  while ((directSetDataMatch = directSetDataPattern.exec(code)) !== null) {
+    const sourceId = String(directSetDataMatch[1] || '').trim()
+    const matchIndex = directSetDataMatch.index ?? -1
+    if (!sourceId || weakGuardSourceIds.has(sourceId)) continue
+    if (!sourceIdsCreatedInLoad.has(sourceId)) continue
+    if (isIndexInsideRanges(matchIndex, loadRanges)) continue
+    if (!hasImmediateStartupFlow) continue
+
+    issues.push({
+      severity: 'error',
+      code: 'map-source-ready-race',
+      message: `检测到 source "${sourceId}" 在 load 回调里创建，却在外部直接调用 map.getSource("${sourceId}").setData(...)。如果启动阶段先触发了数据加载，这段代码会在 source 尚未创建时间歇性报错。`,
+      suggestion: '不要把唯一安全模式强制写死成“fetch 一定在 load 里”；但必须满足 map ready + source ready。可以采用“缓存数据 -> load 后 apply”或“load 与 fetch 并行，汇合后再 setData”的模式。',
+    })
+    break
   }
 
   return issues
@@ -407,6 +452,15 @@ function analyzeOverlayApiCompatibility(code: string): VerificationIssue[] {
       code: 'marker-seticon-unsupported',
       message: '检测到对 TMapGL.Marker 调用 setIcon(...)；当前已验证示例中不使用该 API。',
       suggestion: '需要切换图标时，请移除旧 marker 后重新创建，或改用 GeoJSON 图层控制点样式；不要依赖 marker.setIcon(...)。',
+    })
+  }
+
+  if (/\bTMapGL\.Popup\b/.test(code) && /\.\s*setElement\s*\(/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'popup-setelement-unsupported',
+      message: '检测到对 TMapGL.Popup 调用 setElement(...)；当前已验证 reference 中不存在该 API。',
+      suggestion: 'TMapGL.Popup 请改用 .setLngLat(...).setHTML(html).addTo(map) 或 .setText(text).addTo(map)，不要混入其他地图 SDK 的 Popup.setElement(...) 写法。',
     })
   }
 
@@ -890,6 +944,46 @@ function extractBalancedBlock(
   }
 
   return null
+}
+
+function extractLoadHandlerRanges(source: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = []
+  const pattern = /\bmap\.on\s*\(\s*['"]load['"]\s*,/g
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(source)) !== null) {
+    const bodyStart = source.indexOf('{', match.index)
+    if (bodyStart < 0) continue
+    const block = extractBalancedBlock(source, bodyStart, '{', '}')
+    if (!block) continue
+    ranges.push({
+      start: bodyStart,
+      end: bodyStart + block.length,
+    })
+  }
+
+  return ranges
+}
+
+function collectSourceIdsInRanges(source: string, ranges: Array<{ start: number; end: number }>): Set<string> {
+  const ids = new Set<string>()
+  const pattern = /\bmap\.addSource\s*\(\s*['"`]([^'"`]+)['"`]\s*,/g
+
+  for (const range of ranges) {
+    const segment = source.slice(range.start, range.end)
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(segment)) !== null) {
+      const sourceId = String(match[1] || '').trim()
+      if (sourceId) ids.add(sourceId)
+    }
+  }
+
+  return ids
+}
+
+function isIndexInsideRanges(index: number, ranges: Array<{ start: number; end: number }>): boolean {
+  if (index < 0) return false
+  return ranges.some((range) => index >= range.start && index < range.end)
 }
 
 function skipWhitespace(source: string, index: number): number {

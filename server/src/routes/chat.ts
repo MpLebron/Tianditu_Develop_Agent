@@ -76,6 +76,10 @@ const BUILTIN_SAMPLE_FILES = {
 
 type BuiltinSampleId = keyof typeof BUILTIN_SAMPLE_FILES
 
+function isBuiltinSampleId(value: unknown): value is BuiltinSampleId {
+  return typeof value === 'string' && value in BUILTIN_SAMPLE_FILES
+}
+
 /** 统一替换 token：占位符 + LLM 可能硬编码的任意 32 位 hex token */
 function injectToken(code: string): string {
   const token = config.tiandituToken
@@ -377,6 +381,56 @@ async function parseBuiltinSampleFile(sampleId: BuiltinSampleId, req: Request): 
   ].join('\n')
 }
 
+async function getBuiltinSampleMeta(sampleId: BuiltinSampleId) {
+  const samplePath = BUILTIN_SAMPLE_FILES[sampleId]
+  await access(samplePath, fsConstants.R_OK)
+  const fileStat = await stat(samplePath)
+  return {
+    samplePath,
+    file: {
+      name: basename(samplePath),
+      size: fileStat.size,
+    },
+  }
+}
+
+async function resolveRequestFileData(params: {
+  req: Request
+  file?: Express.Multer.File
+  sampleId?: unknown
+  fileContext?: unknown
+}) {
+  const { req, file, sampleId, fileContext } = params
+
+  if (file) {
+    const uploadedFileData = await parseUploadedFile(file, req)
+    return {
+      fileData: uploadedFileData,
+      emittedFileContext: uploadedFileData,
+    }
+  }
+
+  if (sampleId != null) {
+    if (!isBuiltinSampleId(sampleId)) {
+      throw new Error('无效的样例 ID')
+    }
+    const sampleFileData = await parseBuiltinSampleFile(sampleId, req)
+    return {
+      fileData: sampleFileData,
+      emittedFileContext: sampleFileData,
+    }
+  }
+
+  const inlineFileContext = typeof fileContext === 'string' && fileContext.trim()
+    ? fileContext
+    : undefined
+
+  return {
+    fileData: inlineFileContext,
+    emittedFileContext: undefined,
+  }
+}
+
 function resolveRequestLlmSelection(body: any): LlmSelection {
   return resolveLlmSelection(
     {
@@ -497,7 +551,7 @@ router.post('/visual-inspect', async (req, res) => {
   }
 })
 
-// POST /api/chat/sample-context — 预加载首页案例数据并返回 fileContext
+// POST /api/chat/sample-context — 返回首页样例文件元信息
 router.post('/sample-context', async (req, res) => {
   const sampleId = req.body?.sampleId as BuiltinSampleId | undefined
   if (!sampleId || !(sampleId in BUILTIN_SAMPLE_FILES)) {
@@ -506,18 +560,12 @@ router.post('/sample-context', async (req, res) => {
   }
 
   try {
-    const samplePath = BUILTIN_SAMPLE_FILES[sampleId]
-    const fileContext = await parseBuiltinSampleFile(sampleId, req)
-    const fileStat = await stat(samplePath)
+    const { file } = await getBuiltinSampleMeta(sampleId)
     res.json({
       success: true,
       data: {
         sampleId,
-        fileContext,
-        file: {
-          name: basename(samplePath),
-          size: fileStat.size,
-        },
+        file,
       },
     })
   } catch (err: any) {
@@ -527,10 +575,14 @@ router.post('/sample-context', async (req, res) => {
 
 // POST /api/chat/stream — 流式聊天接口 (SSE)
 router.post('/stream', upload.single('file'), async (req, res) => {
-  const { message, conversationHistory, existingCode, fileContext } = req.body
+  const { message, conversationHistory, existingCode, fileContext, sampleId } = req.body
 
   if (!message) {
     res.status(400).json({ success: false, error: '请输入消息' })
+    return
+  }
+  if (sampleId != null && !isBuiltinSampleId(sampleId)) {
+    res.status(400).json({ success: false, error: '无效的样例 ID' })
     return
   }
 
@@ -554,11 +606,16 @@ router.post('/stream', upload.single('file'), async (req, res) => {
   res.on('close', () => { clientDisconnected = true })
 
   try {
-    const uploadedFileData = req.file ? await parseUploadedFile(req.file, req) : undefined
-    const fileData = uploadedFileData || (typeof fileContext === 'string' && fileContext.trim() ? fileContext : undefined)
+    const resolvedFile = await resolveRequestFileData({
+      req,
+      file: req.file || undefined,
+      sampleId,
+      fileContext,
+    })
+    const fileData = resolvedFile.fileData
 
-    if (!clientDisconnected && uploadedFileData) {
-      res.write(`data: ${JSON.stringify({ type: 'file_context', content: uploadedFileData })}\n\n`)
+    if (!clientDisconnected && resolvedFile.emittedFileContext) {
+      res.write(`data: ${JSON.stringify({ type: 'file_context', content: resolvedFile.emittedFileContext })}\n\n`)
     }
 
     const stream = agent.invokeStream({
@@ -596,10 +653,13 @@ router.post('/stream', upload.single('file'), async (req, res) => {
 // POST /api/chat — 非流式聊天接口（保留兼容）
 router.post('/', upload.single('file'), async (req, res, next) => {
   try {
-    const { message, conversationHistory, existingCode, fileContext } = req.body
+    const { message, conversationHistory, existingCode, fileContext, sampleId } = req.body
 
     if (!message) {
       return res.status(400).json({ success: false, error: '请输入消息' })
+    }
+    if (sampleId != null && !isBuiltinSampleId(sampleId)) {
+      return res.status(400).json({ success: false, error: '无效的样例 ID' })
     }
 
     let llmSelection: LlmSelection
@@ -608,8 +668,13 @@ router.post('/', upload.single('file'), async (req, res, next) => {
     } catch (err: any) {
       return res.status(400).json({ success: false, error: err?.message || '模型参数无效' })
     }
-    const uploadedFileData = req.file ? await parseUploadedFile(req.file, req) : undefined
-    const fileData = uploadedFileData || (typeof fileContext === 'string' && fileContext.trim() ? fileContext : undefined)
+    const resolvedFile = await resolveRequestFileData({
+      req,
+      file: req.file || undefined,
+      sampleId,
+      fileContext,
+    })
+    const fileData = resolvedFile.fileData
 
     const result = await agent.invoke({
       userInput: message,
@@ -631,7 +696,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         code,
         response: result.response,
         error: result.error,
-        fileContext: uploadedFileData || undefined,
+        fileContext: resolvedFile.emittedFileContext || undefined,
       },
     })
   } catch (err) {

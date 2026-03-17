@@ -154,10 +154,10 @@ function fallbackLikelyCause(
 ): string {
   const hasOverlayApiMismatch =
     evidence.matchedSignals.includes('overlay-api')
-    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))
+    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed', 'popup-setelement-mixed'].includes(signal))
 
   if (hasOverlayApiMismatch) {
-    return '覆盖物写法混入了其他地图 SDK 的 API：TMapGL 的 Marker/Popup 应使用 setLngLat(...).addTo(map)，不能用 map.add(marker) 或 marker.setIcon(...) 这类未验证写法。'
+    return '覆盖物写法混入了其他地图 SDK 的 API：TMapGL 的 Marker/Popup 应使用 setLngLat(...).addTo(map)，Popup 内容应通过 setHTML()/setText() 设置，不能用 map.add(marker)、marker.setIcon(...) 或 popup.setElement(...) 这类未验证写法。'
   }
 
   const category = fallbackCategory(evidence)
