@@ -140,6 +140,7 @@ function fallbackCategory(evidence: ReturnType<typeof extractErrorEvidence>): Er
   if (evidence.matchedSignals.includes('overlay-api')) return 'api'
   if (evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))) return 'api'
   if (evidence.matchedSignals.includes('syntax')) return 'syntax'
+  if (evidence.matchedSignals.includes('missing-before-layer')) return 'runtime'
   if (evidence.matchedSignals.includes('runtime-nullish')) return 'runtime'
   if (evidence.matchedSignals.includes('network')) return 'network'
   if (evidence.matchedSignals.includes('geojson')) return 'data'
@@ -158,6 +159,10 @@ function fallbackLikelyCause(
 
   if (hasOverlayApiMismatch) {
     return '覆盖物写法混入了其他地图 SDK 的 API：TMapGL 的 Marker/Popup 应使用 setLngLat(...).addTo(map)，Popup 内容应通过 setHTML()/setText() 设置，不能用 map.add(marker)、marker.setIcon(...) 或 popup.setElement(...) 这类未验证写法。'
+  }
+
+  if (evidence.matchedSignals.includes('missing-before-layer') || evidence.codeSignals.includes('layer-beforeid-literal')) {
+    return '代码在 map.addLayer(layer, beforeId) 中写死了不存在的锚点层（例如 waterway-label）；当前底图样式里没有这个图层，所以业务图层在渲染时直接失败。'
   }
 
   const category = fallbackCategory(evidence)
@@ -206,8 +211,9 @@ function fallbackSuggestedPackages(evidence: ReturnType<typeof extractErrorEvide
     evidence.matchedSignals.includes('geojson')
     || evidence.codeSignals.includes('mapbox-constructor')
     || evidence.matchedSignals.includes('missing-sdk')
+    || evidence.matchedSignals.includes('missing-before-layer')
     || evidence.matchedSignals.includes('overlay-api')
-    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))
+    || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed', 'layer-beforeid-literal'].includes(signal))
   ) {
     packages.add('tianditu-jsapi')
   }
@@ -230,6 +236,7 @@ function fallbackSuggestedReferences(skillStore: SkillStore, evidence: ReturnTyp
   if (evidence.matchedSignals.includes('drive')) push('search-route')
   if (evidence.matchedSignals.includes('transit')) push('search-transit')
   if (evidence.matchedSignals.includes('missing-sdk') || evidence.codeSignals.includes('mapbox-constructor')) push('map-init')
+  if (evidence.matchedSignals.includes('missing-before-layer') || evidence.codeSignals.includes('layer-beforeid-literal')) push('map-init')
   if (evidence.matchedSignals.includes('overlay-api') || evidence.codeSignals.some((signal) => ['generic-map-add', 'marker-constructor-mixed', 'marker-seticon-mixed'].includes(signal))) {
     push('marker')
     push('popup')
@@ -263,6 +270,10 @@ function fallbackChecklist(
   }
   if (evidence.codeSignals.includes('marker-seticon-mixed')) {
     checklist.push('不要依赖 marker.setIcon(...)；需要改图标时移除旧 marker 并重新创建，或改用 GeoJSON 图层控制样式。')
+  }
+  if (evidence.matchedSignals.includes('missing-before-layer') || evidence.codeSignals.includes('layer-beforeid-literal')) {
+    checklist.push('检查是否把 map.addLayer(layer, beforeId) 的第二个参数写死成了不存在的底图锚点层（如 waterway-label）。')
+    checklist.push('只有在 map.getLayer(beforeId) 为真时才传 beforeId；否则直接调用 map.addLayer(layer)。')
   }
   if (evidence.matchedSignals.includes('geojson')) checklist.push('确认传给 addSource 的 data 是 FeatureCollection/Feature。')
   if (runtimeFileContract?.kind === 'geojson') {

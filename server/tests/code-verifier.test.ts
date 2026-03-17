@@ -269,6 +269,36 @@ describe('CodeVerifier symbol text font checks', () => {
     expect(issues.some((issue) => issue.code === 'map-cleanup-getsource-unguarded')).toBe(false)
   })
 
+  it('flags addLayer beforeId literals that are not guarded by map.getLayer', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })
+      map.on('load', function() {
+        map.addLayer({
+          id: 'red-army-point',
+          type: 'circle',
+          source: 'red-army'
+        }, 'waterway-label')
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'layer-beforeid-unguarded')).toBe(true)
+  })
+
+  it('allows addLayer beforeId when existence is checked first', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })
+      function safeAddLayer(layerDef, beforeId) {
+        if (map && map.getLayer && map.getLayer(beforeId)) {
+          map.addLayer(layerDef, beforeId)
+        } else {
+          map.addLayer(layerDef)
+        }
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'layer-beforeid-unguarded')).toBe(false)
+  })
+
   it('allows line-width on line layers', () => {
     const issues = analyzeGeneratedCode(`
       map.on('load', function() {

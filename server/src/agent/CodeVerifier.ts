@@ -37,6 +37,7 @@ export function analyzeGeneratedCode(code: string, options?: { fileData?: string
   issues.push(...mapMutationTimingIssues)
   issues.push(...analyzeSourceReadyTiming(code))
   issues.push(...analyzeMapCleanupGuards(code))
+  issues.push(...analyzeLayerBeforeIdGuards(code))
   issues.push(...analyzeLayerPropertyCompatibility(code))
 
   if (/api\.tianditu\.gov\.cn\/v5\/geocoder/i.test(code)) {
@@ -404,6 +405,27 @@ function analyzeMapCleanupGuards(code: string): VerificationIssue[] {
         suggestion: item.suggestion,
       })
     }
+  }
+
+  return issues
+}
+
+function analyzeLayerBeforeIdGuards(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+  const pattern = /map\.addLayer\s*\(\s*\{[\s\S]{0,2400}?\}\s*,\s*(['"`])([^'"`]+)\1\s*\)/g
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(code)) !== null) {
+    const beforeId = match[2]
+    const guardPattern = new RegExp(`map\\.getLayer\\s*\\(\\s*['"\`]${escapeRegExp(beforeId)}['"\`]\\s*\\)`)
+    if (guardPattern.test(code)) continue
+
+    issues.push({
+      severity: 'error',
+      code: 'layer-beforeid-unguarded',
+      message: `检测到 map.addLayer(..., "${beforeId}") 直接依赖固定锚点层；如果当前底图样式里不存在该图层，会触发 "Cannot add layer before non-existing layer"。`,
+      suggestion: `只有在 map && map.getLayer && map.getLayer("${beforeId}") 为真时才把 "${beforeId}" 作为第二个参数传入；否则直接调用 map.addLayer(layerDef)。不要假设 waterway-label 等底图图层一定存在。`,
+    })
   }
 
   return issues
