@@ -260,11 +260,6 @@ export function ChatInput({ onSend, loading, disabled = false, disabledReason = 
 
       {/* 底部提示（仅在有上传状态时显示） */}
       <div className="mt-1.5 px-1 flex items-center gap-2">
-        {disabledReason && (
-          <div className="min-w-0 flex-1 text-[11px] truncate text-amber-500">
-            {disabledReason}
-          </div>
-        )}
         {(uploadHint || dragReject) && (
           <div className={`min-w-0 flex-1 text-[11px] truncate ${dragReject ? 'text-red-500' : 'text-blue-500'}`}>
             {uploadHint}
