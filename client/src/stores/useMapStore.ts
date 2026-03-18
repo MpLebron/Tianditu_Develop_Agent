@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { CodeDiffPayload } from '../types/codeDiff'
 
 interface MapStore {
   currentRunId: string | null
@@ -13,6 +14,8 @@ interface MapStore {
   execError: string | null
   fixing: boolean
   fixingSource: 'runtime' | 'visual' | null
+  lastFixDiff: CodeDiffPayload | null
+  codeViewMode: 'code' | 'diff'
   fixRetryCount: number
   visualChecking: boolean
   visualFixRetryCount: number
@@ -35,6 +38,8 @@ interface MapStore {
   markVisualChecked: (hash: string | null) => void
   setShareThumbnailBase64: (base64: string | null) => void
   setCurrentRunId: (runId: string | null) => void
+  setLastFixDiff: (diff: CodeDiffPayload | null) => void
+  setCodeViewMode: (mode: 'code' | 'diff') => void
   autoFix: (userInput?: string) => Promise<void>
 }
 
@@ -50,6 +55,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
   execError: null,
   fixing: false,
   fixingSource: null,
+  lastFixDiff: null,
+  codeViewMode: 'code',
   fixRetryCount: 0,
   visualChecking: false,
   visualFixRetryCount: 0,
@@ -64,6 +71,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     execError: null,
     fixRetryCount: 0,
     fixingSource: null,
+    lastFixDiff: null,
+    codeViewMode: 'code',
     visualChecking: false,
     visualFixRetryCount: 0,
     lastVisualCheckedCodeHash: null,
@@ -75,6 +84,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     streamingCode: '',
     codeStreaming: true,
     execError: null,
+    lastFixDiff: null,
+    codeViewMode: 'code',
     visualChecking: false,
     shareThumbnailBase64: null,
   }),
@@ -103,6 +114,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     execError: null,
     fixRetryCount: 0,
     fixingSource: null,
+    lastFixDiff: null,
+    codeViewMode: 'code',
     visualChecking: false,
     visualFixRetryCount: 0,
     lastVisualCheckedCodeHash: null,
@@ -115,6 +128,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
   markVisualChecked: (hash) => set({ lastVisualCheckedCodeHash: hash }),
   setShareThumbnailBase64: (base64) => set({ shareThumbnailBase64: base64 }),
   setCurrentRunId: (runId) => set({ currentRunId: runId }),
+  setLastFixDiff: (diff) => set({ lastFixDiff: diff }),
+  setCodeViewMode: (mode) => set({ codeViewMode: mode }),
 
   autoFix: async (userInput?: string) => {
     const { currentCode, execError, fixRetryCount, fixing } = get()
@@ -122,7 +137,7 @@ export const useMapStore = create<MapStore>((set, get) => ({
     // 防止重复修复、超过重试次数、无代码/无错误
     if (fixing || !currentCode || !execError || fixRetryCount >= MAX_FIX_RETRIES) return
 
-    set({ fixing: true, fixingSource: 'runtime' })
+    set({ fixing: true, fixingSource: 'runtime', lastFixDiff: null, codeViewMode: 'code' })
     console.log(`[AutoFix] 第 ${fixRetryCount + 1} 次修复尝试:`, execError)
 
     try {
@@ -148,6 +163,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
           execError: null,
           fixing: false,
           fixingSource: null,
+          lastFixDiff: json.data?.diff || null,
+          codeViewMode: json.data?.diff ? 'diff' : 'code',
           fixRetryCount: fixRetryCount + 1,
           shareThumbnailBase64: null,
         })

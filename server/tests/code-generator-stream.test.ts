@@ -19,8 +19,8 @@ function createMockStream(chunks: string[]) {
   })()
 }
 
-async function collectStream(output: AsyncGenerator<{ type: string; content: string }>) {
-  const chunks: Array<{ type: string; content: string }> = []
+async function collectStream(output: AsyncGenerator<{ type: string; content?: string; data?: unknown }>) {
+  const chunks: Array<{ type: string; content?: string; data?: unknown }> = []
   for await (const chunk of output) {
     chunks.push(chunk)
   }
@@ -101,5 +101,98 @@ describe('CodeGenerator streaming completion', () => {
     expect(codeDeltaContent).not.toContain('duplicate block')
     expect(textContent).not.toContain('补充说明')
     expect(textContent).not.toContain('结束说明')
+  })
+
+  it('emits a code_diff after final code when updating existing code for a new request', async () => {
+    streamMock.mockResolvedValue(createMockStream([
+      [
+        '修改思路：把标题更新成新版地图。',
+        '------- SEARCH',
+        '<div id="app">旧版地图</div>',
+        '=======',
+        '<div id="app">新版地图</div>',
+        '+++++++ REPLACE',
+      ].join('\n'),
+    ]))
+
+    const generator = new CodeGenerator()
+    const chunks = await collectStream(generator.generateStream({
+      userInput: '把标题改成新版地图',
+      skillDocs: '',
+      existingCode: '<!DOCTYPE html><html><body><div id="app">旧版地图</div></body></html>',
+    }))
+
+    const codeIndex = chunks.findIndex((chunk) => chunk.type === 'code')
+    const diffIndex = chunks.findIndex((chunk) => chunk.type === 'code_diff')
+    const diffChunk = diffIndex >= 0 ? chunks[diffIndex] : undefined
+
+    expect(codeIndex).toBeGreaterThanOrEqual(0)
+    expect(diffIndex).toBeGreaterThan(codeIndex)
+    expect(diffChunk?.data).toMatchObject({
+      summary: '已根据新需求更新现有代码，以下高亮显示本次改动。',
+      fallbackMode: 'patch',
+    })
+  })
+
+  it('prefers local patch updates instead of whole-document rewrite when existing code is provided', async () => {
+    streamMock.mockResolvedValue(createMockStream([
+      [
+        '修改思路：移除标题中的图标，不调整其余布局。',
+        '------- SEARCH',
+        '<span class="panel-icon">📍</span>',
+        '=======',
+        '',
+        '+++++++ REPLACE',
+      ].join('\n'),
+    ]))
+
+    const generator = new CodeGenerator()
+    const chunks = await collectStream(generator.generateStream({
+      userInput: '不要加任何icon',
+      skillDocs: '',
+      existingCode: [
+        '<!DOCTYPE html><html><body>',
+        '<div class="panel-title"><span class="panel-icon">📍</span><span>村落改造地块概览</span></div>',
+        '</body></html>',
+      ].join('\n'),
+    }))
+
+    const codeChunk = chunks.find((chunk) => chunk.type === 'code')
+    const diffChunk = chunks.find((chunk) => chunk.type === 'code_diff')
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text')
+      .map((chunk) => chunk.content || '')
+      .join('')
+
+    expect(codeChunk?.content).toContain('<span>村落改造地块概览</span>')
+    expect(codeChunk?.content).not.toContain('📍')
+    expect(text).toContain('已按局部 patch 完成需求更新')
+    expect(diffChunk?.data).toMatchObject({
+      fallbackMode: 'patch',
+    })
+  })
+
+  it('treats the first generated page as a diff from an empty file', async () => {
+    streamMock.mockResolvedValue(createMockStream([
+      '```html\n<!DOCTYPE html><html><body><div id="app">首版页面</div></body></html>\n```',
+    ]))
+
+    const generator = new CodeGenerator()
+    const chunks = await collectStream(generator.generateStream({
+      userInput: '创建一个基础地图页面',
+      skillDocs: '',
+    }))
+
+    const codeIndex = chunks.findIndex((chunk) => chunk.type === 'code')
+    const diffIndex = chunks.findIndex((chunk) => chunk.type === 'code_diff')
+    const diffChunk = diffIndex >= 0 ? chunks[diffIndex] : undefined
+
+    expect(codeIndex).toBeGreaterThanOrEqual(0)
+    expect(diffIndex).toBeGreaterThan(codeIndex)
+    expect(diffChunk?.data).toMatchObject({
+      beforeCode: '',
+      summary: '已生成首版代码，以下高亮显示从空文件到当前页面的新增内容。',
+      fallbackMode: 'patch',
+    })
   })
 })

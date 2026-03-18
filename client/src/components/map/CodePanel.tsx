@@ -1,14 +1,33 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import type { ReactNode } from 'react'
 import { useMapStore } from '../../stores/useMapStore'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { extractFirstCompleteHtmlDocument } from '../../utils/extractFirstCompleteHtmlDocument'
+import {
+  Diff,
+  Hunk,
+  parseDiff,
+  textLinesToHunk,
+  computeOldLineNumber,
+  computeNewLineNumber,
+  isDelete,
+  isInsert,
+} from 'react-diff-view'
+import 'react-diff-view/style/index.css'
 
 export function CodePanel() {
-  const { currentCode, previewCode, streamingCode, codeStreaming, fixing, fixingSource } = useMapStore()
+  const {
+    currentCode,
+    previewCode,
+    streamingCode,
+    codeStreaming,
+    fixing,
+    fixingSource,
+    lastFixDiff,
+  } = useMapStore()
   const [copied, setCopied] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+  const lastAutoScrolledDiffRef = useRef<string | null>(null)
 
   const resolvedCurrentCode = currentCode
     ? extractFirstCompleteHtmlDocument(currentCode) || currentCode
@@ -20,10 +39,35 @@ export function CodePanel() {
     ? extractFirstCompleteHtmlDocument(streamingCode) || streamingCode
     : null
 
+  const showDiff = !codeStreaming && !!lastFixDiff
+  const diffFiles = useMemo(() => {
+    if (!lastFixDiff?.unifiedDiff) return []
+    try {
+      return parseDiff(normalizeDiffForViewer(lastFixDiff.unifiedDiff), { nearbySequences: 'zip' })
+    } catch (error) {
+      console.error('Failed to parse code diff payload:', error)
+      return []
+    }
+  }, [lastFixDiff])
+  const diffFile = diffFiles[0]
+  const renderDiff = showDiff && !!diffFile
+  const fullDiffHunks = useMemo(() => {
+    if (!diffFile || !lastFixDiff?.beforeCode) return diffFile?.hunks || []
+    return expandHunksToFullFile(diffFile.hunks, lastFixDiff.beforeCode)
+  }, [diffFile, lastFixDiff])
+  const diffStats = useMemo(() => {
+    if (!lastFixDiff?.unifiedDiff) return { additions: 0, deletions: 0 }
+    return countDiffStats(lastFixDiff.unifiedDiff)
+  }, [lastFixDiff])
+
   // 显示的代码：流式生成中用 streamingCode，否则用 currentCode
   const displayCode = codeStreaming
     ? (resolvedPreviewCode || resolvedStreamingCode)
     : resolvedCurrentCode
+  const plainCodeLines = useMemo(
+    () => buildPlainCodeLines(displayCode, codeStreaming),
+    [displayCode, codeStreaming],
+  )
 
   // 流式生成时自动滚动到底部
   useEffect(() => {
@@ -45,6 +89,20 @@ export function CodePanel() {
       panelRef.current.scrollTop = 0
     }
   }, [currentCode, codeStreaming])
+
+  useEffect(() => {
+    if (!renderDiff || !lastFixDiff?.unifiedDiff || !panelRef.current) return
+    if (lastAutoScrolledDiffRef.current === lastFixDiff.unifiedDiff) return
+    lastAutoScrolledDiffRef.current = lastFixDiff.unifiedDiff
+
+    const container = panelRef.current
+    requestAnimationFrame(() => {
+      const target = container.querySelector('.diff-code-insert, .diff-code-delete')?.closest('tr')
+      if (target instanceof HTMLElement) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+  }, [renderDiff, lastFixDiff])
 
   // codeStreaming 时 streamingCode 可能是空字符串（刚开始），也需要显示面板
   if (!displayCode && !codeStreaming) return null
@@ -77,12 +135,12 @@ export function CodePanel() {
       : '生成中...')
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e2e] text-gray-100 overflow-hidden dark-scrollbar">
+    <div className="flex flex-col h-full overflow-hidden bg-slate-50 text-slate-900">
       {/* 工具栏 */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06] bg-[#1e1e2e]/80 backdrop-blur-md shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-slate-200 bg-white/90 backdrop-blur-md">
         <div className="flex items-center gap-2.5">
           {/* 文件类型标识 */}
-          <div className="flex items-center gap-1.5 bg-orange-500/10 text-orange-400 px-2 py-0.5 rounded-md">
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-orange-100 text-orange-600">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M1.5 0h21l-1.91 21.563L11.977 24l-8.565-2.438L1.5 0zm7.031 9.75l-.232-2.718 10.059.003.071-.757.089-.998.063-.728H6.905l.601 6.863h6.822l-.361 3.694-2.213.668-2.172-.656-.142-1.494H7.414l.228 3.115L11.8 17.97l4.15-1.15.673-7.07H8.531z" />
             </svg>
@@ -93,8 +151,24 @@ export function CodePanel() {
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
               {streamStatusLabel}
             </span>
+          ) : renderDiff && lastFixDiff ? (
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[11px] text-slate-500 truncate">{lastFixDiff.summary}</span>
+              {(diffStats.additions > 0 || diffStats.deletions > 0) && (
+                <span className="text-[11px] font-medium text-slate-400 whitespace-nowrap">
+                  <span className="text-emerald-600">+{diffStats.additions}</span>
+                  <span className="mx-1 text-slate-300">/</span>
+                  <span className="text-rose-500">-{diffStats.deletions}</span>
+                </span>
+              )}
+              {lastFixDiff.fallbackMode === 'rewrite' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+                  整页重写兜底
+                </span>
+              )}
+            </div>
           ) : (
-            <span className="text-[11px] text-gray-500">{lineCount} 行</span>
+            <span className="text-[11px] text-slate-500">{lineCount} 行</span>
           )}
         </div>
 
@@ -108,7 +182,7 @@ export function CodePanel() {
                 ? 'bg-green-500/15 text-green-400'
                 : codeStreaming
                   ? 'text-gray-600 cursor-not-allowed'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
             }`}
           >
             {copied ? (
@@ -137,7 +211,7 @@ export function CodePanel() {
                 ? 'bg-green-500/15 text-green-400'
                 : codeStreaming
                   ? 'text-gray-600 cursor-not-allowed'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
             }`}
           >
             {downloaded ? (
@@ -161,46 +235,162 @@ export function CodePanel() {
 
       {/* 代码区域 */}
       <div ref={panelRef} className="flex-1 overflow-auto">
-        {codeStreaming ? (
-          /* 流式生成中：用轻量级 <pre> 渲染，避免 SyntaxHighlighter 高频重解析卡顿 */
-          <pre
-            className="p-4 text-[12.5px] leading-[1.6] text-gray-300 whitespace-pre-wrap break-all"
-            style={{ fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace" }}
-          >
-            {displayCode}
-            {!resolvedPreviewCode && (
-              <span className="inline-block w-[2px] h-[14px] bg-blue-400 animate-pulse ml-px align-middle" />
-            )}
-          </pre>
+        {renderDiff && diffFile ? (
+          <div className="h-full bg-[#fbfbfd]">
+            <div className="inline-code-diff">
+              <div className="text-[12px]">
+                <Diff
+                  viewType="unified"
+                  diffType={diffFile.type}
+                  hunks={fullDiffHunks}
+                  renderGutter={renderSingleLineGutter}
+                >
+                  {(hunks) => hunks.map((hunk) => (
+                    <Hunk key={hunk.content} hunk={hunk} />
+                  ))}
+                </Diff>
+              </div>
+            </div>
+          </div>
         ) : (
-          /* 生成完成：用 SyntaxHighlighter 做完整语法高亮 */
-          <SyntaxHighlighter
-            language="html"
-            style={oneDark}
-            showLineNumbers
-            lineNumberStyle={{
-              minWidth: '2.5em',
-              paddingRight: '1em',
-              color: '#4a4a5a',
-              fontSize: '11px',
-              userSelect: 'none',
-            }}
-            customStyle={{
-              margin: 0,
-              padding: '16px 0',
-              background: 'transparent',
-              fontSize: '12.5px',
-              lineHeight: '1.6',
-            }}
-            codeTagProps={{
-              style: { fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace" },
-            }}
-            wrapLongLines
-          >
-            {resolvedCurrentCode!}
-          </SyntaxHighlighter>
+          <div className="inline-code-plain">
+            <table className="inline-code-plain-table">
+              <tbody>
+                {plainCodeLines.map((line, index) => {
+                  const isLastLine = index === plainCodeLines.length - 1
+                  const showCursor = codeStreaming && !resolvedPreviewCode && isLastLine
+                  return (
+                    <tr key={`plain-line-${index + 1}`} className="inline-code-plain-row">
+                      <td className="inline-code-plain-gutter">{index + 1}</td>
+                      <td className="inline-code-plain-code">
+                        <span>{line || '\u00A0'}</span>
+                        {showCursor && (
+                          <span className="inline-code-plain-cursor" />
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   )
+}
+
+function normalizeDiffForViewer(diffText: string): string {
+  const normalized = String(diffText || '').replace(/\r\n/g, '\n').trim()
+  if (!normalized) return ''
+  if (normalized.startsWith('diff --git') || normalized.startsWith('--- ')) {
+    return `${normalized}\n`
+  }
+  if (!normalized.startsWith('Index:')) {
+    return `${normalized}\n`
+  }
+
+  const lines = normalized.split('\n')
+  const oldLine = lines.find((line) => line.startsWith('--- '))
+  const newLine = lines.find((line) => line.startsWith('+++ '))
+  const hunkStartIndex = lines.findIndex((line) => line.startsWith('@@'))
+  const oldPath = oldLine?.replace(/^---\s+/, '').split(/\s+/)[0] || 'preview.html'
+  const newPath = newLine?.replace(/^\+\+\+\s+/, '').split(/\s+/)[0] || oldPath
+  const hunkLines = hunkStartIndex >= 0 ? lines.slice(hunkStartIndex) : []
+
+  return [
+    `diff --git a/${oldPath} b/${newPath}`,
+    'index 1111111..2222222 100644',
+    `--- a/${oldPath}`,
+    `+++ b/${newPath}`,
+    ...hunkLines,
+  ].join('\n').trimEnd() + '\n'
+}
+
+function countDiffStats(diffText: string): { additions: number; deletions: number } {
+  const normalized = String(diffText || '').replace(/\r\n/g, '\n')
+  let additions = 0
+  let deletions = 0
+
+  for (const line of normalized.split('\n')) {
+    if (!line) continue
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) continue
+    if (line.startsWith('+')) additions += 1
+    if (line.startsWith('-')) deletions += 1
+  }
+
+  return { additions, deletions }
+}
+
+function expandHunksToFullFile(hunks: any[], sourceCode: string): any[] {
+  if (!Array.isArray(hunks) || hunks.length === 0) return []
+
+  const sourceLines = normalizeCodeLines(sourceCode)
+  const expanded: any[] = []
+  const sortedHunks = [...hunks].sort((a, b) => a.oldStart - b.oldStart)
+
+  let oldCursor = 1
+  let newCursor = 1
+
+  for (const hunk of sortedHunks) {
+    if (hunk.oldStart > oldCursor) {
+      const contextLines = sourceLines.slice(oldCursor - 1, hunk.oldStart - 1)
+      const contextHunk = textLinesToHunk(contextLines, oldCursor, newCursor)
+      if (contextHunk) expanded.push(contextHunk)
+    }
+
+    expanded.push(hunk)
+    oldCursor = hunk.oldStart + hunk.oldLines
+    newCursor = hunk.newStart + hunk.newLines
+  }
+
+  if (oldCursor <= sourceLines.length) {
+    const tailLines = sourceLines.slice(oldCursor - 1)
+    const tailHunk = textLinesToHunk(tailLines, oldCursor, newCursor)
+    if (tailHunk) expanded.push(tailHunk)
+  }
+
+  return expanded
+}
+
+function normalizeCodeLines(sourceCode: string): string[] {
+  const normalized = String(sourceCode || '').replace(/\r\n/g, '\n')
+  if (!normalized) return []
+  return normalized.split('\n')
+}
+
+function buildPlainCodeLines(sourceCode: string | null | undefined, preserveEmptyLine = false): string[] {
+  const normalized = String(sourceCode || '').replace(/\r\n/g, '\n')
+  if (!normalized) {
+    return preserveEmptyLine ? [''] : []
+  }
+  return normalized.split('\n')
+}
+
+function renderSingleLineGutter(options: {
+  change: any
+  side: 'old' | 'new'
+  wrapInAnchor: (element: ReactNode) => ReactNode
+}) {
+  const { change, side, wrapInAnchor } = options
+
+  if (side === 'old') {
+    let marker = ''
+    let markerClass = 'inline-code-diff-marker'
+    if (isDelete(change)) {
+      marker = '−'
+      markerClass += ' is-delete'
+    } else if (isInsert(change)) {
+      marker = '+'
+      markerClass += ' is-insert'
+    }
+    return <span className={markerClass}>{marker}</span>
+  }
+
+  const currentLine = computeNewLineNumber(change)
+  const fallbackLine = computeOldLineNumber(change)
+  const lineNumber = currentLine === -1 ? fallbackLine : currentLine
+  if (lineNumber === -1) return null
+
+  return wrapInAnchor(<span>{lineNumber}</span>)
 }

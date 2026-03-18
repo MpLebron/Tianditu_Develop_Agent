@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Message, ThoughtChainItem } from '../types/chat'
+import type { CodeDiffPayload } from '../types/codeDiff'
 import { useMapStore } from './useMapStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
 import { createId } from '../utils/createId'
@@ -50,6 +51,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const activeFileContext = get().activeFileContext
     const existingCode = useMapStore.getState().currentCode || undefined
     useMapStore.getState().setCurrentRunId(null)
+    useMapStore.getState().setLastFixDiff(null)
+    useMapStore.getState().setCodeViewMode('code')
 
     set((s) => ({ messages: [...s.messages, userMsg], loading: true, error: null }))
 
@@ -197,6 +200,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               m.id === assistantId ? { ...m, content: textContent } : m,
             ),
           }))
+        } else if (chunk.type === 'code_diff') {
+          useMapStore.getState().setLastFixDiff(chunk.data as CodeDiffPayload)
+          useMapStore.getState().setCodeViewMode('diff')
+          useWorkspaceStore.getState().setShowCode(true)
         } else if (chunk.type === 'code_start') {
           if (receivedCode) return
           // 代码开始生成 → 立即展开代码面板，开始流式显示
@@ -515,6 +522,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
 
     useMapStore.setState({ fixing: true, fixingSource: source })
+    useMapStore.getState().setLastFixDiff(null)
+    useMapStore.getState().setCodeViewMode('code')
     console.log(`[AutoFixStream][${source}] 第 ${attempt} 次修复尝试:`, effectiveError)
 
     try {
@@ -600,6 +609,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
           if (chunk.type === 'text') {
             appendText(String(chunk.content || ''))
+            return
+          }
+
+          if (chunk.type === 'code_diff') {
+            useMapStore.getState().setLastFixDiff(chunk.data as CodeDiffPayload)
+            useMapStore.getState().setCodeViewMode('diff')
+            useWorkspaceStore.getState().setShowCode(true)
             return
           }
 

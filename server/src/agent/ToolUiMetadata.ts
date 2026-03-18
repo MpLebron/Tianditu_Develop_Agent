@@ -205,6 +205,26 @@ export function buildToolUiMetadata(params: {
             : '本轮未生成可用修复代码',
         uiVisibility: 'activity',
       }
+    case 'code_patch.apply':
+      if (mode === 'generate') {
+        const changeKind = String(resultRecord?.changeKind ?? argsRecord?.changeKind ?? '').trim()
+        return {
+          uiLabel: changeKind === 'create' ? '展示首版代码' : '应用改动',
+          uiSummary: status === 'running'
+            ? (changeKind === 'create' ? '正在整理首版代码内容' : '正在整理这次代码改动')
+            : (changeKind === 'create' ? '已高亮显示首版代码新增内容' : '已高亮显示本次代码改动'),
+          uiVisibility: 'activity',
+        }
+      }
+      return {
+        uiLabel: '应用改动',
+        uiSummary: status === 'running'
+          ? '正在把修复改动应用到当前代码'
+          : resultRecord?.fallbackMode === 'rewrite'
+            ? '局部 patch 未完全命中，已回退为整页重写'
+            : '已按局部 patch 应用修复改动',
+        uiVisibility: 'activity',
+      }
     case 'code_guard.validate':
     case 'code_verifier.validate':
       return {

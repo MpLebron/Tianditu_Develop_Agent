@@ -1,6 +1,7 @@
 import { config } from '../config.js'
 import { buildToolOnlySummary } from './AgentTooling.js'
 import type { CodeGenerator } from './CodeGenerator.js'
+import type { CodeDiffPayload } from './CodePatchTypes.js'
 import { selectContracts } from './ContractSelector.js'
 import type { DocLoader } from './DocLoader.js'
 import { ErrorAnalyzer, formatErrorAnalysisForPrompt } from './ErrorAnalyzer.js'
@@ -15,6 +16,7 @@ import { WebFetchService } from './WebFetchService.js'
 import { WorkspaceSnippetEditService } from './WorkspaceSnippetEditService.js'
 
 type CodeStreamChunk = { type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }
+type CodeDiffChunk = { type: 'code_diff'; data: CodeDiffPayload }
 type ToolStartChunk = {
   type: 'tool_execution_start'
   toolCallId: string
@@ -39,7 +41,7 @@ type ToolEndChunk = {
   vetoApplied?: boolean
 }
 
-export type AgentRuntimeChunk = CodeStreamChunk | ToolStartChunk | ToolEndChunk
+export type AgentRuntimeChunk = CodeStreamChunk | CodeDiffChunk | ToolStartChunk | ToolEndChunk
 
 export class AgentRuntime {
   private domainSelector: DomainSelector
@@ -338,6 +340,29 @@ export class AgentRuntime {
         fileData: effectiveFileData,
         toolContext: toolContextPrompt,
       })) {
+        if (chunk.type === 'code_diff') {
+          const changeKind = chunk.data.beforeCode.trim().length > 0 ? 'update' : 'create'
+          const patchCtx = startTool(nextToolCallId, 'code_patch.apply', {
+            mode: 'generate',
+            changeKind,
+            fallbackMode: chunk.data.fallbackMode,
+            hunkCount: chunk.data.hunks.length,
+          })
+          yield patchCtx.start
+          yield chunk
+          yield endTool(patchCtx, {
+            mode: 'generate',
+            changeKind,
+            fallbackMode: chunk.data.fallbackMode,
+            hunkCount: chunk.data.hunks.length,
+            summary: chunk.data.summary,
+          }, false, {
+            selectedPackages: state.selectedPackages,
+            selectedReferences: state.loadedReferences,
+            selectedContracts: state.contractIds,
+          })
+          continue
+        }
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
         if (chunk.type === 'code') {
@@ -561,6 +586,26 @@ export class AgentRuntime {
         fileData: effectiveFileData,
         errorDiagnosis: formatErrorAnalysisForPrompt(analysis),
       })) {
+        if (chunk.type === 'code_diff') {
+          const patchCtx = startTool(nextToolCallId, 'code_patch.apply', {
+            mode: 'fix',
+            fallbackMode: chunk.data.fallbackMode,
+            blockCount: chunk.data.blockReports.filter((report) => report.status === 'applied').length,
+          })
+          yield patchCtx.start
+          yield chunk
+          yield endTool(patchCtx, {
+            mode: 'fix',
+            fallbackMode: chunk.data.fallbackMode,
+            blockCount: chunk.data.blockReports.filter((report) => report.status === 'applied').length,
+            summary: chunk.data.summary,
+          }, false, {
+            selectedPackages: state.selectedPackages,
+            selectedReferences: state.loadedReferences,
+            selectedContracts: state.contractIds,
+          })
+          continue
+        }
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
         if (chunk.type === 'code') {
@@ -656,6 +701,26 @@ export class AgentRuntime {
         fileData: params.fileData,
         errorDiagnosis: params.errorDiagnosis,
       })) {
+        if (chunk.type === 'code_diff') {
+          const patchCtx = startTool(params.nextToolCallId, 'code_patch.apply', {
+            mode: `${params.mode}_verifier_repair`,
+            fallbackMode: chunk.data.fallbackMode,
+            blockCount: chunk.data.blockReports.filter((report) => report.status === 'applied').length,
+          })
+          yield patchCtx.start
+          yield chunk
+          yield endTool(patchCtx, {
+            mode: `${params.mode}_verifier_repair`,
+            fallbackMode: chunk.data.fallbackMode,
+            blockCount: chunk.data.blockReports.filter((report) => report.status === 'applied').length,
+            summary: chunk.data.summary,
+          }, false, {
+            selectedPackages: params.selectedPackages,
+            selectedReferences: params.selectedReferences,
+            selectedContracts: params.selectedContracts,
+          })
+          continue
+        }
         if (chunk.type === 'code') repairedCode = chunk.content
         if (chunk.type === 'error') sawError = true
         yield chunk

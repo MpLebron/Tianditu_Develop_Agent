@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useLocation, Link } from 'react-router-dom'
 import { ChatPanel } from '../components/chat/ChatPanel'
 import { MapPreview } from '../components/map/MapPreview'
@@ -9,11 +10,164 @@ import { useMapStore } from '../stores/useMapStore'
 import { useChatStore } from '../stores/useChatStore'
 
 export function WorkspacePage() {
-  const { showCode, chatWidth, toggleCode } = useWorkspaceStore()
+  const { showCode, chatWidth, codeWidth, toggleCode, setChatWidth, setCodeWidth } = useWorkspaceStore()
   const { currentCode, codeStreaming } = useMapStore()
   const { sendMessage } = useChatStore()
   const location = useLocation()
   const [shareOpen, setShareOpen] = useState(false)
+  const [activeResizeHandle, setActiveResizeHandle] = useState<'chat' | 'code' | null>(null)
+  const layoutRef = useRef<HTMLDivElement>(null)
+  const chatPanelRef = useRef<HTMLDivElement>(null)
+  const codePanelRef = useRef<HTMLDivElement>(null)
+  const chatWidthRef = useRef(chatWidth)
+  const codeWidthRef = useRef(codeWidth)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  const hasCodePanel = showCode && !!(currentCode || codeStreaming)
+
+  const layoutConstraints = useMemo(() => ({
+    minChatWidth: 320,
+    minCodeWidth: 340,
+    minMapWidth: 420,
+  }), [])
+
+  const applyChatWidth = (width: number) => {
+    chatWidthRef.current = width
+    if (chatPanelRef.current) {
+      chatPanelRef.current.style.width = `${width}px`
+    }
+  }
+
+  const applyCodeWidth = (width: number) => {
+    codeWidthRef.current = width
+    if (codePanelRef.current) {
+      codePanelRef.current.style.width = `${width}px`
+    }
+  }
+
+  useEffect(() => {
+    applyChatWidth(chatWidth)
+  }, [chatWidth])
+
+  useEffect(() => {
+    applyCodeWidth(codeWidth)
+  }, [codeWidth])
+
+  useEffect(() => {
+    const container = layoutRef.current
+    if (!container) return
+
+    const clampWidths = () => {
+      const containerWidth = container.clientWidth
+      const codePanelWidth = hasCodePanel ? codeWidthRef.current : 0
+      const maxChatWidth = Math.max(layoutConstraints.minChatWidth, containerWidth - layoutConstraints.minMapWidth - codePanelWidth)
+      const nextChatWidth = clamp(chatWidthRef.current, layoutConstraints.minChatWidth, maxChatWidth)
+      if (nextChatWidth !== chatWidthRef.current) {
+        applyChatWidth(nextChatWidth)
+        setChatWidth(nextChatWidth)
+      }
+
+      if (!hasCodePanel) return
+
+      const maxCodeWidth = Math.max(layoutConstraints.minCodeWidth, containerWidth - layoutConstraints.minMapWidth - chatWidthRef.current)
+      const nextCodeWidth = clamp(codeWidthRef.current, layoutConstraints.minCodeWidth, maxCodeWidth)
+      if (nextCodeWidth !== codeWidthRef.current) {
+        applyCodeWidth(nextCodeWidth)
+        setCodeWidth(nextCodeWidth)
+      }
+    }
+
+    clampWidths()
+    const observer = new ResizeObserver(clampWidths)
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [hasCodePanel, layoutConstraints, setChatWidth, setCodeWidth])
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.()
+      dragCleanupRef.current = null
+    }
+  }, [])
+
+  const beginResize = (side: 'chat' | 'code', pointerEvent: ReactPointerEvent<HTMLDivElement>) => {
+    pointerEvent.preventDefault()
+    const container = layoutRef.current
+    if (!container) return
+
+    dragCleanupRef.current?.()
+    setActiveResizeHandle(side)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const handleElement = pointerEvent.currentTarget
+    if ('setPointerCapture' in handleElement) {
+      handleElement.setPointerCapture(pointerEvent.pointerId)
+    }
+
+    let rafId = 0
+    let latestClientX = pointerEvent.clientX
+
+    const applyPointerPosition = () => {
+      rafId = 0
+      const rect = container.getBoundingClientRect()
+      const containerWidth = rect.width
+
+      if (side === 'chat') {
+        const maxChatWidth = Math.max(
+          layoutConstraints.minChatWidth,
+          containerWidth - layoutConstraints.minMapWidth - (hasCodePanel ? codeWidthRef.current : 0),
+        )
+        const nextChatWidth = clamp(latestClientX - rect.left, layoutConstraints.minChatWidth, maxChatWidth)
+        applyChatWidth(nextChatWidth)
+        return
+      }
+
+      const maxCodeWidth = Math.max(
+        layoutConstraints.minCodeWidth,
+        containerWidth - layoutConstraints.minMapWidth - chatWidthRef.current,
+      )
+      const nextCodeWidth = clamp(rect.right - latestClientX, layoutConstraints.minCodeWidth, maxCodeWidth)
+      applyCodeWidth(nextCodeWidth)
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      latestClientX = event.clientX
+      if (!rafId) {
+        rafId = window.requestAnimationFrame(applyPointerPosition)
+      }
+    }
+
+    const stopResize = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+      if (side === 'chat') {
+        setChatWidth(chatWidthRef.current)
+      } else {
+        setCodeWidth(codeWidthRef.current)
+      }
+      setActiveResizeHandle(null)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopResize)
+      window.removeEventListener('pointercancel', stopResize)
+      if ('releasePointerCapture' in handleElement) {
+        try {
+          handleElement.releasePointerCapture(pointerEvent.pointerId)
+        } catch {
+          // noop
+        }
+      }
+      dragCleanupRef.current = null
+    }
+
+    dragCleanupRef.current = stopResize
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopResize)
+    window.addEventListener('pointercancel', stopResize)
+  }
 
   // 从首页案例卡片跳转时自动发送 prompt
   const sentRef = useRef(false)
@@ -154,14 +308,21 @@ export function WorkspacePage() {
       </header>
 
       {/* ===== 主体 ===== */}
-      <div className="flex-1 flex overflow-hidden">
+      <div ref={layoutRef} className="flex-1 flex overflow-hidden">
         {/* 聊天面板 */}
         <div
-          className="bg-white shrink-0 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] border-r border-gray-200/40"
+          ref={chatPanelRef}
+          className={`bg-white shrink-0 border-r border-gray-200/40 ${activeResizeHandle ? 'transition-none' : 'transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]'}`}
           style={{ width: chatWidth }}
         >
           <ChatPanel />
         </div>
+
+        <ResizeHandle
+          side="chat"
+          active={activeResizeHandle === 'chat'}
+          onPointerDown={beginResize}
+        />
 
         {/* 地图预览 */}
         <div className="flex-1 min-w-0 relative">
@@ -169,14 +330,57 @@ export function WorkspacePage() {
         </div>
 
         {/* 代码面板 */}
-        {showCode && (currentCode || codeStreaming) && (
-          <div className="w-[420px] border-l border-gray-200/40 shrink-0 animate-slide-in-right">
+        {hasCodePanel && (
+          <>
+            <ResizeHandle
+              side="code"
+              active={activeResizeHandle === 'code'}
+              onPointerDown={beginResize}
+            />
+            <div
+              ref={codePanelRef}
+              className={`border-l border-gray-200/40 shrink-0 ${activeResizeHandle ? 'transition-none' : 'animate-slide-in-right'}`}
+              style={{ width: codeWidth }}
+            >
             <CodePanel />
-          </div>
+            </div>
+          </>
         )}
       </div>
 
       <ShareModal open={shareOpen} code={currentCode} onClose={() => setShareOpen(false)} />
     </div>
   )
+}
+
+function ResizeHandle(props: {
+  side: 'chat' | 'code'
+  active: boolean
+  onPointerDown: (side: 'chat' | 'code', event: ReactPointerEvent<HTMLDivElement>) => void
+}) {
+  const { side, active, onPointerDown } = props
+
+  return (
+    <div
+      className="group relative w-3 shrink-0 cursor-col-resize touch-none"
+      onPointerDown={(event) => {
+        onPointerDown(side, event)
+      }}
+      aria-label={side === 'chat' ? '调整聊天区宽度' : '调整代码区宽度'}
+      role="separator"
+      aria-orientation="vertical"
+    >
+      <div
+        className={`absolute inset-y-0 left-1/2 -translate-x-1/2 rounded-full transition-all duration-200 ${
+          active
+            ? 'w-1.5 bg-blue-400/80 shadow-[0_0_0_4px_rgba(96,165,250,0.12)]'
+            : 'w-px bg-slate-200 group-hover:w-1 group-hover:bg-blue-300/80'
+        }`}
+      />
+    </div>
+  )
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
 }

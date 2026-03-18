@@ -1,4 +1,5 @@
 import { StateGraph, Annotation, END } from '@langchain/langgraph'
+import type { CodeDiffPayload } from './CodePatchTypes.js'
 import { SkillStore } from './SkillStore.js'
 import { SkillMatcher } from './SkillMatcher.js'
 import { SkillPlanner } from './SkillPlanner.js'
@@ -27,6 +28,7 @@ const AgentState = Annotation.Root({
 type AgentStateType = typeof AgentState.State
 
 type CodeStreamChunk = { type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }
+type CodeDiffChunk = { type: 'code_diff'; data: CodeDiffPayload }
 type ToolStartChunk = {
   type: 'tool_execution_start'
   toolCallId: string
@@ -51,7 +53,7 @@ type ToolEndChunk = {
   vetoApplied?: boolean
 }
 
-export type AgentStreamChunk = CodeStreamChunk | ToolStartChunk | ToolEndChunk | AgentRuntimeChunk
+export type AgentStreamChunk = CodeStreamChunk | CodeDiffChunk | ToolStartChunk | ToolEndChunk | AgentRuntimeChunk
 
 // ========== MapAgent 类 ==========
 
@@ -417,6 +419,36 @@ export class MapAgent {
         existingCode: params.existingCode,
         fileData: params.fileData,
       })) {
+        if (chunk.type === 'code_diff') {
+          const changeKind = chunk.data.beforeCode.trim().length > 0 ? 'update' : 'create'
+          const patchCallId = nextToolCallId('code_patch.apply')
+          yield {
+            type: 'tool_execution_start',
+            toolCallId: patchCallId,
+            toolName: 'code_patch.apply',
+            args: {
+              mode: 'generate',
+              changeKind,
+              fallbackMode: chunk.data.fallbackMode,
+              hunkCount: chunk.data.hunks.length,
+            },
+          }
+          yield chunk
+          yield {
+            type: 'tool_execution_end',
+            toolCallId: patchCallId,
+            toolName: 'code_patch.apply',
+            result: {
+              mode: 'generate',
+              changeKind,
+              fallbackMode: chunk.data.fallbackMode,
+              hunkCount: chunk.data.hunks.length,
+              summary: chunk.data.summary,
+            },
+            isError: false,
+          }
+          continue
+        }
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
         if (chunk.type === 'code') {
@@ -580,6 +612,7 @@ export class MapAgent {
 
     let explanation = ''
     let fixedCode = ''
+    let diff: CodeDiffPayload | undefined
     let failed = false
     let lastError = ''
 
@@ -588,6 +621,8 @@ export class MapAgent {
         explanation += chunk.content
       } else if (chunk.type === 'code') {
         fixedCode = chunk.content
+      } else if (chunk.type === 'code_diff') {
+        diff = chunk.data
       } else if (chunk.type === 'error') {
         failed = true
         lastError = chunk.content
@@ -599,6 +634,7 @@ export class MapAgent {
         code: fixedCode,
         explanation,
         fixed: true,
+        diff,
       }
     }
 
@@ -606,6 +642,7 @@ export class MapAgent {
       code: params.code,
       explanation: explanation || lastError || `自动修复失败。错误信息：${params.error}`,
       fixed: false,
+      diff,
     }
   }
 

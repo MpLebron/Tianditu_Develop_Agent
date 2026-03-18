@@ -211,6 +211,144 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.15);
 }
 
+.inline-code-plain {
+  min-height: 100%;
+  background: #fbfbfd;
+}
+
+.inline-code-plain-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #1f2937;
+}
+
+.inline-code-plain-row:hover .inline-code-plain-gutter,
+.inline-code-plain-row:hover .inline-code-plain-code {
+  background: #f8fafc;
+}
+
+.inline-code-plain-gutter {
+  width: 3.85rem;
+  min-width: 3.85rem;
+  padding: 0 0.75rem 0 0.4rem;
+  text-align: right;
+  vertical-align: top;
+  color: #94a3b8;
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  user-select: none;
+}
+
+.inline-code-plain-code {
+  padding: 0 1.25rem 0 1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.inline-code-plain-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.12em;
+  background: #3b82f6;
+  animation: blink-cursor 0.8s ease-in-out infinite;
+}
+
+.inline-code-diff {
+  --diff-background-color: #fbfbfd;
+  --diff-text-color: #1f2937;
+  --diff-font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  --diff-selection-background-color: rgba(59, 130, 246, 0.18);
+  --diff-gutter-insert-background-color: #e4f7ea;
+  --diff-gutter-delete-background-color: #fbe7ea;
+  --diff-gutter-selected-background-color: #f8fafc;
+  --diff-code-insert-background-color: #edf9f0;
+  --diff-code-delete-background-color: #fdf0f2;
+  --diff-code-selected-background-color: #f8fafc;
+  --diff-code-insert-edit-background-color: #cdeed8;
+  --diff-code-delete-edit-background-color: #f7c8d0;
+  min-height: 100%;
+}
+
+.inline-code-diff .diff {
+  background: transparent;
+}
+
+.inline-code-diff .diff-line {
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.inline-code-diff .diff-gutter {
+  width: 4.5rem;
+  min-width: 4.5rem;
+  color: #94a3b8;
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.inline-code-diff .diff-line > .diff-gutter:first-child {
+  width: 1.15rem;
+  min-width: 1.15rem;
+  padding: 0;
+  text-align: center;
+  border-right: none;
+}
+
+.inline-code-diff .diff-line > .diff-gutter:nth-child(2) {
+  width: 3.6rem;
+  min-width: 3.6rem;
+  padding: 0 0.65rem 0 0.25rem;
+  text-align: right;
+}
+
+.inline-code-diff .diff-code {
+  padding-left: 1rem;
+  padding-right: 1.25rem;
+}
+
+.inline-code-diff-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  color: transparent;
+}
+
+.inline-code-diff-marker.is-insert {
+  color: #16a34a;
+}
+
+.inline-code-diff-marker.is-delete {
+  color: #e11d48;
+}
+
+.inline-code-diff tr:hover .diff-gutter,
+.inline-code-diff tr:hover .diff-code {
+  filter: brightness(0.99);
+}
+
+.inline-code-diff .diff-code-insert,
+.inline-code-diff .diff-gutter-insert {
+  box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.55);
+}
+
+.inline-code-diff .diff-code-delete,
+.inline-code-diff .diff-gutter-delete {
+  box-shadow: inset 3px 0 0 rgba(244, 63, 94, 0.48);
+}
+
+.inline-code-diff .diff-hunk {
+  background: #f8fafc;
+}
+
 /* ===== Textarea 统一 ===== */
 textarea:focus {
   outline: none;

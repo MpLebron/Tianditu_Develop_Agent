@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'fs/promises'
 import { resolve, sep } from 'path'
 import { config } from '../config.js'
+import { CodePatchService } from './CodePatchService.js'
 
 export interface WorkspaceSnippetEditResult {
   filePath: string
@@ -14,6 +15,8 @@ export interface WorkspaceSnippetEditResult {
 }
 
 export class WorkspaceSnippetEditService {
+  private patchService = new CodePatchService()
+
   async apply(params: {
     filePath: string
     oldString: string
@@ -41,24 +44,37 @@ export class WorkspaceSnippetEditService {
       throw new Error(`occurrenceIndex 超出范围: ${targetIndex}`)
     }
 
-    const start = matches[targetIndex]
-    const end = start + params.oldString.length
-    const updated = original.slice(0, start) + params.newString + original.slice(end)
+    const selectedMatch = matches[targetIndex]
+    const selectedOldString = original.slice(selectedMatch, selectedMatch + params.oldString.length)
+    const patchResult = this.patchService.applyBlocks({
+      originalCode: original,
+      fileName: params.filePath,
+      blocks: [{
+        blockIndex: 0,
+        search: selectedOldString,
+        replace: params.newString,
+        occurrenceIndex: targetIndex,
+      }],
+    })
+    const report = patchResult.blockReports[0]
+
+    if (!patchResult.success || !report || report.status !== 'applied' || !report.range) {
+      throw new Error(report?.message || `片段替换失败: ${params.filePath}`)
+    }
+
+    const updated = patchResult.newCode
 
     await writeFile(absolutePath, updated, 'utf-8')
-
-    const startLine = countLines(original.slice(0, start)) + 1
-    const endLine = startLine + countLines(params.newString)
 
     return {
       filePath: params.filePath,
       absolutePath,
       actualOccurrences: matches.length,
       replacedOccurrence: targetIndex,
-      startLine,
-      endLine,
-      previewBefore: buildContextPreview(original, start, end),
-      previewAfter: buildContextPreview(updated, start, start + params.newString.length),
+      startLine: report.range.startLine,
+      endLine: report.range.endLine,
+      previewBefore: buildContextPreview(original, report.range.start, report.range.end),
+      previewAfter: buildContextPreview(updated, report.range.start, report.range.start + params.newString.length),
     }
   }
 }

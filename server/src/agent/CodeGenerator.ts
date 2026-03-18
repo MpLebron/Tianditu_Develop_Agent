@@ -1,6 +1,8 @@
 import { createLLM } from '../llm/createLLM.js'
 import { config } from '../config.js'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { CodePatchService } from './CodePatchService.js'
+import type { CodeDiffPayload, PatchBlock, PatchBlockReport } from './CodePatchTypes.js'
 
 const STREAM_TEXT_MIN_CHARS = 6
 const STREAM_TEXT_KEEP_TAIL = 6
@@ -11,11 +13,18 @@ const RECOVERY_STREAM_CHUNK_SIZE = 160
 const RECOVERY_STREAM_DELAY_MS = 10
 
 type StreamOutputChunk = { type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }
+export type CodeGeneratorStreamChunk =
+  | StreamOutputChunk
+  | { type: 'code_diff'; data: CodeDiffPayload }
+export type CodeGeneratorFixChunk =
+  CodeGeneratorStreamChunk
 
 /**
  * 知识驱动的 LLM 代码生成
  */
 export class CodeGenerator {
+  private patchService = new CodePatchService()
+
   constructor() {}
 
   /**
@@ -78,41 +87,26 @@ export class CodeGenerator {
     apiContractsPrompt?: string
     fileData?: string
     errorDiagnosis?: string
-  }): Promise<{ code: string; explanation: string }> {
-    const systemPrompt = this.buildFixSystemPrompt({
-      skillDocs: params.skillDocs,
-      apiContractsPrompt: params.apiContractsPrompt,
-    })
-    const userPrompt = this.buildFixUserPrompt(params)
+  }): Promise<{ code: string; explanation: string; diff?: CodeDiffPayload }> {
+    let explanation = ''
+    let code = ''
+    let diff: CodeDiffPayload | undefined
 
-    const llm = createLLM({ temperature: 0.3 })
-    const response = await llm.invoke([
-      new SystemMessage(systemPrompt),
-      new HumanMessage(userPrompt),
-    ])
-
-    const content = typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content)
-
-    const parsed = this.parseResponse(content)
-    if (parsed.code) return parsed
-
-    const htmlLikelyExpected = /```html|<!doctype\s+html|<html\b/i.test(content)
-    if (htmlLikelyExpected) {
-      const retried = await this.retryCompleteHtml({
-        systemPrompt,
-        userPrompt,
-      })
-      if (retried.code) {
-        return {
-          code: retried.code,
-          explanation: [parsed.explanation, retried.explanation].filter(Boolean).join('\n\n').trim(),
-        }
+    for await (const chunk of this.fixErrorStream(params)) {
+      if (chunk.type === 'text') {
+        explanation += chunk.content
+      } else if (chunk.type === 'code') {
+        code = chunk.content
+      } else if (chunk.type === 'code_diff') {
+        diff = chunk.data
       }
     }
 
-    return parsed
+    return {
+      code: code || params.code,
+      explanation: explanation.trim(),
+      diff,
+    }
   }
 
   /**
@@ -125,99 +119,160 @@ export class CodeGenerator {
     apiContractsPrompt?: string
     fileData?: string
     errorDiagnosis?: string
-  }): AsyncGenerator<{ type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }> {
-    const systemPrompt = this.buildFixSystemPrompt({
-      skillDocs: params.skillDocs,
-      apiContractsPrompt: params.apiContractsPrompt,
-    })
-    const userPrompt = this.buildFixUserPrompt(params)
+  }): AsyncGenerator<CodeGeneratorFixChunk> {
+    const maxPatchRetryRounds = Math.max(1, config.llm.recoveryRounds || 1)
+    const aggregatedReports: PatchBlockReport[] = []
+    const aggregatedBlocks: PatchBlock[] = []
+    const patchTexts: string[] = []
+    let currentCode = params.code
+    let nextBlockIndex = 0
 
     try {
-      const streamed = this.streamModelResponse({
-        systemPrompt,
-        userPrompt,
+      const firstAttempt = this.streamPatchPlanResponse({
+        systemPrompt: this.buildFixPatchSystemPrompt({
+          skillDocs: params.skillDocs,
+          apiContractsPrompt: params.apiContractsPrompt,
+        }),
+        userPrompt: this.buildFixPatchUserPrompt(params),
       })
-      let streamedFinalCode = ''
 
-      for await (const chunk of streamed.chunks) {
-        if (chunk.type === 'code' && !streamedFinalCode) {
-          streamedFinalCode = chunk.content
+      for await (const chunk of firstAttempt.chunks) {
+        yield chunk
+      }
+
+      let attemptBlocks = this.patchService
+        .parseSearchReplaceBlocks(firstAttempt.patchText || firstAttempt.fullContent)
+        .map((block) => ({ ...block, blockIndex: nextBlockIndex + block.blockIndex }))
+      if (attemptBlocks.length > 0) {
+        aggregatedBlocks.push(...attemptBlocks)
+        patchTexts.push(firstAttempt.patchText || firstAttempt.fullContent)
+        nextBlockIndex += attemptBlocks.length
+      }
+
+      let latestApply = attemptBlocks.length > 0
+        ? this.patchService.applyBlocks({
+          originalCode: currentCode,
+          fileName: 'preview.html',
+          blocks: attemptBlocks,
+        })
+        : null
+
+      if (latestApply) {
+        aggregatedReports.push(...latestApply.blockReports)
+        currentCode = latestApply.newCode
+        if (latestApply.success) {
+          yield { type: 'text', content: '\n\n已按局部 patch 完成自动修复，正在生成改动视图。' }
+          const diffPayload = this.patchService.buildCodeDiffPayload({
+            beforeCode: params.code,
+            afterCode: currentCode,
+            fallbackMode: 'patch',
+            blockReports: aggregatedReports,
+            patchBlocks: aggregatedBlocks,
+            patchText: patchTexts.join('\n\n'),
+            summary: summarizePatchReports(aggregatedReports),
+            fileName: 'preview.html',
+          })
+          yield { type: 'code_diff', data: diffPayload }
+          yield { type: 'code', content: currentCode }
+          return
+        }
+      }
+
+      let remainingFailures = latestApply?.blockReports.filter((report) => report.status === 'failed') || []
+      if (!latestApply && attemptBlocks.length === 0) {
+        remainingFailures = [
+          createProtocolFailureReport(nextBlockIndex, firstAttempt.fullContent),
+        ]
+        aggregatedReports.push(...remainingFailures)
+      }
+      for (let round = 0; round < maxPatchRetryRounds && remainingFailures.length > 0; round += 1) {
+        yield {
+          type: 'text',
+          content: `\n\n局部 patch 仍有 ${remainingFailures.length} 处需要纠正，正在按失败块重试第 ${round + 1} 轮。`,
+        }
+        const retryResponse = await this.generatePatchRetryResponse({
+          code: currentCode,
+          error: params.error,
+          errorDiagnosis: params.errorDiagnosis,
+          failedReports: remainingFailures,
+          skillDocs: params.skillDocs,
+          apiContractsPrompt: params.apiContractsPrompt,
+          fileData: params.fileData,
+        })
+        if (retryResponse.explanation) {
+          yield { type: 'text', content: `\n\n${retryResponse.explanation}` }
+        }
+
+        const retryBlocks = this.patchService
+          .parseSearchReplaceBlocks(retryResponse.patchText || retryResponse.fullContent)
+          .map((block) => ({ ...block, blockIndex: nextBlockIndex + block.blockIndex }))
+
+        if (retryBlocks.length === 0) {
+          remainingFailures = [
+            createProtocolFailureReport(nextBlockIndex, retryResponse.fullContent),
+          ]
+          aggregatedReports.push(...remainingFailures)
+          continue
+        }
+
+        aggregatedBlocks.push(...retryBlocks)
+        patchTexts.push(retryResponse.patchText || retryResponse.fullContent)
+        nextBlockIndex += retryBlocks.length
+
+        const retryApply = this.patchService.applyBlocks({
+          originalCode: currentCode,
+          fileName: 'preview.html',
+          blocks: retryBlocks,
+        })
+        aggregatedReports.push(...retryApply.blockReports)
+        currentCode = retryApply.newCode
+        if (retryApply.success) {
+          const diffPayload = this.patchService.buildCodeDiffPayload({
+            beforeCode: params.code,
+            afterCode: currentCode,
+            fallbackMode: 'patch',
+            blockReports: aggregatedReports,
+            patchBlocks: aggregatedBlocks,
+            patchText: patchTexts.join('\n\n'),
+            summary: summarizePatchReports(aggregatedReports),
+            fileName: 'preview.html',
+          })
+          yield { type: 'code_diff', data: diffPayload }
+          yield { type: 'code', content: currentCode }
+          return
+        }
+        remainingFailures = retryApply.blockReports.filter((report) => report.status === 'failed')
+      }
+
+      yield { type: 'text', content: '\n\n局部 patch 未能稳定完成，正在回退到整页重写修复。' }
+      let rewriteCode = ''
+      for await (const chunk of this.fixErrorRewriteStream(params)) {
+        if (chunk.type === 'code') {
+          rewriteCode = chunk.content
+          continue
         }
         yield chunk
       }
 
-      let finalCode = streamedFinalCode
-
-      // 只有在流式阶段从未得到完整 HTML 时，才进入恢复链路
-      if (!finalCode) {
-        const parsed = this.parseResponse(streamed.fullContent)
-        finalCode = parsed.code
-      }
-
-      // 第一层兜底：代码块未闭合时，使用已流式拼接的 code_delta 还原
-      if (!finalCode) {
-        const recovered = this.recoverCodeFromCodeDelta(streamed.codeBuffer)
-        if (recovered) {
-          finalCode = recovered
-          yield { type: 'text' as const, content: '\n\n检测到修复输出被截断，已使用流式代码自动收尾。' }
-          for await (const recoveryChunk of this.streamRecoveredHtml({
-            recoveredCode: recovered,
-            existingCode: streamed.codeBuffer,
-            codeStartEmitted: streamed.codeStartEmitted,
-          })) {
-            yield recoveryChunk
-          }
-        }
-      }
-
-      // 第二层兜底：再尝试一次非流式重试，要求“只输出完整 HTML”
-      if (!finalCode) {
-        const retried = this.retryCompleteHtmlStream({
-          systemPrompt,
-          userPrompt,
-          existingCode: streamed.codeBuffer,
-          codeStartEmitted: streamed.codeStartEmitted,
+      if (rewriteCode) {
+        const diffPayload = this.patchService.buildCodeDiffPayload({
+          beforeCode: params.code,
+          afterCode: rewriteCode,
+          fallbackMode: 'rewrite',
+          blockReports: aggregatedReports,
+          patchBlocks: aggregatedBlocks,
+          patchText: patchTexts.join('\n\n'),
+          summary: '局部 patch 未能稳定完成，已回退为整页重写修复。',
+          fileName: 'preview.html',
         })
-        for await (const recoveryChunk of retried.chunks) {
-          yield recoveryChunk
-        }
-        if (retried.code) {
-          finalCode = retried.code
-          if (retried.explanation) {
-            yield { type: 'text' as const, content: `\n\n${retried.explanation}` }
-          }
-        }
+        yield { type: 'code_diff', data: diffPayload }
+        yield { type: 'code', content: rewriteCode }
+        return
       }
 
-      if (!finalCode) {
-        const fallback = await this.retryCompleteHtml({
-          systemPrompt,
-          userPrompt,
-        })
-        if (fallback.code) {
-          finalCode = fallback.code
-          for await (const recoveryChunk of this.streamRecoveredHtml({
-            recoveredCode: fallback.code,
-            existingCode: streamed.codeBuffer,
-            codeStartEmitted: streamed.codeStartEmitted,
-          })) {
-            yield recoveryChunk
-          }
-          if (fallback.explanation) {
-            yield { type: 'text' as const, content: `\n\n${fallback.explanation}` }
-          }
-        }
-      }
-
-      if (finalCode) {
-        if (!streamedFinalCode) {
-          yield { type: 'code' as const, content: finalCode }
-        }
-      } else {
-        yield {
-          type: 'error' as const,
-          content: '修复输出不完整：未得到可用的最终 HTML 代码，请重试或简化修复目标。',
-        }
+      yield {
+        type: 'error',
+        content: '局部 patch 与整页重写均未生成可用修复结果，请重试或缩小修复范围。',
       }
     } catch (err: any) {
       yield { type: 'error' as const, content: err.message }
@@ -243,7 +298,7 @@ export class CodeGenerator {
     existingCode?: string
     fileData?: string
     toolContext?: string
-  }): AsyncGenerator<{ type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }> {
+  }): AsyncGenerator<CodeGeneratorStreamChunk> {
     const systemPrompt = this.buildSystemPrompt({
       skillDocs: params.skillDocs,
       skillCatalog: params.skillCatalog,
@@ -252,9 +307,203 @@ export class CodeGenerator {
     const userPrompt = this.buildUserPrompt(params)
 
     try {
-      const streamed = this.streamModelResponse({
+      if (params.existingCode) {
+        const patchHandled = yield* this.generateUpdatedCodeByPatchStream({
+          userInput: params.userInput,
+          conversationHistory: params.conversationHistory,
+          existingCode: params.existingCode,
+          fileData: params.fileData,
+          toolContext: params.toolContext,
+          skillDocs: params.skillDocs,
+          skillCatalog: params.skillCatalog,
+          apiContractsPrompt: params.apiContractsPrompt,
+          fullGenerationSystemPrompt: systemPrompt,
+          fullGenerationUserPrompt: userPrompt,
+        })
+        if (patchHandled) {
+          return
+        }
+      }
+
+      yield* this.streamWholeDocumentGeneration({
         systemPrompt,
         userPrompt,
+        beforeCodeForDiff: params.existingCode || '',
+      })
+    } catch (err: any) {
+      yield { type: 'error' as const, content: err.message }
+    }
+  }
+
+  private async *generateUpdatedCodeByPatchStream(params: {
+    userInput: string
+    conversationHistory?: string
+    existingCode: string
+    fileData?: string
+    toolContext?: string
+    skillDocs: string
+    skillCatalog?: string
+    apiContractsPrompt?: string
+    fullGenerationSystemPrompt: string
+    fullGenerationUserPrompt: string
+  }): AsyncGenerator<CodeGeneratorStreamChunk, boolean, void> {
+    const maxPatchRetryRounds = Math.max(1, config.llm.recoveryRounds || 1)
+    const aggregatedReports: PatchBlockReport[] = []
+    const aggregatedBlocks: PatchBlock[] = []
+    const patchTexts: string[] = []
+    let currentCode = params.existingCode
+    let nextBlockIndex = 0
+
+    const firstAttempt = this.streamPatchPlanResponse({
+      systemPrompt: this.buildGeneratePatchSystemPrompt({
+        skillDocs: params.skillDocs,
+        skillCatalog: params.skillCatalog,
+        apiContractsPrompt: params.apiContractsPrompt,
+      }),
+      userPrompt: this.buildGeneratePatchUserPrompt({
+        userInput: params.userInput,
+        conversationHistory: params.conversationHistory,
+        existingCode: params.existingCode,
+        fileData: params.fileData,
+        toolContext: params.toolContext,
+      }),
+    })
+
+    for await (const chunk of firstAttempt.chunks) {
+      yield chunk
+    }
+
+    let attemptBlocks = this.patchService
+      .parseSearchReplaceBlocks(firstAttempt.patchText || firstAttempt.fullContent)
+      .map((block) => ({ ...block, blockIndex: nextBlockIndex + block.blockIndex }))
+    if (attemptBlocks.length > 0) {
+      aggregatedBlocks.push(...attemptBlocks)
+      patchTexts.push(firstAttempt.patchText || firstAttempt.fullContent)
+      nextBlockIndex += attemptBlocks.length
+    }
+
+    let latestApply = attemptBlocks.length > 0
+      ? this.patchService.applyBlocks({
+        originalCode: currentCode,
+        fileName: 'preview.html',
+        blocks: attemptBlocks,
+      })
+      : null
+
+    if (latestApply) {
+      aggregatedReports.push(...latestApply.blockReports)
+      currentCode = latestApply.newCode
+      if (latestApply.success) {
+        yield { type: 'text', content: '\n\n已按局部 patch 完成需求更新，正在生成改动视图。' }
+        yield { type: 'code', content: currentCode }
+        yield {
+          type: 'code_diff',
+          data: this.patchService.buildCodeDiffPayload({
+            beforeCode: params.existingCode,
+            afterCode: currentCode,
+            fallbackMode: 'patch',
+            blockReports: aggregatedReports,
+            patchBlocks: aggregatedBlocks,
+            patchText: patchTexts.join('\n\n'),
+            summary: summarizeUpdatePatchReports(aggregatedReports),
+            fileName: 'preview.html',
+          }),
+        }
+        return true
+      }
+    }
+
+    let remainingFailures = latestApply?.blockReports.filter((report) => report.status === 'failed') || []
+    if (!latestApply && attemptBlocks.length === 0) {
+      remainingFailures = [
+        createProtocolFailureReport(nextBlockIndex, firstAttempt.fullContent),
+      ]
+      aggregatedReports.push(...remainingFailures)
+    }
+
+    for (let round = 0; round < maxPatchRetryRounds && remainingFailures.length > 0; round += 1) {
+      yield {
+        type: 'text',
+        content: `\n\n局部 patch 仍有 ${remainingFailures.length} 处需要纠正，正在按失败块重试第 ${round + 1} 轮。`,
+      }
+      const retryResponse = await this.generateUpdatePatchRetryResponse({
+        code: currentCode,
+        userInput: params.userInput,
+        conversationHistory: params.conversationHistory,
+        failedReports: remainingFailures,
+        skillDocs: params.skillDocs,
+        skillCatalog: params.skillCatalog,
+        apiContractsPrompt: params.apiContractsPrompt,
+        fileData: params.fileData,
+        toolContext: params.toolContext,
+      })
+      if (retryResponse.explanation) {
+        yield { type: 'text', content: `\n\n${retryResponse.explanation}` }
+      }
+
+      const retryBlocks = this.patchService
+        .parseSearchReplaceBlocks(retryResponse.patchText || retryResponse.fullContent)
+        .map((block) => ({ ...block, blockIndex: nextBlockIndex + block.blockIndex }))
+
+      if (retryBlocks.length === 0) {
+        remainingFailures = [
+          createProtocolFailureReport(nextBlockIndex, retryResponse.fullContent),
+        ]
+        aggregatedReports.push(...remainingFailures)
+        continue
+      }
+
+      aggregatedBlocks.push(...retryBlocks)
+      patchTexts.push(retryResponse.patchText || retryResponse.fullContent)
+      nextBlockIndex += retryBlocks.length
+
+      const retryApply = this.patchService.applyBlocks({
+        originalCode: currentCode,
+        fileName: 'preview.html',
+        blocks: retryBlocks,
+      })
+      aggregatedReports.push(...retryApply.blockReports)
+      currentCode = retryApply.newCode
+
+      if (retryApply.success) {
+        yield { type: 'text', content: '\n\n已按局部 patch 完成需求更新，正在生成改动视图。' }
+        yield { type: 'code', content: currentCode }
+        yield {
+          type: 'code_diff',
+          data: this.patchService.buildCodeDiffPayload({
+            beforeCode: params.existingCode,
+            afterCode: currentCode,
+            fallbackMode: 'patch',
+            blockReports: aggregatedReports,
+            patchBlocks: aggregatedBlocks,
+            patchText: patchTexts.join('\n\n'),
+            summary: summarizeUpdatePatchReports(aggregatedReports),
+            fileName: 'preview.html',
+          }),
+        }
+        return true
+      }
+
+      remainingFailures = retryApply.blockReports.filter((report) => report.status === 'failed')
+    }
+
+    yield { type: 'text', content: '\n\n局部 patch 未能稳定完成，正在回退到整页生成。' }
+    yield* this.streamWholeDocumentGeneration({
+      systemPrompt: params.fullGenerationSystemPrompt,
+      userPrompt: params.fullGenerationUserPrompt,
+      beforeCodeForDiff: params.existingCode,
+    })
+    return true
+  }
+
+  private async *streamWholeDocumentGeneration(params: {
+    systemPrompt: string
+    userPrompt: string
+    beforeCodeForDiff: string
+  }): AsyncGenerator<CodeGeneratorStreamChunk> {
+      const streamed = this.streamModelResponse({
+        systemPrompt: params.systemPrompt,
+        userPrompt: params.userPrompt,
       })
       let streamedFinalCode = ''
 
@@ -294,8 +543,8 @@ export class CodeGenerator {
       // 第二层兜底：自动重试一轮，要求模型直接返回完整 HTML
       if (!finalCode && codeLikelyExpected) {
         const retried = this.retryCompleteHtmlStream({
-          systemPrompt,
-          userPrompt,
+          systemPrompt: params.systemPrompt,
+          userPrompt: params.userPrompt,
           existingCode: streamed.codeBuffer,
           codeStartEmitted: streamed.codeStartEmitted,
         })
@@ -312,8 +561,8 @@ export class CodeGenerator {
 
       if (!finalCode && codeLikelyExpected) {
         const fallback = await this.retryCompleteHtml({
-          systemPrompt,
-          userPrompt,
+          systemPrompt: params.systemPrompt,
+          userPrompt: params.userPrompt,
         })
         if (fallback.code) {
           finalCode = fallback.code
@@ -334,6 +583,23 @@ export class CodeGenerator {
         if (!streamedFinalCode) {
           yield { type: 'code' as const, content: finalCode }
         }
+        const beforeCode = params.beforeCodeForDiff
+        const shouldEmitDiff =
+          normalizeComparableCode(beforeCode) !== normalizeComparableCode(finalCode)
+
+        if (shouldEmitDiff) {
+          const diffPayload = this.patchService.buildCodeDiffPayload({
+            beforeCode,
+            afterCode: finalCode,
+            fallbackMode: 'patch',
+            blockReports: [],
+            summary: beforeCode.trim().length > 0
+              ? '已根据新需求更新现有代码，以下高亮显示本次改动。'
+              : '已生成首版代码，以下高亮显示从空文件到当前页面的新增内容。',
+            fileName: 'preview.html',
+          })
+          yield { type: 'code_diff', data: diffPayload }
+        }
       } else {
         // 纯文字回答场景：没有代码输出是合法结果，不应误判为截断
         if (!codeLikelyExpected) return
@@ -342,8 +608,247 @@ export class CodeGenerator {
           content: '输出不完整：未得到可用的最终 HTML 代码，请重试或缩小本次需求范围。',
         }
       }
-    } catch (err: any) {
-      yield { type: 'error' as const, content: err.message }
+  }
+
+  private async *fixErrorRewriteStream(params: {
+    code: string
+    error: string
+    skillDocs: string
+    apiContractsPrompt?: string
+    fileData?: string
+    errorDiagnosis?: string
+  }): AsyncGenerator<StreamOutputChunk> {
+    const systemPrompt = this.buildFixSystemPrompt({
+      skillDocs: params.skillDocs,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
+    const userPrompt = this.buildFixUserPrompt(params)
+
+    const streamed = this.streamModelResponse({
+      systemPrompt,
+      userPrompt,
+    })
+    let streamedFinalCode = ''
+
+    for await (const chunk of streamed.chunks) {
+      if (chunk.type === 'code' && !streamedFinalCode) {
+        streamedFinalCode = chunk.content
+      }
+      yield chunk
+    }
+
+    let finalCode = streamedFinalCode
+
+    if (!finalCode) {
+      const parsed = this.parseResponse(streamed.fullContent)
+      finalCode = parsed.code
+    }
+
+    if (!finalCode) {
+      const recovered = this.recoverCodeFromCodeDelta(streamed.codeBuffer)
+      if (recovered) {
+        finalCode = recovered
+        yield { type: 'text', content: '\n\n检测到修复输出被截断，已使用流式代码自动收尾。' }
+        for await (const recoveryChunk of this.streamRecoveredHtml({
+          recoveredCode: recovered,
+          existingCode: streamed.codeBuffer,
+          codeStartEmitted: streamed.codeStartEmitted,
+        })) {
+          yield recoveryChunk
+        }
+      }
+    }
+
+    if (!finalCode) {
+      const retried = this.retryCompleteHtmlStream({
+        systemPrompt,
+        userPrompt,
+        existingCode: streamed.codeBuffer,
+        codeStartEmitted: streamed.codeStartEmitted,
+      })
+      for await (const recoveryChunk of retried.chunks) {
+        yield recoveryChunk
+      }
+      if (retried.code) {
+        finalCode = retried.code
+        if (retried.explanation) {
+          yield { type: 'text', content: `\n\n${retried.explanation}` }
+        }
+      }
+    }
+
+    if (!finalCode) {
+      const fallback = await this.retryCompleteHtml({
+        systemPrompt,
+        userPrompt,
+      })
+      if (fallback.code) {
+        finalCode = fallback.code
+        for await (const recoveryChunk of this.streamRecoveredHtml({
+          recoveredCode: fallback.code,
+          existingCode: streamed.codeBuffer,
+          codeStartEmitted: streamed.codeStartEmitted,
+        })) {
+          yield recoveryChunk
+        }
+        if (fallback.explanation) {
+          yield { type: 'text', content: `\n\n${fallback.explanation}` }
+        }
+      }
+    }
+
+    if (finalCode && !streamedFinalCode) {
+      yield { type: 'code', content: finalCode }
+      return
+    }
+
+    if (!finalCode) {
+      yield {
+        type: 'error',
+        content: '修复输出不完整：未得到可用的最终 HTML 代码，请重试或简化修复目标。',
+      }
+    }
+  }
+
+  private streamPatchPlanResponse(params: {
+    systemPrompt: string
+    userPrompt: string
+  }): {
+    chunks: AsyncGenerator<StreamOutputChunk>
+    fullContent: string
+    patchText: string
+  } {
+    let fullContent = ''
+    let patchText = ''
+    const markers = ['------- SEARCH', '<<<<<<< SEARCH']
+    const maxMarkerLength = Math.max(...markers.map((marker) => marker.length))
+
+    const chunks = (async function* (): AsyncGenerator<StreamOutputChunk> {
+      const llm = createLLM({ temperature: 0.2 })
+      const stream = await llm.stream([
+        new SystemMessage(params.systemPrompt),
+        new HumanMessage(params.userPrompt),
+      ])
+
+      let textBuffer = ''
+      let patchStarted = false
+
+      for await (const chunk of stream) {
+        const text = typeof chunk.content === 'string' ? chunk.content : ''
+        if (!text) continue
+        fullContent += text
+
+        if (patchStarted) {
+          patchText += text
+          continue
+        }
+
+        textBuffer += text
+        const markerIndex = findPatchMarkerIndex(textBuffer)
+        if (markerIndex >= 0) {
+          const explanation = textBuffer.slice(0, markerIndex)
+          if (explanation) {
+            yield { type: 'text', content: explanation }
+          }
+          patchText += textBuffer.slice(markerIndex)
+          textBuffer = ''
+          patchStarted = true
+          continue
+        }
+
+        if (textBuffer.length > maxMarkerLength + STREAM_TEXT_KEEP_TAIL) {
+          const flush = textBuffer.slice(0, textBuffer.length - maxMarkerLength)
+          if (flush) {
+            yield { type: 'text', content: flush }
+            textBuffer = textBuffer.slice(textBuffer.length - maxMarkerLength)
+          }
+        }
+      }
+
+      if (textBuffer) {
+        if (patchStarted) {
+          patchText += textBuffer
+        } else {
+          yield { type: 'text', content: textBuffer }
+        }
+      }
+    })()
+
+    return {
+      chunks,
+      get fullContent() {
+        return fullContent
+      },
+      get patchText() {
+        return patchText
+      },
+    }
+  }
+
+  private async generatePatchRetryResponse(params: {
+    code: string
+    error: string
+    errorDiagnosis?: string
+    failedReports: PatchBlockReport[]
+    skillDocs: string
+    apiContractsPrompt?: string
+    fileData?: string
+  }): Promise<{ explanation: string; patchText: string; fullContent: string }> {
+    const systemPrompt = this.buildFixPatchSystemPrompt({
+      skillDocs: params.skillDocs,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
+    const userPrompt = this.buildFixPatchRetryUserPrompt(params)
+    return this.invokePatchResponse({
+      systemPrompt,
+      userPrompt,
+    })
+  }
+
+  private async generateUpdatePatchRetryResponse(params: {
+    code: string
+    userInput: string
+    conversationHistory?: string
+    failedReports: PatchBlockReport[]
+    skillDocs: string
+    skillCatalog?: string
+    apiContractsPrompt?: string
+    fileData?: string
+    toolContext?: string
+  }): Promise<{ explanation: string; patchText: string; fullContent: string }> {
+    const systemPrompt = this.buildGeneratePatchSystemPrompt({
+      skillDocs: params.skillDocs,
+      skillCatalog: params.skillCatalog,
+      apiContractsPrompt: params.apiContractsPrompt,
+    })
+    const userPrompt = this.buildGeneratePatchRetryUserPrompt(params)
+    return this.invokePatchResponse({
+      systemPrompt,
+      userPrompt,
+    })
+  }
+
+  private async invokePatchResponse(params: {
+    systemPrompt: string
+    userPrompt: string
+  }): Promise<{ explanation: string; patchText: string; fullContent: string }> {
+    const llm = createLLM({ temperature: 0.2 })
+    const response = await llm.invoke([
+      new SystemMessage(params.systemPrompt),
+      new HumanMessage(params.userPrompt),
+    ])
+    const content = typeof response.content === 'string'
+      ? response.content
+      : JSON.stringify(response.content)
+    const patchBlocks = this.patchService.parseSearchReplaceBlocks(content)
+    const markerIndex = findPatchMarkerIndex(content)
+
+    return {
+      explanation: markerIndex > 0 ? content.slice(0, markerIndex).trim() : '',
+      patchText: patchBlocks.length > 0
+        ? content.slice(Math.max(0, markerIndex))
+        : '',
+      fullContent: content,
     }
   }
 
@@ -749,6 +1254,73 @@ ${params.skillDocs}
 ${params.apiContractsPrompt ? `\n## 天地图接口契约（高优先级）\n${params.apiContractsPrompt}` : ''}`
   }
 
+  private buildFixPatchSystemPrompt(params: { skillDocs: string; apiContractsPrompt?: string }): string {
+    return `你是天地图 JS API v5.0 代码修复专家。你的首选任务是对现有 HTML 做最小局部 patch，而不是重写整页。
+
+## 局部 patch 协议
+1. 可以先用 1-2 句中文说明修复思路；如果已经在重试，或你已经明确知道改哪几行，也可以直接从 SEARCH/REPLACE blocks 开始。
+2. 然后只输出一个或多个 SEARCH/REPLACE blocks：
+------- SEARCH
+[精确查找片段]
+=======
+[替换后的新片段]
+++++++ REPLACE
+3. 每个 SEARCH 必须尽量短小，但又足够唯一。
+4. 严禁输出完整 HTML、整页重写块、额外 Markdown 标题、JSON 或解释性清单。
+5. 如果需要多处修改，按文件出现顺序输出多个 block。
+6. 允许删除代码：REPLACE 部分留空。
+7. 禁止空 SEARCH，禁止“把整个 <html>...</html> 全部放进 SEARCH”。
+8. 如果上一轮只是协议失败（没有输出出可解析的 patch blocks），这不代表要整页重写；你必须改为返回合规 patch blocks。
+
+## patch 设计要求
+- 只修改真正导致报错的最小代码片段。
+- 优先保持页面布局、样式、交互和数据流不变。
+- 如果提供了错误诊断，必须先遵循诊断中的根因与检查清单。
+- 如果 reference 或接口契约已经给出正确写法，必须优先回到这些写法。
+- 如果某个修改会影响多处重复代码，优先只改出错路径，不要顺手大改其它无关区域。
+- 如果一段旧代码可能命中多处，必须扩充上下文直到唯一，不要赌“默认第一个”。
+
+## 参考文档
+${params.skillDocs}
+
+${params.apiContractsPrompt ? `\n## 天地图接口契约（高优先级）\n${params.apiContractsPrompt}` : ''}`
+  }
+
+  private buildGeneratePatchSystemPrompt(params: { skillDocs: string; skillCatalog?: string; apiContractsPrompt?: string }): string {
+    return `你是天地图 JS API v5.0 前端改版专家。当前任务是基于现有 HTML 满足新的需求变更。你的首选任务是对现有 HTML 做最小局部 patch，而不是重写整页。
+
+## 局部 patch 协议
+1. 可以先用 1-2 句中文说明将要怎么改；如果已经非常明确，也可以直接从 SEARCH/REPLACE blocks 开始。
+2. 然后只输出一个或多个 SEARCH/REPLACE blocks：
+------- SEARCH
+[精确查找片段]
+=======
+[替换后的新片段]
+++++++ REPLACE
+3. 每个 SEARCH 必须尽量短小，但又足够唯一。
+4. 严禁输出完整 HTML、整页重写块、额外 Markdown 标题、JSON 或解释性清单。
+5. 如果需要多处修改，按文件出现顺序输出多个 block。
+6. 允许删除代码：REPLACE 部分留空。
+7. 禁止空 SEARCH，禁止“把整个 <html>...</html> 全部放进 SEARCH”。
+8. 如果上一轮只是协议失败（没有输出出可解析的 patch blocks），这不代表要整页重写；你必须改为返回合规 patch blocks。
+
+## patch 设计要求
+- 只修改满足用户新需求所必需的最小代码片段。
+- 优先保持当前页面的布局、数据流、地图初始化和正常工作的交互不变。
+- 如果用户只是要求调整颜色、文案、图例、图标、控件、侧边栏样式或局部交互，不要顺手重写整个页面结构。
+- 如果某个修改会影响多处重复代码，优先只改用户这次明确提到的区域。
+- 如果一段旧代码可能命中多处，必须扩充上下文直到唯一，不要赌“默认第一个”。
+- 如果已有实现已经正确工作，只需要围绕用户这次的新要求做最小差异修改。
+
+## 可用能力目录
+${params.skillCatalog || '（未提供能力目录）'}
+
+## 参考文档
+${params.skillDocs}
+
+${params.apiContractsPrompt ? `\n## 天地图接口契约（高优先级）\n${params.apiContractsPrompt}` : ''}`
+  }
+
   private buildFixUserPrompt(params: {
     code: string
     error: string
@@ -779,6 +1351,144 @@ ${params.error}
     return prompt
   }
 
+  private buildFixPatchUserPrompt(params: {
+    code: string
+    error: string
+    fileData?: string
+    errorDiagnosis?: string
+  }): string {
+    let prompt = `## 当前代码
+\`\`\`html
+${params.code}
+\`\`\`
+
+## 错误信息
+${params.error}
+
+请先给出简短修复思路，然后只输出 SEARCH/REPLACE blocks，不要输出完整 HTML。`
+
+    if (params.errorDiagnosis) {
+      prompt += `\n\n## 错误诊断（高优先级）\n${params.errorDiagnosis}`
+    }
+
+    if (params.fileData) {
+      prompt += `\n\n## 用户数据文件的运行时契约与样例（高优先级）\n${params.fileData}`
+    }
+
+    return prompt
+  }
+
+  private buildFixPatchRetryUserPrompt(params: {
+    code: string
+    error: string
+    errorDiagnosis?: string
+    failedReports: PatchBlockReport[]
+    fileData?: string
+  }): string {
+    const hadProtocolFailure = params.failedReports.some((report) =>
+      report.message.includes('没有输出任何可解析的 SEARCH/REPLACE blocks'),
+    )
+    const failureReport = params.failedReports
+      .map((report) => [
+        `### 失败块 ${report.blockIndex + 1}`,
+        `- 原因: ${report.message}`,
+        `- SEARCH 片段:`,
+        report.searchPreview || '（空）',
+        report.nearbyContext ? `- 附近代码:\n${report.nearbyContext}` : '',
+      ].filter(Boolean).join('\n'))
+      .join('\n\n')
+
+    let prompt = `## 当前代码（已应用成功 patch 后的最新版本）
+\`\`\`html
+${params.code}
+\`\`\`
+
+## 仍待修复的错误
+${params.error}
+
+## 上一轮失败块报告
+${failureReport}
+
+请只重发这些失败块对应的 SEARCH/REPLACE blocks。
+- 不要重复已经成功的 patch
+- 不要输出完整 HTML
+- 每个 SEARCH 必须唯一命中`
+
+    if (hadProtocolFailure) {
+      prompt += `\n- 你上一轮没有输出任何可解析的 SEARCH/REPLACE blocks，这只是协议失败，不代表必须整页重写
+- 这一轮请不要输出前言、总结、Markdown 代码围栏或完整 HTML
+- 这一轮的第一行必须直接从 \`------- SEARCH\` 或 \`<<<<<<< SEARCH\` 开始`
+    }
+
+    if (params.errorDiagnosis) {
+      prompt += `\n\n## 错误诊断（高优先级）\n${params.errorDiagnosis}`
+    }
+
+    if (params.fileData) {
+      prompt += `\n\n## 用户数据文件的运行时契约与样例（高优先级）\n${params.fileData}`
+    }
+
+    return prompt
+  }
+
+  private buildGeneratePatchRetryUserPrompt(params: {
+    code: string
+    userInput: string
+    conversationHistory?: string
+    failedReports: PatchBlockReport[]
+    fileData?: string
+    toolContext?: string
+  }): string {
+    const hadProtocolFailure = params.failedReports.some((report) =>
+      report.message.includes('没有输出任何可解析的 SEARCH/REPLACE blocks'),
+    )
+    const failureReport = params.failedReports
+      .map((report) => [
+        `### 失败块 ${report.blockIndex + 1}`,
+        `- 原因: ${report.message}`,
+        `- SEARCH 片段:`,
+        report.searchPreview || '（空）',
+        report.nearbyContext ? `- 附近代码:\n${report.nearbyContext}` : '',
+      ].filter(Boolean).join('\n'))
+      .join('\n\n')
+
+    let prompt = `## 当前代码（已应用成功 patch 后的最新版本）
+\`\`\`html
+${params.code}
+\`\`\`
+
+## 当前需求
+${params.userInput}
+
+## 上一轮失败块报告
+${failureReport}
+
+请只重发这些失败块对应的 SEARCH/REPLACE blocks。
+- 不要重复已经成功的 patch
+- 不要输出完整 HTML
+- 每个 SEARCH 必须唯一命中`
+
+    if (params.conversationHistory) {
+      prompt = `## 对话历史\n${params.conversationHistory}\n\n${prompt}`
+    }
+
+    if (hadProtocolFailure) {
+      prompt += `\n- 你上一轮没有输出任何可解析的 SEARCH/REPLACE blocks，这只是协议失败，不代表必须整页重写
+- 这一轮请不要输出前言、总结、Markdown 代码围栏或完整 HTML
+- 这一轮的第一行必须直接从 \`------- SEARCH\` 或 \`<<<<<<< SEARCH\` 开始`
+    }
+
+    if (params.fileData) {
+      prompt += `\n\n## 用户数据文件的运行时契约与样例（高优先级）\n${params.fileData}`
+    }
+
+    if (params.toolContext) {
+      prompt += `\n\n${params.toolContext}`
+    }
+
+    return prompt
+  }
+
   private buildUserPrompt(params: {
     userInput: string
     conversationHistory?: string
@@ -802,6 +1512,38 @@ ${params.error}
 
     if (params.conversationHistory) {
       prompt = `## 对话历史\n${params.conversationHistory}\n\n## 当前请求\n${prompt}`
+    }
+
+    return prompt
+  }
+
+  private buildGeneratePatchUserPrompt(params: {
+    userInput: string
+    conversationHistory?: string
+    existingCode: string
+    fileData?: string
+    toolContext?: string
+  }): string {
+    let prompt = `## 当前需求
+${params.userInput}
+
+## 当前代码
+\`\`\`html
+${params.existingCode}
+\`\`\`
+
+请先给出简短修改思路，然后只输出 SEARCH/REPLACE blocks，不要输出完整 HTML。`
+
+    if (params.fileData) {
+      prompt += `\n\n## 用户数据文件的运行时契约与样例（高优先级）\n${params.fileData}`
+    }
+
+    if (params.toolContext) {
+      prompt += `\n\n${params.toolContext}`
+    }
+
+    if (params.conversationHistory) {
+      prompt = `## 对话历史\n${params.conversationHistory}\n\n${prompt}`
     }
 
     return prompt
@@ -1172,4 +1914,60 @@ function __buildTiandituSearchProxyUrl(baseUrl, payload) {
     }
     return `${code}\n${helper}`
   }
+}
+
+function normalizeComparableCode(code: string): string {
+  return String(code || '').replace(/\r\n/g, '\n').trim()
+}
+
+function findPatchMarkerIndex(content: string): number {
+  const indexes = [...content.matchAll(/(?:-{3,}|<{3,})\s*SEARCH/g)]
+    .map((match) => match.index ?? -1)
+    .filter((index) => index >= 0)
+  if (!indexes.length) return -1
+  return Math.min(...indexes)
+}
+
+function createProtocolFailureReport(blockIndex: number, rawContent: string): PatchBlockReport {
+  const normalized = String(rawContent || '').trim()
+  const compact = normalized.replace(/\s+/g, ' ').trim()
+  const preview = compact
+    ? compact.slice(0, 220)
+    : '（空响应）'
+
+  return {
+    blockIndex,
+    status: 'failed',
+    occurrences: 0,
+    message: '上一轮没有输出任何可解析的 SEARCH/REPLACE blocks，属于协议失败，请直接返回合规的局部 patch。',
+    searchPreview: '（无可解析 SEARCH）',
+    replacePreview: '（无可解析 REPLACE）',
+    nearbyContext: normalized
+      ? normalized.slice(0, 600)
+      : '模型未返回可用 patch 内容。',
+  }
+}
+
+function summarizePatchReports(reports: PatchBlockReport[]): string {
+  const appliedCount = reports.filter((report) => report.status === 'applied').length
+  const failedCount = reports.filter((report) => report.status === 'failed').length
+  if (appliedCount > 0 && failedCount === 0) {
+    return `本次修复共应用 ${appliedCount} 处局部改动。`
+  }
+  if (appliedCount > 0) {
+    return `本次修复已应用 ${appliedCount} 处局部改动，仍有 ${failedCount} 处改动命中过于模糊。`
+  }
+  return '本轮未能稳定应用局部 patch。'
+}
+
+function summarizeUpdatePatchReports(reports: PatchBlockReport[]): string {
+  const appliedCount = reports.filter((report) => report.status === 'applied').length
+  const failedCount = reports.filter((report) => report.status === 'failed').length
+  if (appliedCount > 0 && failedCount === 0) {
+    return `已根据新需求更新现有代码，以下高亮显示本次改动。`
+  }
+  if (appliedCount > 0) {
+    return `本次更新已应用 ${appliedCount} 处局部改动，仍有 ${failedCount} 处需要继续收敛。`
+  }
+  return '本轮未能稳定应用局部 patch。'
 }

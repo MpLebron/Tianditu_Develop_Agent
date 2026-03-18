@@ -819,6 +819,21 @@ router.post('/stream', upload.single('file'), async (req, res) => {
           await runDossierStore.attachHtmlArtifact(dossierRunId, 'generated-code', String(decoratedChunk.content || ''), {
             codeChars: String(decoratedChunk.content || '').length,
           })
+        } else if (decoratedChunk.type === 'code_diff' && decoratedChunk.data) {
+          const payload = decoratedChunk.data as Record<string, unknown>
+          await runDossierStore.attachJsonArtifact(dossierRunId, 'generated-diff-meta', {
+            fallbackMode: payload.fallbackMode,
+            summary: payload.summary,
+            blockReports: payload.blockReports,
+            patchBlocks: payload.patchBlocks,
+            patchText: payload.patchText,
+          })
+          if (typeof payload.unifiedDiff === 'string' && payload.unifiedDiff.trim()) {
+            await runDossierStore.attachTextArtifact(dossierRunId, 'generated-diff', payload.unifiedDiff, {
+              fallbackMode: payload.fallbackMode,
+              summary: payload.summary,
+            })
+          }
         } else if (decoratedChunk.type === 'error' && decoratedChunk.content) {
           await runDossierStore.appendError(dossierRunId, {
             source: 'server',
@@ -942,6 +957,7 @@ router.post('/fix', async (req, res, next) => {
         code: fixedCode,
         explanation: result.explanation,
         fixed: result.fixed,
+        diff: result.diff,
       },
     })
   } catch (err) {
@@ -1069,6 +1085,21 @@ router.post('/fix/stream', async (req, res) => {
             codeChars: String(decoratedChunk.content || '').length,
             source: source === 'visual' ? 'visual' : 'runtime',
           })
+        } else if (decoratedChunk.type === 'code_diff' && decoratedChunk.data) {
+          const payload = decoratedChunk.data as Record<string, unknown>
+          await runDossierStore.attachJsonArtifact(dossierRunId, 'fix-patch', {
+            fallbackMode: payload.fallbackMode,
+            summary: payload.summary,
+            blockReports: payload.blockReports,
+            patchBlocks: payload.patchBlocks,
+            patchText: payload.patchText,
+          })
+          if (typeof payload.unifiedDiff === 'string' && payload.unifiedDiff.trim()) {
+            await runDossierStore.attachTextArtifact(dossierRunId, 'fix-diff', payload.unifiedDiff, {
+              fallbackMode: payload.fallbackMode,
+              summary: payload.summary,
+            })
+          }
         } else if (decoratedChunk.type === 'error' && decoratedChunk.content) {
           await runDossierStore.appendError(dossierRunId, {
             source: 'server',
