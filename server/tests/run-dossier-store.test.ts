@@ -26,7 +26,6 @@ describe('RunDossierStore', () => {
       entrySource: 'sample',
       sampleId: 'long-march',
       userPrompt: '生成长征专题图',
-      modelProvider: 'qwen',
       modelName: 'qwen3.5-plus',
       agentMode: 'agent_first_full',
       verifierEnabled: true,

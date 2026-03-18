@@ -44,11 +44,11 @@ NODE_ENV=production
 TIANDITU_TOKEN=your_tianditu_token
 LLM_API_KEY=your_aihubmix_key
 LLM_BASE_URL=https://aihubmix.com/v1
-LLM_PROVIDER=qwen
+# 单模型默认走阿里云百炼 Qwen3.5 Plus
 LLM_MODEL=qwen3.5-plus
-# Qwen 走阿里云百炼时建议配置（provider=qwen 时优先使用）
 DASHSCOPE_API_KEY=your_dashscope_api_key
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_RESPONSES_BASE_URL=https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1
 MAX_FILE_SIZE=52428800
 UPLOAD_DIR=/app/uploads
 SHARE_DIR=/app/share

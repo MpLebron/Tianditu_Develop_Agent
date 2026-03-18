@@ -1,6 +1,5 @@
 import { createLLM } from '../llm/createLLM.js'
 import { config } from '../config.js'
-import type { LlmSelection } from '../provider/index.js'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 
 const STREAM_TEXT_MIN_CHARS = 6
@@ -30,7 +29,7 @@ export class CodeGenerator {
     conversationHistory?: string
     existingCode?: string
     fileData?: string
-    llmSelection?: LlmSelection
+    toolContext?: string
   }): Promise<{ code: string; explanation: string }> {
     const systemPrompt = this.buildSystemPrompt({
       skillDocs: params.skillDocs,
@@ -39,7 +38,7 @@ export class CodeGenerator {
     })
     const userPrompt = this.buildUserPrompt(params)
 
-    const llm = createLLM({ temperature: 0.3, llmSelection: params.llmSelection })
+    const llm = createLLM({ temperature: 0.3 })
     const response = await llm.invoke([
       new SystemMessage(systemPrompt),
       new HumanMessage(userPrompt),
@@ -57,7 +56,6 @@ export class CodeGenerator {
       const retried = await this.retryCompleteHtml({
         systemPrompt,
         userPrompt,
-        llmSelection: params.llmSelection,
       })
       if (retried.code) {
         return {
@@ -80,7 +78,6 @@ export class CodeGenerator {
     apiContractsPrompt?: string
     fileData?: string
     errorDiagnosis?: string
-    llmSelection?: LlmSelection
   }): Promise<{ code: string; explanation: string }> {
     const systemPrompt = this.buildFixSystemPrompt({
       skillDocs: params.skillDocs,
@@ -88,7 +85,7 @@ export class CodeGenerator {
     })
     const userPrompt = this.buildFixUserPrompt(params)
 
-    const llm = createLLM({ temperature: 0.3, llmSelection: params.llmSelection })
+    const llm = createLLM({ temperature: 0.3 })
     const response = await llm.invoke([
       new SystemMessage(systemPrompt),
       new HumanMessage(userPrompt),
@@ -106,7 +103,6 @@ export class CodeGenerator {
       const retried = await this.retryCompleteHtml({
         systemPrompt,
         userPrompt,
-        llmSelection: params.llmSelection,
       })
       if (retried.code) {
         return {
@@ -129,7 +125,6 @@ export class CodeGenerator {
     apiContractsPrompt?: string
     fileData?: string
     errorDiagnosis?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<{ type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }> {
     const systemPrompt = this.buildFixSystemPrompt({
       skillDocs: params.skillDocs,
@@ -141,7 +136,6 @@ export class CodeGenerator {
       const streamed = this.streamModelResponse({
         systemPrompt,
         userPrompt,
-        llmSelection: params.llmSelection,
       })
       let streamedFinalCode = ''
 
@@ -183,7 +177,6 @@ export class CodeGenerator {
           userPrompt,
           existingCode: streamed.codeBuffer,
           codeStartEmitted: streamed.codeStartEmitted,
-          llmSelection: params.llmSelection,
         })
         for await (const recoveryChunk of retried.chunks) {
           yield recoveryChunk
@@ -200,7 +193,6 @@ export class CodeGenerator {
         const fallback = await this.retryCompleteHtml({
           systemPrompt,
           userPrompt,
-          llmSelection: params.llmSelection,
         })
         if (fallback.code) {
           finalCode = fallback.code
@@ -250,7 +242,7 @@ export class CodeGenerator {
     conversationHistory?: string
     existingCode?: string
     fileData?: string
-    llmSelection?: LlmSelection
+    toolContext?: string
   }): AsyncGenerator<{ type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }> {
     const systemPrompt = this.buildSystemPrompt({
       skillDocs: params.skillDocs,
@@ -263,7 +255,6 @@ export class CodeGenerator {
       const streamed = this.streamModelResponse({
         systemPrompt,
         userPrompt,
-        llmSelection: params.llmSelection,
       })
       let streamedFinalCode = ''
 
@@ -307,7 +298,6 @@ export class CodeGenerator {
           userPrompt,
           existingCode: streamed.codeBuffer,
           codeStartEmitted: streamed.codeStartEmitted,
-          llmSelection: params.llmSelection,
         })
         for await (const recoveryChunk of retried.chunks) {
           yield recoveryChunk
@@ -324,7 +314,6 @@ export class CodeGenerator {
         const fallback = await this.retryCompleteHtml({
           systemPrompt,
           userPrompt,
-          llmSelection: params.llmSelection,
         })
         if (fallback.code) {
           finalCode = fallback.code
@@ -361,7 +350,6 @@ export class CodeGenerator {
   private streamModelResponse(params: {
     systemPrompt: string
     userPrompt: string
-    llmSelection?: LlmSelection
   }): {
     chunks: AsyncGenerator<StreamOutputChunk>
     fullContent: string
@@ -375,7 +363,7 @@ export class CodeGenerator {
     let finalCode = ''
 
     const chunks = (async function* (self: CodeGenerator): AsyncGenerator<StreamOutputChunk> {
-      const llm = createLLM({ temperature: 0.3, llmSelection: params.llmSelection })
+      const llm = createLLM({ temperature: 0.3 })
       const stream = await llm.stream([
         new SystemMessage(params.systemPrompt),
         new HumanMessage(params.userPrompt),
@@ -597,6 +585,8 @@ export class CodeGenerator {
 1. **生成地图代码**：当用户需要创建/修改地图、可视化数据、搜索地点、规划路线时，生成可运行的 HTML
 2. **回答技术问题**：当用户询问 API 用法、概念解释等纯知识性问题时，用文字回答
 3. **分析数据文件**：当用户上传文件并询问其内容时，基于文件摘要回答
+4. **利用外部工具结果回答**：当系统已提供搜索/抓取结果时，优先基于这些结果回答，不要忽略
+5. **总结工程文件修改**：当系统已执行工作区片段编辑时，用中文总结改动与影响，不要输出 HTML，除非用户明确要求生成地图页面
 
 ## 自主判断规则
 - 如果用户的请求需要在地图上展示任何内容（标注、图层、路线、搜索结果、数据可视化等），生成 HTML 代码
@@ -604,6 +594,8 @@ export class CodeGenerator {
 - 如果用户询问的是纯知识性问题（如"什么是 GeoJSON"、"这个 API 怎么用"），用文字回答，不生成代码
 - 如果用户上传了文件并问"这个数据里面是什么"、"有多少条记录"等分析性问题，基于文件摘要用文字回答
 - 如果有现有代码且用户的后续请求含有动作词（如"帮我"、"添加"、"在地图上"），生成修改后的代码
+- 如果输入中包含“外部工具结果（高优先级）”，必须优先吸收这些结果再回答
+- 如果外部工具结果显示已经修改了工作区文件，默认输出文字总结，不生成 HTML，除非用户明确要求“返回页面代码/地图代码”
 
 ## 代码生成规则（仅当你判断需要生成代码时）
 1. 命名空间：只使用 TMapGL
@@ -792,6 +784,7 @@ ${params.error}
     conversationHistory?: string
     existingCode?: string
     fileData?: string
+    toolContext?: string
   }): string {
     let prompt = params.userInput
 
@@ -801,6 +794,10 @@ ${params.error}
 
     if (params.fileData) {
       prompt += `\n\n## 用户数据文件的运行时契约与样例（高优先级）\n${params.fileData}`
+    }
+
+    if (params.toolContext) {
+      prompt += `\n\n${params.toolContext}`
     }
 
     if (params.conversationHistory) {
@@ -894,7 +891,6 @@ ${params.error}
   private async retryCompleteHtml(params: {
     systemPrompt: string
     userPrompt: string
-    llmSelection?: LlmSelection
   }): Promise<{ code: string; explanation: string }> {
     const maxRounds = Math.max(0, config.llm.recoveryRounds || 0)
     if (maxRounds === 0) return { code: '', explanation: '' }
@@ -902,7 +898,7 @@ ${params.error}
     let lastExplanation = ''
 
     for (let i = 0; i < maxRounds; i += 1) {
-      const llm = createLLM({ temperature: 0.2, llmSelection: params.llmSelection })
+      const llm = createLLM({ temperature: 0.2 })
       const retryPrompt = [
         params.userPrompt,
         '',
@@ -940,7 +936,6 @@ ${params.error}
     userPrompt: string
     existingCode: string
     codeStartEmitted: boolean
-    llmSelection?: LlmSelection
   }): {
     chunks: AsyncGenerator<StreamOutputChunk>
     code: string
@@ -954,7 +949,7 @@ ${params.error}
       if (maxRounds === 0) return
 
       for (let i = 0; i < maxRounds; i += 1) {
-        const llm = createLLM({ temperature: 0.2, llmSelection: params.llmSelection })
+        const llm = createLLM({ temperature: 0.2 })
         const retryPrompt = [
           params.userPrompt,
           '',

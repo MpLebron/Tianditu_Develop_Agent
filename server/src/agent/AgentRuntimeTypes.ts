@@ -2,6 +2,7 @@ import type { SkillDomainId } from './SkillStore.js'
 
 export type AgentRuntimeMode = 'legacy' | 'shadow' | 'agent_first_generate' | 'agent_first_full'
 export type DecisionSource = 'llm' | 'validator' | 'fallback' | 'shadow' | 'analyzer'
+export type AgentBuiltinToolName = 'web_search' | 'web_fetch' | 'snippet_edit'
 
 export interface DomainDecision {
   packageIds: string[]
@@ -68,4 +69,41 @@ export interface PlanningPolicyCard {
   appliesTo: Array<'generate' | 'fix'>
   domains?: SkillDomainId[]
   guidance: string[]
+}
+
+export interface AgentToolPlan {
+  action: 'skip' | 'run_tools'
+  replyMode: 'continue' | 'tool_only'
+  reason: string
+  confidence: number
+  steps: AgentToolPlanStep[]
+  raw: string
+  decisionSource: DecisionSource
+  parseFailed?: boolean
+  fallbackReason?: string
+}
+
+export type AgentToolPlanStep = WebSearchToolStep | WebFetchToolStep | SnippetEditToolStep
+
+export interface WebSearchToolStep {
+  tool: 'web_search'
+  reason: string
+  query: string
+  maxResults?: number
+}
+
+export interface WebFetchToolStep {
+  tool: 'web_fetch'
+  reason: string
+  url: string
+}
+
+export interface SnippetEditToolStep {
+  tool: 'snippet_edit'
+  reason: string
+  filePath: string
+  oldString: string
+  newString: string
+  expectedOccurrences?: number
+  occurrenceIndex?: number
 }

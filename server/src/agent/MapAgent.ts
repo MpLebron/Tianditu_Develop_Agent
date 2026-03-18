@@ -8,7 +8,6 @@ import { analyzeGeneratedCode, formatGuardIssuesForPrompt, hasBlockingGuardIssue
 import { buildApiContractPrompt } from './TiandituApiContractAdvisor.js'
 import { AgentRuntime, type AgentRuntimeChunk } from './AgentRuntime.js'
 import { FileIntelligenceService } from './FileIntelligenceService.js'
-import type { LlmSelection } from '../provider/index.js'
 import { config } from '../config.js'
 
 // ========== 状态定义 ==========
@@ -111,7 +110,6 @@ export class MapAgent {
     fileData?: string
     conversationHistory?: string
     existingCode?: string
-    llmSelection?: LlmSelection
   }): Promise<{ code: string | null; response: string; error: string | null }> {
     await this.init()
     // 非流式接口复用流式主链路，避免与 invokeStream 的策略分叉（skill loop / doc loading / 生成逻辑不一致）
@@ -148,7 +146,6 @@ export class MapAgent {
     fileData?: string
     conversationHistory?: string
     existingCode?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<AgentStreamChunk> {
     await this.init()
 
@@ -169,7 +166,6 @@ export class MapAgent {
     fileData?: string
     conversationHistory?: string
     existingCode?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<AgentStreamChunk> {
     await this.init()
 
@@ -218,7 +214,6 @@ export class MapAgent {
           conversationHistory: params.conversationHistory,
           existingCode: params.existingCode,
           fileData: params.fileData,
-          llmSelection: params.llmSelection,
         })
         loopDecision = {
           action: d.action,
@@ -342,7 +337,6 @@ export class MapAgent {
           conversationHistory: params.conversationHistory,
           existingCode: params.existingCode,
           fileData: params.fileData,
-          llmSelection: params.llmSelection,
         })
         const fallbackSkills = decision.selectedSkills.filter((s) => !loadedSkills.includes(s))
         for (const skillName of fallbackSkills) {
@@ -422,7 +416,6 @@ export class MapAgent {
         conversationHistory: params.conversationHistory,
         existingCode: params.existingCode,
         fileData: params.fileData,
-        llmSelection: params.llmSelection,
       })) {
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
@@ -515,7 +508,6 @@ export class MapAgent {
               '  - 优先改错接口路径/参数名/返回解析路径。',
               '  - 修复后必须保留 loading/ready/empty/error 状态收敛。',
             ].join('\n'),
-            llmSelection: params.llmSelection,
           })) {
             if (fixChunk.type === 'error') repairSawError = true
             if (fixChunk.type === 'code') repairedCode = fixChunk.content
@@ -560,7 +552,6 @@ export class MapAgent {
     error: string
     userInput: string
     fileData?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<AgentStreamChunk> {
     await this.init()
 
@@ -584,7 +575,6 @@ export class MapAgent {
     error: string
     userInput: string
     fileData?: string
-    llmSelection?: LlmSelection
   }) {
     await this.init()
 
@@ -627,7 +617,6 @@ export class MapAgent {
     error: string
     userInput: string
     fileData?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<AgentStreamChunk> {
     await this.init()
 
@@ -696,7 +685,6 @@ export class MapAgent {
           runtimeError: params.error,
           fileData: params.fileData,
           mode: 'fix',
-          llmSelection: params.llmSelection,
         })
         loopDecision = {
           action: d.action,
@@ -809,7 +797,6 @@ export class MapAgent {
           userInput: `${plannerInput}\n\n运行错误：${params.error}`,
           existingCode: params.code,
           fileData: params.fileData,
-          llmSelection: params.llmSelection,
         })
         const fallbackSkills = decision.selectedSkills.filter((s) => !loadedSkills.includes(s))
         for (const skillName of fallbackSkills) {
@@ -919,7 +906,6 @@ export class MapAgent {
         apiContractsPrompt,
         fileData: params.fileData,
         errorDiagnosis: diagnosisPrompt,
-        llmSelection: params.llmSelection,
       })) {
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
@@ -1009,7 +995,6 @@ export class MapAgent {
             apiContractsPrompt,
             fileData: params.fileData,
             errorDiagnosis: diagnosisPrompt,
-            llmSelection: params.llmSelection,
           })) {
             if (fixChunk.type === 'error') repairSawError = true
             if (fixChunk.type === 'code') repairedCode = fixChunk.content
@@ -1128,7 +1113,6 @@ export class MapAgent {
     conversationHistory?: string
     existingCode?: string
     fileData?: string
-        llmSelection?: LlmSelection
   }): Promise<{ selectedSkills: string[]; source: 'llm' | 'keyword_fallback'; reason: string }> {
     try {
       const dynamicMaxSkills = Math.max(this.skillStore.getSkillNames().length, 1)
@@ -1137,7 +1121,6 @@ export class MapAgent {
         conversationHistory: params.conversationHistory,
         existingCode: params.existingCode,
         fileData: params.fileData,
-        llmSelection: params.llmSelection,
         maxSkills: dynamicMaxSkills,
       })
       return {

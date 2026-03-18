@@ -13,6 +13,11 @@ export interface ThoughtChainItem {
   selectedContracts?: string[]
   fallbackReason?: string
   vetoApplied?: boolean
+  uiLabel?: string
+  uiSummary?: string
+  uiGroup?: string
+  uiGroupLabel?: string
+  uiVisibility?: 'activity' | 'grouped' | 'debug'
 }
 
 export interface Message {

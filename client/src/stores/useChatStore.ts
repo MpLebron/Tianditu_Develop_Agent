@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { Message, ThoughtChainItem } from '../types/chat'
 import { useMapStore } from './useMapStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
-import { useModelStore } from './useModelStore'
 import { createId } from '../utils/createId'
 import { extractFirstCompleteHtmlDocument } from '../utils/extractFirstCompleteHtmlDocument'
 import { injectTiandituTokenPlaceholders } from '../utils/injectTiandituTokenPlaceholders'
@@ -50,7 +49,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const history = buildHistory(get().messages)
     const activeFileContext = get().activeFileContext
     const existingCode = useMapStore.getState().currentCode || undefined
-    const modelSelection = useModelStore.getState().getRequestSelection()
     useMapStore.getState().setCurrentRunId(null)
 
     set((s) => ({ messages: [...s.messages, userMsg], loading: true, error: null }))
@@ -107,6 +105,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               selectedContracts: patch.selectedContracts,
               fallbackReason: patch.fallbackReason,
               vetoApplied: patch.vetoApplied,
+              uiLabel: patch.uiLabel,
+              uiSummary: patch.uiSummary,
+              uiGroup: patch.uiGroup,
+              uiGroupLabel: patch.uiGroupLabel,
+              uiVisibility: patch.uiVisibility,
             })
           } else {
             chain[idx] = { ...chain[idx], ...patch }
@@ -133,6 +136,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             args: chunk.args,
             status: 'running',
             startedAt: typeof chunk.startedAtMs === 'number' ? chunk.startedAtMs : Date.now(),
+            uiLabel: typeof chunk.uiLabel === 'string' ? chunk.uiLabel : undefined,
+            uiSummary: typeof chunk.uiSummary === 'string' ? chunk.uiSummary : undefined,
+            uiGroup: typeof chunk.uiGroup === 'string' ? chunk.uiGroup : undefined,
+            uiGroupLabel: typeof chunk.uiGroupLabel === 'string' ? chunk.uiGroupLabel : undefined,
+            uiVisibility: chunk.uiVisibility === 'activity' || chunk.uiVisibility === 'grouped' || chunk.uiVisibility === 'debug'
+              ? chunk.uiVisibility
+              : undefined,
           })
           return
         }
@@ -151,6 +161,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             selectedContracts: Array.isArray(chunk.selectedContracts) ? chunk.selectedContracts : undefined,
             fallbackReason: typeof chunk.fallbackReason === 'string' ? chunk.fallbackReason : undefined,
             vetoApplied: chunk.vetoApplied === true,
+            uiLabel: typeof chunk.uiLabel === 'string' ? chunk.uiLabel : undefined,
+            uiSummary: typeof chunk.uiSummary === 'string' ? chunk.uiSummary : undefined,
+            uiGroup: typeof chunk.uiGroup === 'string' ? chunk.uiGroup : undefined,
+            uiGroupLabel: typeof chunk.uiGroupLabel === 'string' ? chunk.uiGroupLabel : undefined,
+            uiVisibility: chunk.uiVisibility === 'activity' || chunk.uiVisibility === 'grouped' || chunk.uiVisibility === 'debug'
+              ? chunk.uiVisibility
+              : undefined,
           })
           return
         }
@@ -324,9 +341,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       } else if (!file && activeFileContext) {
         formData.append('fileContext', activeFileContext)
       }
-      if (modelSelection?.provider) formData.append('provider', modelSelection.provider)
-      if (modelSelection?.model) formData.append('model', modelSelection.model)
-
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         body: formData,
@@ -399,7 +413,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (fixing || !currentCode || !effectiveError || currentRetryCount >= maxRetries) return
 
     const attempt = currentRetryCount + 1
-    const modelSelection = useModelStore.getState().getRequestSelection()
     const parentRunId = useMapStore.getState().currentRunId || undefined
     const assistantId = createId()
     let assistantCreated = false
@@ -463,6 +476,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               selectedContracts: patch.selectedContracts,
               fallbackReason: patch.fallbackReason,
               vetoApplied: patch.vetoApplied,
+              uiLabel: patch.uiLabel,
+              uiSummary: patch.uiSummary,
+              uiGroup: patch.uiGroup,
+              uiGroupLabel: patch.uiGroupLabel,
+              uiVisibility: patch.uiVisibility,
             })
           } else {
             chain[idx] = { ...chain[idx], ...patch }
@@ -510,8 +528,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           fileContext: get().activeFileContext || undefined,
           parentRunId,
           source,
-          provider: modelSelection?.provider,
-          model: modelSelection?.model,
         }),
       })
 
@@ -538,6 +554,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               args: chunk.args,
               status: 'running',
               startedAt: typeof chunk.startedAtMs === 'number' ? chunk.startedAtMs : Date.now(),
+              uiLabel: typeof chunk.uiLabel === 'string' ? chunk.uiLabel : undefined,
+              uiSummary: typeof chunk.uiSummary === 'string' ? chunk.uiSummary : undefined,
+              uiGroup: typeof chunk.uiGroup === 'string' ? chunk.uiGroup : undefined,
+              uiGroupLabel: typeof chunk.uiGroupLabel === 'string' ? chunk.uiGroupLabel : undefined,
+              uiVisibility: chunk.uiVisibility === 'activity' || chunk.uiVisibility === 'grouped' || chunk.uiVisibility === 'debug'
+                ? chunk.uiVisibility
+                : undefined,
             })
             return
           }
@@ -564,6 +587,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               selectedContracts: Array.isArray(chunk.selectedContracts) ? chunk.selectedContracts : undefined,
               fallbackReason: typeof chunk.fallbackReason === 'string' ? chunk.fallbackReason : undefined,
               vetoApplied: chunk.vetoApplied === true,
+              uiLabel: typeof chunk.uiLabel === 'string' ? chunk.uiLabel : undefined,
+              uiSummary: typeof chunk.uiSummary === 'string' ? chunk.uiSummary : undefined,
+              uiGroup: typeof chunk.uiGroup === 'string' ? chunk.uiGroup : undefined,
+              uiGroupLabel: typeof chunk.uiGroupLabel === 'string' ? chunk.uiGroupLabel : undefined,
+              uiVisibility: chunk.uiVisibility === 'activity' || chunk.uiVisibility === 'grouped' || chunk.uiVisibility === 'debug'
+                ? chunk.uiVisibility
+                : undefined,
             })
             return
           }

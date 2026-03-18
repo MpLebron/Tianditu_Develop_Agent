@@ -63,6 +63,5 @@ app.listen(config.port, '0.0.0.0', () => {
   console.log(`[Server] 天地图智能开发平台后端启动`)
   console.log(`[Server] http://localhost:${config.port}`)
   console.log(`[Server] 环境: ${config.nodeEnv}`)
-  console.log(`[Server] 模型提供商: ${config.llm.provider}`)
   console.log(`[Server] 模型: ${config.llm.model}`)
 })

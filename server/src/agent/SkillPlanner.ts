@@ -1,6 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { createLLM } from '../llm/createLLM.js'
-import type { LlmSelection } from '../provider/index.js'
 import type { SkillStore } from './SkillStore.js'
 
 export interface SkillPlannerDecision {
@@ -32,7 +31,6 @@ export class SkillPlanner {
     existingCode?: string
     fileData?: string
     maxSkills?: number
-    llmSelection?: LlmSelection
   }): Promise<SkillPlannerDecision> {
     const totalSkills = this.skillStore.getSkillNames().length
     const requestedMax = params.maxSkills ?? totalSkills
@@ -40,7 +38,7 @@ export class SkillPlanner {
     const systemPrompt = this.buildSystemPrompt({ maxSkills })
     const userPrompt = this.buildUserPrompt(params)
 
-    const llm = createLLM({ temperature: 0, maxTokens: 800, llmSelection: params.llmSelection })
+    const llm = createLLM({ temperature: 0, maxTokens: 800 })
     const response = await llm.invoke([
       new SystemMessage(systemPrompt),
       new HumanMessage(userPrompt),
@@ -76,7 +74,6 @@ export class SkillPlanner {
     fileData?: string
     runtimeError?: string
     mode?: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): Promise<SkillToolLoopDecision> {
     const fixSteered = this.trySteerFixErrorSelection(params)
     if (fixSteered) return fixSteered
@@ -142,7 +139,7 @@ export class SkillPlanner {
       this.skillStore.getPlannerCatalog(),
     ].filter(Boolean).join('\n')
 
-    const llm = createLLM({ temperature: 0, maxTokens: 800, llmSelection: params.llmSelection })
+    const llm = createLLM({ temperature: 0, maxTokens: 800 })
     const response = await llm.invoke([
       new SystemMessage(systemPrompt),
       new HumanMessage(userPrompt),
@@ -270,7 +267,6 @@ export class SkillPlanner {
     fileData?: string
     runtimeError?: string
     mode?: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): SkillToolLoopDecision | null {
     const text = [
       params.userInput || '',
@@ -346,7 +342,6 @@ export class SkillPlanner {
     fileData?: string
     runtimeError?: string
     mode?: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): SkillToolLoopDecision | null {
     if (params.mode === 'fix') return null
 
@@ -446,7 +441,6 @@ export class SkillPlanner {
     fileData?: string
     runtimeError?: string
     mode?: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): SkillToolLoopDecision | null {
     if (params.mode === 'fix') return null
 
@@ -513,7 +507,6 @@ export class SkillPlanner {
     fileData?: string
     runtimeError?: string
     mode?: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): SkillToolLoopDecision | null {
     if (params.mode !== 'fix') return null
 
@@ -626,7 +619,6 @@ export class SkillPlanner {
     fileData?: string
     runtimeError?: string
     mode?: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): string[] {
     const hints: string[] = []
     const text = [

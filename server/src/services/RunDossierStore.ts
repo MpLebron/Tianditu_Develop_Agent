@@ -53,7 +53,6 @@ export interface RunRequestSnapshot {
   userPrompt: string
   conversationHistory?: string
   existingCodeChars?: number
-  modelProvider?: string
   modelName?: string
   entrySource: RunEntrySource
   fileName?: string
@@ -72,7 +71,6 @@ export interface RunDossierSummary {
   entrySource: RunEntrySource
   sampleId?: string
   userPrompt: string
-  modelProvider?: string
   modelName?: string
   agentMode?: string
   verifierEnabled: boolean
@@ -114,7 +112,6 @@ export interface CreateRunInput {
   userPrompt: string
   conversationHistory?: string
   existingCodeChars?: number
-  modelProvider?: string
   modelName?: string
   agentMode?: string
   verifierEnabled: boolean
@@ -247,7 +244,6 @@ export class RunDossierStore {
         entrySource: input.entrySource,
         sampleId: input.sampleId,
         userPrompt: clampText(input.userPrompt, 1000),
-        modelProvider: clampText(input.modelProvider, 80) || undefined,
         modelName: clampText(input.modelName, 120) || undefined,
         agentMode: clampText(input.agentMode, 80) || undefined,
         verifierEnabled: input.verifierEnabled === true,
@@ -269,7 +265,6 @@ export class RunDossierStore {
         userPrompt: clampText(input.userPrompt, 8000),
         conversationHistory: input.conversationHistory ? clampText(input.conversationHistory, 8000) : undefined,
         existingCodeChars: input.existingCodeChars,
-        modelProvider: clampText(input.modelProvider, 80) || undefined,
         modelName: clampText(input.modelName, 120) || undefined,
         entrySource: input.entrySource,
         fileName: input.fileName ? clampText(input.fileName, 180) : undefined,

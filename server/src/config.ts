@@ -72,6 +72,21 @@ function resolveRunDossierDir(): string {
   return candidates[0] || resolve(import.meta.dirname, '../data/run-dossiers')
 }
 
+function resolveAgentWorkspaceRoot(): string {
+  const candidates = [
+    process.env.AGENT_WORKSPACE_ROOT,
+    // 本地开发：server/src -> 项目根目录
+    resolve(import.meta.dirname, '../..'),
+    process.cwd(),
+  ].filter((p): p is string => Boolean(p && p.trim()))
+
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+
+  return candidates[0] || resolve(import.meta.dirname, '../..')
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000'),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -79,13 +94,10 @@ export const config = {
   tiandituToken: process.env.TIANDITU_TOKEN || '',
 
   llm: {
-    apiKey: process.env.LLM_API_KEY || '',
-    baseUrl: process.env.LLM_BASE_URL || 'https://aihubmix.com/v1',
-    provider: process.env.LLM_PROVIDER || 'qwen',
+    apiKey: process.env.DASHSCOPE_API_KEY || process.env.LLM_API_KEY || '',
+    baseUrl: process.env.DASHSCOPE_BASE_URL || process.env.LLM_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    responsesBaseUrl: process.env.DASHSCOPE_RESPONSES_BASE_URL || 'https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1',
     model: process.env.LLM_MODEL || 'qwen3.5-plus',
-    // Qwen 专用链路（阿里云百炼 OpenAI 兼容接口）
-    qwenApiKey: process.env.DASHSCOPE_API_KEY || '',
-    qwenBaseUrl: process.env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     maxOutputTokens: parseInt(process.env.LLM_MAX_OUTPUT_TOKENS || '8192'),
     requestTimeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '240000'),
     maxRetries: parseInt(process.env.LLM_MAX_RETRIES || '2'),
@@ -132,7 +144,7 @@ export const config = {
     viewportWidth: parseInt(process.env.VISUAL_INSPECTION_VIEWPORT_WIDTH || '1440'),
     viewportHeight: parseInt(process.env.VISUAL_INSPECTION_VIEWPORT_HEIGHT || '900'),
     maxCodeChars: parseInt(process.env.VISUAL_INSPECTION_MAX_CODE_CHARS || '400000'),
-    llmTimeoutMs: parseInt(process.env.VISUAL_INSPECTION_LLM_TIMEOUT_MS || '20000'),
+    llmTimeoutMs: parseInt(process.env.VISUAL_INSPECTION_LLM_TIMEOUT_MS || '45000'),
     maxConcurrentRenders: parseInt(process.env.VISUAL_INSPECTION_MAX_CONCURRENT || '2'),
   },
 
@@ -143,5 +155,25 @@ export const config = {
     maxVerifyRepairRounds: parseInt(process.env.AGENT_MAX_VERIFY_REPAIR_ROUNDS || '1'),
     enableVerifier: process.env.AGENT_ENABLE_VERIFIER === 'true',
     enableShadowEvents: process.env.AGENT_RUNTIME_SHADOW_EVENTS !== 'false',
+  },
+
+  agentTools: {
+    enabled: process.env.AGENT_TOOLS_ENABLED !== 'false',
+    workspaceRoot: resolveAgentWorkspaceRoot(),
+    maxPlanSteps: parseInt(process.env.AGENT_TOOL_MAX_STEPS || '3'),
+    search: {
+      provider: process.env.AGENT_WEB_SEARCH_PROVIDER || 'duckduckgo',
+      maxResults: parseInt(process.env.AGENT_WEB_SEARCH_MAX_RESULTS || '5'),
+      timeoutMs: parseInt(process.env.AGENT_WEB_SEARCH_TIMEOUT_MS || '15000'),
+      serperApiKey: process.env.SERPER_API_KEY || '',
+    },
+    fetch: {
+      timeoutMs: parseInt(process.env.AGENT_FETCH_TIMEOUT_MS || '15000'),
+      maxBytes: parseInt(process.env.AGENT_FETCH_MAX_BYTES || '524288'),
+    },
+    edit: {
+      contextLines: parseInt(process.env.AGENT_EDIT_CONTEXT_LINES || '2'),
+      maxSnippetChars: parseInt(process.env.AGENT_EDIT_MAX_SNIPPET_CHARS || '2400'),
+    },
   },
 }

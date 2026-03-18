@@ -10,6 +10,11 @@ interface ApiFailure {
   error: string
 }
 
+interface ShareSuggestStreamEvent extends ShareSuggestResult {
+  type: 'suggestion_delta'
+  done?: boolean
+}
+
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init)
   const json = (await response.json()) as ApiSuccess<T> | ApiFailure
@@ -104,6 +109,61 @@ export const shareApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
+  },
+
+  async suggestStream(
+    payload: { code: string; hint?: string; prompt?: string },
+    options: {
+      signal?: AbortSignal
+      onDelta: (event: ShareSuggestStreamEvent) => void
+    },
+  ) {
+    const response = await fetch('/api/share/maps/suggest/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: options.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('无法获取响应流')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    const processLine = (line: string) => {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) return
+      const payloadText = trimmed.slice(5).trim()
+      if (!payloadText || payloadText === '[DONE]') return
+
+      const event = JSON.parse(payloadText) as ShareSuggestStreamEvent | { type: 'error'; error?: string }
+      if (event.type === 'error') {
+        throw new Error(event.error || '生成失败')
+      }
+      options.onDelta(event)
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        processLine(line)
+      }
+    }
+
+    if (buffer.trim()) {
+      processLine(buffer)
+    }
   },
 
   async getDetail(slug: string, options?: { manageToken?: string; track?: boolean }) {

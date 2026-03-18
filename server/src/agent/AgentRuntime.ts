@@ -1,15 +1,18 @@
-import type { LlmSelection } from '../provider/index.js'
 import { config } from '../config.js'
+import { buildToolOnlySummary } from './AgentTooling.js'
 import type { CodeGenerator } from './CodeGenerator.js'
 import { selectContracts } from './ContractSelector.js'
 import type { DocLoader } from './DocLoader.js'
 import { ErrorAnalyzer, formatErrorAnalysisForPrompt } from './ErrorAnalyzer.js'
 import { verifyCode } from './CodeVerifier.js'
-import type { DomainDecision, ErrorAnalysisResult, ReferencePlan } from './AgentRuntimeTypes.js'
+import type { AgentToolPlan, DomainDecision, ErrorAnalysisResult, ReferencePlan } from './AgentRuntimeTypes.js'
 import { DomainSelector } from './DomainSelector.js'
 import { FileIntelligenceService } from './FileIntelligenceService.js'
+import { NativeToolLoop, type NativeToolLoopResult } from './NativeToolLoop.js'
 import { ReferencePlanner } from './ReferencePlanner.js'
 import type { SkillStore } from './SkillStore.js'
+import { WebFetchService } from './WebFetchService.js'
+import { WorkspaceSnippetEditService } from './WorkspaceSnippetEditService.js'
 
 type CodeStreamChunk = { type: 'text' | 'code_start' | 'code_delta' | 'code' | 'code_reset' | 'error'; content: string }
 type ToolStartChunk = {
@@ -43,6 +46,9 @@ export class AgentRuntime {
   private referencePlanner: ReferencePlanner
   private errorAnalyzer: ErrorAnalyzer
   private fileIntelligence: FileIntelligenceService
+  private nativeToolLoop: NativeToolLoop
+  private webFetch: WebFetchService
+  private snippetEdit: WorkspaceSnippetEditService
 
   constructor(
     private deps: {
@@ -55,6 +61,12 @@ export class AgentRuntime {
     this.referencePlanner = new ReferencePlanner(this.deps.skillStore)
     this.errorAnalyzer = new ErrorAnalyzer(this.deps.skillStore)
     this.fileIntelligence = new FileIntelligenceService()
+    this.webFetch = new WebFetchService()
+    this.snippetEdit = new WorkspaceSnippetEditService()
+    this.nativeToolLoop = new NativeToolLoop({
+      webFetch: this.webFetch,
+      snippetEdit: this.snippetEdit,
+    })
   }
 
   async *invokeStream(params: {
@@ -62,7 +74,6 @@ export class AgentRuntime {
     fileData?: string
     conversationHistory?: string
     existingCode?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<AgentRuntimeChunk> {
     let effectiveFileData = params.fileData
     const state = {
@@ -74,6 +85,8 @@ export class AgentRuntime {
     }
     let toolSeq = 0
     const nextToolCallId = (toolName: string) => `${toolName}-${Date.now()}-${++toolSeq}`
+    let toolContextPrompt = ''
+    const nativeLoopToolStarts = new Map<string, number>()
 
     if (params.fileData) {
       const inspectCtx = startTool(nextToolCallId, 'file_intelligence.inspect', {
@@ -89,6 +102,91 @@ export class AgentRuntime {
       }, inspected.summary.status === 'error', {})
     }
 
+    if (config.agentTools.enabled) {
+      const loopCtx = startTool(nextToolCallId, 'native_tool_loop.run', {
+        mode: 'generate',
+        hasConversationHistory: !!params.conversationHistory,
+        hasExistingCode: !!params.existingCode,
+        hasFileData: !!effectiveFileData,
+      })
+      yield loopCtx.start
+
+      let toolLoopResult: NativeToolLoopResult | null = null
+      for await (const event of this.nativeToolLoop.run({
+        userInput: params.userInput,
+        conversationHistory: params.conversationHistory,
+        existingCode: params.existingCode,
+        fileData: effectiveFileData,
+        localCapabilityCatalog: this.deps.skillStore.getPackagePlannerCatalog(),
+        mode: 'generate',
+      })) {
+        if (event.type === 'tool_start') {
+          const startedAtMs = Date.now()
+          yield {
+            type: 'tool_execution_start',
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: event.args,
+            startedAtMs,
+          }
+          nativeLoopToolStarts.set(event.toolCallId, startedAtMs)
+          continue
+        }
+
+        if (event.type === 'tool_end') {
+          const startedAtMs = nativeLoopToolStarts.get(event.toolCallId) || Date.now()
+          const endedAtMs = Date.now()
+          yield {
+            type: 'tool_execution_end',
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            result: event.result,
+            isError: event.isError,
+            startedAtMs,
+            endedAtMs,
+            durationMs: Math.max(0, endedAtMs - startedAtMs),
+          }
+          nativeLoopToolStarts.delete(event.toolCallId)
+          continue
+        }
+
+        toolLoopResult = event.result
+      }
+
+      toolLoopResult = captureNativeToolLoopFinalResult(toolLoopResult)
+      toolContextPrompt = toolLoopResult.toolContext
+
+      yield endTool(loopCtx, {
+        mode: 'generate',
+        replyMode: toolLoopResult.replyMode,
+        reason: toolLoopResult.reason,
+        rounds: toolLoopResult.rounds,
+        toolCalls: toolLoopResult.records.length,
+        usedTools: dedupe(toolLoopResult.records.map((record) => record.step.tool)),
+      }, false, {
+        decisionSource: toolLoopResult.decisionSource,
+        fallbackReason: toolLoopResult.fallbackReason,
+      })
+
+      if (toolLoopResult.replyMode === 'tool_only') {
+        const planLike: AgentToolPlan = {
+          action: toolLoopResult.records.length > 0 ? 'run_tools' : 'skip',
+          replyMode: 'tool_only' as const,
+          reason: toolLoopResult.reason,
+          confidence: toolLoopResult.decisionSource === 'llm' ? 0.84 : 0.58,
+          steps: toolLoopResult.records.map((record) => record.step),
+          raw: toolLoopResult.rawFinalText,
+          decisionSource: toolLoopResult.decisionSource,
+          fallbackReason: toolLoopResult.fallbackReason,
+        }
+        yield {
+          type: 'text',
+          content: toolLoopResult.finalText || buildToolOnlySummary(planLike, toolLoopResult.records),
+        }
+        return
+      }
+    }
+
     const domainCtx = startTool(nextToolCallId, 'domain_selector.selectPackages', {
       mode: 'generate',
       hasConversationHistory: !!params.conversationHistory,
@@ -102,7 +200,6 @@ export class AgentRuntime {
       existingCode: params.existingCode,
       fileData: effectiveFileData,
       mode: 'generate',
-      llmSelection: params.llmSelection,
     })
     state.selectedPackages = domainDecision.packageIds
     yield endTool(domainCtx, domainDecision, false, {
@@ -141,7 +238,6 @@ export class AgentRuntime {
         existingCode: params.existingCode,
         fileData: effectiveFileData,
         mode: 'generate',
-        llmSelection: params.llmSelection,
       })
       lastPlan = plan
       yield endTool(refCtx, {
@@ -240,7 +336,7 @@ export class AgentRuntime {
         conversationHistory: params.conversationHistory,
         existingCode: params.existingCode,
         fileData: effectiveFileData,
-        llmSelection: params.llmSelection,
+        toolContext: toolContextPrompt,
       })) {
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
@@ -274,7 +370,6 @@ export class AgentRuntime {
         skillDocs: assembledDocs,
         apiContractsPrompt: state.contractPrompt,
         fileData: effectiveFileData,
-        llmSelection: params.llmSelection,
         selectedPackages: state.selectedPackages,
         selectedReferences: state.loadedReferences,
         selectedContracts: state.contractIds,
@@ -287,7 +382,6 @@ export class AgentRuntime {
     error: string
     userInput: string
     fileData?: string
-    llmSelection?: LlmSelection
   }): AsyncGenerator<AgentRuntimeChunk> {
     let effectiveFileData = params.fileData
     const state = {
@@ -324,7 +418,6 @@ export class AgentRuntime {
       error: params.error,
       code: params.code,
       fileData: effectiveFileData,
-      llmSelection: params.llmSelection,
     })
     const analysis = analyzed.analysis
     yield endTool(evidenceCtx, {
@@ -351,7 +444,6 @@ export class AgentRuntime {
       fileData: effectiveFileData,
       runtimeError: params.error,
       mode: 'fix',
-      llmSelection: params.llmSelection,
     })
     state.selectedPackages = dedupe([...domainDecision.packageIds, ...analysis.suggestedPackages])
     yield endTool(domainCtx, {
@@ -394,7 +486,6 @@ export class AgentRuntime {
         fileData: effectiveFileData,
         runtimeError: params.error,
         mode: 'fix',
-        llmSelection: params.llmSelection,
       })
       lastPlan = plan
       yield endTool(refCtx, {
@@ -469,7 +560,6 @@ export class AgentRuntime {
         apiContractsPrompt: state.contractPrompt,
         fileData: effectiveFileData,
         errorDiagnosis: formatErrorAnalysisForPrompt(analysis),
-        llmSelection: params.llmSelection,
       })) {
         if (chunk.type === 'text') textChunks += 1
         if (chunk.type === 'code_delta') codeChunks += 1
@@ -504,7 +594,6 @@ export class AgentRuntime {
         skillDocs: state.skillDocs,
         apiContractsPrompt: state.contractPrompt,
         fileData: effectiveFileData,
-        llmSelection: params.llmSelection,
         errorDiagnosis: formatErrorAnalysisForPrompt(analysis),
         selectedPackages: state.selectedPackages,
         selectedReferences: state.loadedReferences,
@@ -521,7 +610,6 @@ export class AgentRuntime {
     skillDocs: string
     apiContractsPrompt: string
     fileData?: string
-    llmSelection?: LlmSelection
     errorDiagnosis?: string
     selectedPackages: string[]
     selectedReferences: string[]
@@ -567,7 +655,6 @@ export class AgentRuntime {
         apiContractsPrompt: params.apiContractsPrompt,
         fileData: params.fileData,
         errorDiagnosis: params.errorDiagnosis,
-        llmSelection: params.llmSelection,
       })) {
         if (chunk.type === 'code') repairedCode = chunk.content
         if (chunk.type === 'error') sawError = true
@@ -598,6 +685,21 @@ function mergeDocs(base: string, next: string): string {
 
 function dedupe(items: string[]): string[] {
   return Array.from(new Set(items))
+}
+
+function captureNativeToolLoopFinalResult(result: NativeToolLoopResult | null): NativeToolLoopResult {
+  if (result) return result
+  return {
+    replyMode: 'continue',
+    reason: 'native_tool_loop 未产出最终决策，回退到后续生成链路。',
+    finalText: '',
+    rawFinalText: '',
+    toolContext: '',
+    records: [],
+    rounds: 0,
+    decisionSource: 'fallback',
+    fallbackReason: 'native_tool_loop_missing_final',
+  }
 }
 
 function startTool(

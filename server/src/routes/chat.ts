@@ -4,18 +4,13 @@ import { access, stat } from 'fs/promises'
 import { basename, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { MapAgent } from '../agent/MapAgent.js'
+import { enrichToolExecutionChunk } from '../agent/ToolUiMetadata.js'
 import { FileParser } from '../services/FileParser.js'
 import { GeoJSONParser } from '../services/GeoJSONParser.js'
 import { VisualRenderService } from '../services/VisualRenderService.js'
 import { VisualInspectionService } from '../services/VisualInspectionService.js'
 import { upload } from '../middleware/upload.js'
 import { config } from '../config.js'
-import {
-  getCatalogDefaultSelection,
-  getProviderCatalog,
-  resolveLlmSelection,
-  type LlmSelection,
-} from '../provider/index.js'
 import {
   buildRuntimeGeojsonContract,
   buildRuntimeJsonContract,
@@ -48,16 +43,6 @@ const visualRenderService = new VisualRenderService({
 const visualInspectionService = new VisualInspectionService({
   timeoutMs: config.visualInspection.llmTimeoutMs,
 })
-const defaultLlmSelection = (() => {
-  try {
-    return resolveLlmSelection(
-      { provider: config.llm.provider, model: config.llm.model },
-      getCatalogDefaultSelection(),
-    )
-  } catch {
-    return getCatalogDefaultSelection()
-  }
-})()
 
 const SAMPLE_FEATURE_COUNT = 3
 const SAMPLE_ROW_COUNT = 3
@@ -433,16 +418,6 @@ async function resolveRequestFileData(params: {
   }
 }
 
-function resolveRequestLlmSelection(body: any): LlmSelection {
-  return resolveLlmSelection(
-    {
-      provider: typeof body?.provider === 'string' ? body.provider : undefined,
-      model: typeof body?.model === 'string' ? body.model : undefined,
-    },
-    defaultLlmSelection,
-  )
-}
-
 function detectEntrySource(params: { file?: Express.Multer.File; sampleId?: unknown; fileContext?: unknown }): RunEntrySource {
   if (params.file) return 'upload'
   if (params.sampleId != null) return 'sample'
@@ -475,7 +450,7 @@ function visualInspectUnavailable(reason: string) {
     diagnosis: reason || '视觉巡检暂时不可用。',
     repairHint: '无',
     confidence: 0,
-    model: 'gpt-4.1-nano',
+    model: config.llm.model,
   }
 }
 
@@ -487,6 +462,11 @@ function isBlankLikeDiagnosis(text: string): boolean {
 function isLoadingLikeDiagnosis(text: string): boolean {
   const value = String(text || '').toLowerCase()
   return /加载中|正在加载|请稍候|请稍等|loading|initializing|rendering|fetching|waiting/.test(value)
+}
+
+function isMissingOuterUiDiagnosis(text: string): boolean {
+  const value = String(text || '').toLowerCase()
+  return /缺失顶部标题栏|缺失左侧控制面板|未检测到.*标题栏|未检测到.*控制面板|missing.*header|missing.*sidebar|missing.*panel/.test(value)
 }
 
 function hasExplicitFailureSignal(text: string): boolean {
@@ -518,6 +498,10 @@ function normalizeVisualInspectByCaptureMeta(
     return visualInspectUnavailable('页面仍处于加载阶段，当前截图不适合触发自动补修。')
   }
 
+  if (captureMeta.mode === 'canvas' && isMissingOuterUiDiagnosis(combinedText)) {
+    return visualInspectUnavailable('当前截图只捕获到地图画布，无法可靠判断页面外围标题栏或侧栏是否缺失。')
+  }
+
   const likelyCanvasMap = Number(captureMeta.canvasCount || 0) > 0 && Number(captureMeta.largestCanvasArea || 0) >= 120000
   const tainted = captureMeta.canvasTainted === true && captureMeta.canvasReadable !== true
   const blankLike = captureMeta.blankLikely === true || isBlankLikeDiagnosis(combinedText)
@@ -525,18 +509,6 @@ function normalizeVisualInspectByCaptureMeta(
 
   return visualInspectUnavailable('前端截图受跨域画布限制影响，当前截图无法可靠反映地图渲染内容。')
 }
-
-// GET /api/chat/models — 多模型提供商与模型列表
-router.get('/models', (_req, res) => {
-  res.json({
-    success: true,
-    data: {
-      providers: getProviderCatalog(),
-      defaultSelection: defaultLlmSelection,
-      baseUrl: config.llm.baseUrl,
-    },
-  })
-})
 
 // POST /api/chat/visual-inspect — 地图视觉巡检
 router.post('/visual-inspect', async (req, res) => {
@@ -692,14 +664,6 @@ router.post('/stream', upload.single('file'), async (req, res) => {
     return
   }
 
-  let llmSelection: LlmSelection
-  try {
-    llmSelection = resolveRequestLlmSelection(req.body)
-  } catch (err: any) {
-    res.status(400).json({ success: false, error: err?.message || '模型参数无效' })
-    return
-  }
-
   const requestContext = getRequestContext(req)
   const entrySource = detectEntrySource({
     file: req.file || undefined,
@@ -715,8 +679,7 @@ router.post('/stream', upload.single('file'), async (req, res) => {
       userPrompt: message,
       conversationHistory: typeof conversationHistory === 'string' ? conversationHistory : undefined,
       existingCodeChars: typeof existingCode === 'string' ? existingCode.length : undefined,
-      modelProvider: llmSelection.providerId,
-      modelName: llmSelection.model,
+      modelName: config.llm.model,
       agentMode: String(config.agentRuntime.mode || ''),
       verifierEnabled: config.agentRuntime.enableVerifier,
       requestId: requestContext.requestId,
@@ -731,7 +694,7 @@ router.post('/stream', upload.single('file'), async (req, res) => {
       entrySource,
       conversationHistory: typeof conversationHistory === 'string' ? conversationHistory : '',
       existingCodeChars: typeof existingCode === 'string' ? existingCode.length : 0,
-      llmSelection,
+      modelName: config.llm.model,
       requestContext,
       uploadedFile: req.file
         ? { originalname: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype }
@@ -797,63 +760,80 @@ router.post('/stream', upload.single('file'), async (req, res) => {
       fileData,
       conversationHistory,
       existingCode,
-      llmSelection,
     })
 
     let receivedFinalCode = false
     for await (const chunk of stream) {
       if (clientDisconnected) break
 
+      const decoratedChunk = chunk.type === 'tool_execution_start' || chunk.type === 'tool_execution_end'
+        ? enrichToolExecutionChunk(chunk as Record<string, unknown>)
+        : chunk
+
       if (config.runDossiers.enabled && dossierRunId) {
-        if (chunk.type === 'tool_execution_start') {
+        if (decoratedChunk.type === 'tool_execution_start') {
           await runDossierStore.appendEvent(dossierRunId, {
             type: 'tool_execution_start',
-            toolCallId: String((chunk as any).toolCallId || ''),
-            toolName: String((chunk as any).toolName || ''),
+            toolCallId: String((decoratedChunk as any).toolCallId || ''),
+            toolName: String((decoratedChunk as any).toolName || ''),
             status: 'running',
             payload: {
-              args: (chunk as any).args,
-              startedAtMs: (chunk as any).startedAtMs,
+              args: (decoratedChunk as any).args,
+              startedAtMs: (decoratedChunk as any).startedAtMs,
+              ui: {
+                uiLabel: (decoratedChunk as any).uiLabel,
+                uiSummary: (decoratedChunk as any).uiSummary,
+                uiGroup: (decoratedChunk as any).uiGroup,
+                uiGroupLabel: (decoratedChunk as any).uiGroupLabel,
+                uiVisibility: (decoratedChunk as any).uiVisibility,
+              },
             },
           })
-        } else if (chunk.type === 'tool_execution_end') {
+        } else if (decoratedChunk.type === 'tool_execution_end') {
           await runDossierStore.appendEvent(dossierRunId, {
             type: 'tool_execution_end',
-            toolCallId: String((chunk as any).toolCallId || ''),
-            toolName: String((chunk as any).toolName || ''),
-            status: (chunk as any).isError ? 'error' : 'done',
+            toolCallId: String((decoratedChunk as any).toolCallId || ''),
+            toolName: String((decoratedChunk as any).toolName || ''),
+            status: (decoratedChunk as any).isError ? 'error' : 'done',
             payload: {
-              result: (chunk as any).result,
-              isError: (chunk as any).isError,
-              endedAtMs: (chunk as any).endedAtMs,
-              decisionSource: (chunk as any).decisionSource,
-              selectedPackages: (chunk as any).selectedPackages,
-              selectedReferences: (chunk as any).selectedReferences,
-              selectedContracts: (chunk as any).selectedContracts,
-              fallbackReason: (chunk as any).fallbackReason,
-              vetoApplied: (chunk as any).vetoApplied,
+              result: (decoratedChunk as any).result,
+              isError: (decoratedChunk as any).isError,
+              endedAtMs: (decoratedChunk as any).endedAtMs,
+              decisionSource: (decoratedChunk as any).decisionSource,
+              selectedPackages: (decoratedChunk as any).selectedPackages,
+              selectedReferences: (decoratedChunk as any).selectedReferences,
+              selectedContracts: (decoratedChunk as any).selectedContracts,
+              fallbackReason: (decoratedChunk as any).fallbackReason,
+              vetoApplied: (decoratedChunk as any).vetoApplied,
+              ui: {
+                uiLabel: (decoratedChunk as any).uiLabel,
+                uiSummary: (decoratedChunk as any).uiSummary,
+                uiGroup: (decoratedChunk as any).uiGroup,
+                uiGroupLabel: (decoratedChunk as any).uiGroupLabel,
+                uiVisibility: (decoratedChunk as any).uiVisibility,
+              },
             },
           })
-        } else if (chunk.type === 'code' && chunk.content) {
+        } else if (decoratedChunk.type === 'code' && decoratedChunk.content) {
           receivedFinalCode = true
-          await runDossierStore.attachHtmlArtifact(dossierRunId, 'generated-code', String(chunk.content || ''), {
-            codeChars: String(chunk.content || '').length,
+          await runDossierStore.attachHtmlArtifact(dossierRunId, 'generated-code', String(decoratedChunk.content || ''), {
+            codeChars: String(decoratedChunk.content || '').length,
           })
-        } else if (chunk.type === 'error' && chunk.content) {
+        } else if (decoratedChunk.type === 'error' && decoratedChunk.content) {
           await runDossierStore.appendError(dossierRunId, {
             source: 'server',
             kind: 'stream',
-            message: String(chunk.content || ''),
+            message: String(decoratedChunk.content || ''),
             markFailed: true,
             outcome: 'request_error',
           })
         }
       }
 
-      let data = chunk
+      let data = decoratedChunk
       // 对 code 类型注入 token
-      if (chunk.type === 'code' && chunk.content) {
-        data = { ...chunk, content: injectToken(chunk.content) }
+      if (decoratedChunk.type === 'code' && decoratedChunk.content) {
+        data = { ...decoratedChunk, content: injectToken(String(decoratedChunk.content || '')) }
       }
       res.write(`data: ${JSON.stringify(data)}\n\n`)
     }
@@ -901,13 +881,6 @@ router.post('/', upload.single('file'), async (req, res, next) => {
     if (sampleId != null && !isBuiltinSampleId(sampleId)) {
       return res.status(400).json({ success: false, error: '无效的样例 ID' })
     }
-
-    let llmSelection: LlmSelection
-    try {
-      llmSelection = resolveRequestLlmSelection(req.body)
-    } catch (err: any) {
-      return res.status(400).json({ success: false, error: err?.message || '模型参数无效' })
-    }
     const resolvedFile = await resolveRequestFileData({
       req,
       file: req.file || undefined,
@@ -921,7 +894,6 @@ router.post('/', upload.single('file'), async (req, res, next) => {
       fileData,
       conversationHistory,
       existingCode,
-      llmSelection,
     })
 
     // 替换 token
@@ -952,19 +924,11 @@ router.post('/fix', async (req, res, next) => {
     if (!code || !error) {
       return res.status(400).json({ success: false, error: '缺少代码或错误信息' })
     }
-
-    let llmSelection: LlmSelection
-    try {
-      llmSelection = resolveRequestLlmSelection(req.body)
-    } catch (err: any) {
-      return res.status(400).json({ success: false, error: err?.message || '模型参数无效' })
-    }
     const result = await agent.fixCode({
       code,
       error,
       userInput: userInput || '',
       fileData: typeof fileContext === 'string' && fileContext.trim() ? fileContext : undefined,
-      llmSelection,
     })
 
     let fixedCode = result.code
@@ -994,14 +958,6 @@ router.post('/fix/stream', async (req, res) => {
     return
   }
 
-  let llmSelection: LlmSelection
-  try {
-    llmSelection = resolveRequestLlmSelection(req.body)
-  } catch (err: any) {
-    res.status(400).json({ success: false, error: err?.message || '模型参数无效' })
-    return
-  }
-
   const requestContext = getRequestContext(req)
   let dossierRunId = ''
   const phase: RunPhase = source === 'visual' ? 'fix_visual' : 'fix_runtime'
@@ -1013,8 +969,7 @@ router.post('/fix/stream', async (req, res) => {
       entrySource: typeof fileContext === 'string' && fileContext.trim() ? 'inline' : 'none',
       userPrompt: typeof userInput === 'string' && userInput.trim() ? userInput : '[auto-fix]',
       existingCodeChars: typeof code === 'string' ? code.length : undefined,
-      modelProvider: llmSelection.providerId,
-      modelName: llmSelection.model,
+      modelName: config.llm.model,
       agentMode: String(config.agentRuntime.mode || ''),
       verifierEnabled: config.agentRuntime.enableVerifier,
       requestId: requestContext.requestId,
@@ -1027,7 +982,7 @@ router.post('/fix/stream', async (req, res) => {
       source: source === 'visual' ? 'visual' : 'runtime',
       error,
       userInput: userInput || '',
-      llmSelection,
+      modelName: config.llm.model,
       requestContext,
     })
     await runDossierStore.attachHtmlArtifact(dossierRunId, 'input-code', String(code || ''))
@@ -1054,63 +1009,80 @@ router.post('/fix/stream', async (req, res) => {
       error,
       userInput: userInput || '',
       fileData: typeof fileContext === 'string' && fileContext.trim() ? fileContext : undefined,
-      llmSelection,
     })
 
     let receivedFinalCode = false
     for await (const chunk of stream) {
       if (clientDisconnected) break
 
+      const decoratedChunk = chunk.type === 'tool_execution_start' || chunk.type === 'tool_execution_end'
+        ? enrichToolExecutionChunk(chunk as Record<string, unknown>)
+        : chunk
+
       if (config.runDossiers.enabled && dossierRunId) {
-        if (chunk.type === 'tool_execution_start') {
+        if (decoratedChunk.type === 'tool_execution_start') {
           await runDossierStore.appendEvent(dossierRunId, {
             type: 'tool_execution_start',
-            toolCallId: String((chunk as any).toolCallId || ''),
-            toolName: String((chunk as any).toolName || ''),
+            toolCallId: String((decoratedChunk as any).toolCallId || ''),
+            toolName: String((decoratedChunk as any).toolName || ''),
             status: 'running',
             payload: {
-              args: (chunk as any).args,
-              startedAtMs: (chunk as any).startedAtMs,
+              args: (decoratedChunk as any).args,
+              startedAtMs: (decoratedChunk as any).startedAtMs,
+              ui: {
+                uiLabel: (decoratedChunk as any).uiLabel,
+                uiSummary: (decoratedChunk as any).uiSummary,
+                uiGroup: (decoratedChunk as any).uiGroup,
+                uiGroupLabel: (decoratedChunk as any).uiGroupLabel,
+                uiVisibility: (decoratedChunk as any).uiVisibility,
+              },
             },
           })
-        } else if (chunk.type === 'tool_execution_end') {
+        } else if (decoratedChunk.type === 'tool_execution_end') {
           await runDossierStore.appendEvent(dossierRunId, {
             type: 'tool_execution_end',
-            toolCallId: String((chunk as any).toolCallId || ''),
-            toolName: String((chunk as any).toolName || ''),
-            status: (chunk as any).isError ? 'error' : 'done',
+            toolCallId: String((decoratedChunk as any).toolCallId || ''),
+            toolName: String((decoratedChunk as any).toolName || ''),
+            status: (decoratedChunk as any).isError ? 'error' : 'done',
             payload: {
-              result: (chunk as any).result,
-              isError: (chunk as any).isError,
-              endedAtMs: (chunk as any).endedAtMs,
-              decisionSource: (chunk as any).decisionSource,
-              selectedPackages: (chunk as any).selectedPackages,
-              selectedReferences: (chunk as any).selectedReferences,
-              selectedContracts: (chunk as any).selectedContracts,
-              fallbackReason: (chunk as any).fallbackReason,
-              vetoApplied: (chunk as any).vetoApplied,
+              result: (decoratedChunk as any).result,
+              isError: (decoratedChunk as any).isError,
+              endedAtMs: (decoratedChunk as any).endedAtMs,
+              decisionSource: (decoratedChunk as any).decisionSource,
+              selectedPackages: (decoratedChunk as any).selectedPackages,
+              selectedReferences: (decoratedChunk as any).selectedReferences,
+              selectedContracts: (decoratedChunk as any).selectedContracts,
+              fallbackReason: (decoratedChunk as any).fallbackReason,
+              vetoApplied: (decoratedChunk as any).vetoApplied,
+              ui: {
+                uiLabel: (decoratedChunk as any).uiLabel,
+                uiSummary: (decoratedChunk as any).uiSummary,
+                uiGroup: (decoratedChunk as any).uiGroup,
+                uiGroupLabel: (decoratedChunk as any).uiGroupLabel,
+                uiVisibility: (decoratedChunk as any).uiVisibility,
+              },
             },
           })
-        } else if (chunk.type === 'code' && chunk.content) {
+        } else if (decoratedChunk.type === 'code' && decoratedChunk.content) {
           receivedFinalCode = true
-          await runDossierStore.attachHtmlArtifact(dossierRunId, 'fixed-code', String(chunk.content || ''), {
-            codeChars: String(chunk.content || '').length,
+          await runDossierStore.attachHtmlArtifact(dossierRunId, 'fixed-code', String(decoratedChunk.content || ''), {
+            codeChars: String(decoratedChunk.content || '').length,
             source: source === 'visual' ? 'visual' : 'runtime',
           })
-        } else if (chunk.type === 'error' && chunk.content) {
+        } else if (decoratedChunk.type === 'error' && decoratedChunk.content) {
           await runDossierStore.appendError(dossierRunId, {
             source: 'server',
             kind: 'fix-stream',
-            message: String(chunk.content || ''),
+            message: String(decoratedChunk.content || ''),
             markFailed: true,
             outcome: 'request_error',
           })
         }
       }
 
-      let data = chunk
-      if (chunk.type === 'code' && chunk.content) {
-        data = { ...chunk, content: injectToken(chunk.content) }
+      let data = decoratedChunk
+      if (decoratedChunk.type === 'code' && decoratedChunk.content) {
+        data = { ...decoratedChunk, content: injectToken(String(decoratedChunk.content || '')) }
       }
       res.write(`data: ${JSON.stringify(data)}\n\n`)
     }

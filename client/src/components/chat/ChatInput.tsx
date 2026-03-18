@@ -1,5 +1,4 @@
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
-import { ModelSelector } from './ModelSelector'
 
 interface ChatInputProps {
   onSend: (message: string, file?: File) => void
@@ -253,9 +252,6 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
             {uploadHint}
           </div>
         )}
-        <div className="ml-auto shrink-0">
-          <ModelSelector variant="chatInline" />
-        </div>
       </div>
     </div>
   )

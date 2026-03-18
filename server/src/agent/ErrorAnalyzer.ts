@@ -1,6 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { createLLM } from '../llm/createLLM.js'
-import type { LlmSelection } from '../provider/index.js'
 import type { ErrorAnalysisResult } from './AgentRuntimeTypes.js'
 import { extractTextContent, parseJsonObject } from './PlannerJson.js'
 import type { SkillStore } from './SkillStore.js'
@@ -14,13 +13,12 @@ export class ErrorAnalyzer {
     error: string
     code: string
     fileData?: string
-    llmSelection?: LlmSelection
   }): Promise<{ analysis: ErrorAnalysisResult; evidenceText: string }> {
     const evidence = extractErrorEvidence(params.error, params.code)
     const evidenceText = formatEvidence(evidence)
     const runtimeFileContract = extractRuntimeFileContract(params.fileData)
     try {
-      const llm = createLLM({ temperature: 0, maxTokens: 800, llmSelection: params.llmSelection })
+      const llm = createLLM({ temperature: 0, maxTokens: 800 })
       const response = await llm.invoke([
         new SystemMessage(`你是一个代码修复错误分析器。根据错误证据输出 JSON。
 

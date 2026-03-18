@@ -1,343 +1,144 @@
 import type { ThoughtChainItem } from '../../types/chat'
 
-function asRecord(value: unknown): Record<string, any> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : null
+type ActivityStatus = ThoughtChainItem['status']
+
+interface ActivityRow {
+  key: string
+  label: string
+  summary?: string
+  status: ActivityStatus
+  durationMs?: number | null
+  stepCount?: number
+  grouped?: boolean
+  children?: Array<{
+    key: string
+    label: string
+    summary?: string
+    status: ActivityStatus
+  }>
 }
 
-function formatValue(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-function statusLabel(item: ThoughtChainItem) {
-  if (item.status === 'running') return '运行中'
-  if (item.status === 'error') return '失败'
+function statusLabel(status: ActivityStatus) {
+  if (status === 'running') return '运行中'
+  if (status === 'error') return '失败'
   return '完成'
 }
 
-function statusClass(item: ThoughtChainItem) {
-  if (item.status === 'running') return 'bg-blue-50 text-blue-600 border-blue-200/70'
-  if (item.status === 'error') return 'bg-red-50 text-red-600 border-red-200/70'
+function statusClass(status: ActivityStatus) {
+  if (status === 'running') return 'bg-blue-50 text-blue-600 border-blue-200/70'
+  if (status === 'error') return 'bg-red-50 text-red-600 border-red-200/70'
   return 'bg-emerald-50 text-emerald-600 border-emerald-200/70'
 }
 
-function getMode(item: ThoughtChainItem): 'fix' | 'generate' | undefined {
-  const args = asRecord(item.args)
-  const result = asRecord(item.result)
-  const mode = args?.mode ?? result?.mode
-  return mode === 'fix' || mode === 'generate' ? mode : undefined
+function computeDuration(items: ThoughtChainItem[]) {
+  const starts = items
+    .map((item) => item.startedAt)
+    .filter((value): value is number => typeof value === 'number')
+  const ends = items
+    .map((item) => item.endedAt)
+    .filter((value): value is number => typeof value === 'number')
+
+  if (!starts.length) return null
+  const startedAt = Math.min(...starts)
+  const endedAt = ends.length ? Math.max(...ends) : null
+  if (endedAt == null) return null
+  return Math.max(0, endedAt - startedAt)
 }
 
-function getTitle(item: ThoughtChainItem): string {
-  const mode = getMode(item)
-  const args = asRecord(item.args)
-  const result = asRecord(item.result)
-  const skillName = String(args?.skillName ?? result?.skillName ?? '').trim()
+function mergeStatus(items: ThoughtChainItem[]): ActivityStatus {
+  if (items.some((item) => item.status === 'running')) return 'running'
+  if (items.some((item) => item.status === 'error')) return 'error'
+  return 'done'
+}
 
-  switch (item.toolName) {
-    case 'skill_tool_loop.decideNextAction':
-      return mode === 'fix'
-        ? '修复阶段：决定下一步（读文档 / 直接修复）'
-        : '生成阶段：决定下一步（读文档 / 开始生成）'
-    case 'domain_selector.selectPackages':
-      return mode === 'fix' ? '修复阶段：选择领域 package' : '生成阶段：选择领域 package'
-    case 'reference_planner.decide':
-      return mode === 'fix' ? '修复阶段：规划 reference 和 contract' : '生成阶段：规划 reference 和 contract'
-    case 'file_intelligence.inspect':
-      return '读取真实数据并生成数据画像'
-    case 'context_assembler.loadPackages':
-      return '装配领域 package 上下文'
-    case 'context_assembler.load':
-      return '装配生成上下文'
-    case 'doc_loader.readReferenceDocs':
-      return `${mode === 'fix' ? '修复阶段' : '生成阶段'}：读取 reference 文档`
-    case 'error_analyzer.analyze':
-      return '错误分析：提取证据并判断根因'
-    case 'doc_loader.readSkillDoc':
-      return `${mode === 'fix' ? '修复阶段' : mode === 'generate' ? '生成阶段' : 'Agent'}：读取 skill 文档${skillName ? `（${skillName}）` : ''}`
-    case 'code_generator.fixError':
-      return '根据运行错误修复代码'
-    case 'code_generator.generateStream':
-      return '调用代码生成器'
-    case 'code_guard.validate':
-      return '执行代码守卫校验'
-    case 'code_verifier.validate':
-      return '执行代码 verifier 校验'
-    case 'skill_planner.selectSkills':
-      return mode === 'fix' ? '修复阶段兜底：选择技能' : '生成阶段兜底：选择技能'
-    case 'skill_matcher.matchByKeywords':
-      return '关键词匹配兜底（仅在规划失败时）'
-    case 'visual_inspector.capture':
-      return '视觉巡检：渲染并截图'
-    case 'visual_inspector.diagnose':
-      return '视觉巡检：AI图像诊断'
-    default:
-      return item.toolName
+function fallbackLabel(item: ThoughtChainItem) {
+  return item.uiLabel || item.toolName || '执行步骤'
+}
+
+function fallbackSummary(item: ThoughtChainItem) {
+  if (item.uiSummary) return item.uiSummary
+  if (item.status === 'running') return '正在执行'
+  return ''
+}
+
+function buildSingleRow(item: ThoughtChainItem): ActivityRow {
+  const durationMs =
+    typeof item.startedAt === 'number' && typeof item.endedAt === 'number'
+      ? Math.max(0, item.endedAt - item.startedAt)
+      : null
+
+  return {
+    key: item.toolCallId,
+    label: fallbackLabel(item),
+    summary: fallbackSummary(item) || undefined,
+    status: item.status,
+    durationMs,
   }
 }
 
-function getSummary(item: ThoughtChainItem): string | null {
-  const args = asRecord(item.args)
-  const result = asRecord(item.result)
-  const mode = getMode(item)
+function buildGroupRow(items: ThoughtChainItem[]): ActivityRow {
+  const status = mergeStatus(items)
+  const reversed = [...items].reverse()
+  const preferred = reversed.find((item) => item.status === 'running' && item.uiSummary)
+    || reversed.find((item) => item.status === 'error' && item.uiSummary)
+    || reversed.find((item) => item.uiSummary)
 
-  if (item.toolName === 'skill_tool_loop.decideNextAction') {
-    if (item.status === 'running') {
-      const iteration = args?.iteration != null ? `第 ${args.iteration} 轮` : '当前轮'
-      const errorHint = mode === 'fix' && typeof args?.runtimeErrorPreview === 'string' ? '，已带入运行错误信息' : ''
-      return `${iteration}决策中${errorHint}`
-    }
-    const summary = typeof result?.decisionSummary === 'string' ? result.decisionSummary : ''
-    const reason = typeof result?.reason === 'string' ? result.reason : ''
-    return [summary, reason ? `原因：${reason}` : ''].filter(Boolean).join(' | ') || null
+  const summary = preferred?.uiSummary
+    || (status === 'running'
+      ? `正在执行 ${items.length} 个内部步骤`
+      : status === 'error'
+        ? `其中 ${items.filter((item) => item.status === 'error').length} 个步骤失败`
+        : `已完成 ${items.length} 个内部步骤`)
+
+  return {
+    key: `${items[0].uiGroup || 'group'}:${items[0].toolCallId}`,
+    label: items[0].uiGroupLabel || '准备上下文',
+    summary,
+    status,
+    durationMs: computeDuration(items),
+    stepCount: items.length,
+    grouped: true,
+    children: items.map((item) => ({
+      key: item.toolCallId,
+      label: fallbackLabel(item),
+      summary: fallbackSummary(item) || undefined,
+      status: item.status,
+    })),
   }
-
-  if (item.toolName === 'domain_selector.selectPackages') {
-    const selectedPackages = item.selectedPackages || (Array.isArray(result?.packageIds) ? result.packageIds : [])
-    const reason = typeof result?.reason === 'string' ? result.reason : ''
-    const source = item.decisionSource ? `来源：${item.decisionSource}` : ''
-    if (item.status === 'running') return '正在判断本轮应进入哪些领域 package'
-    return [
-      selectedPackages.length ? `选中 package: ${selectedPackages.join(', ')}` : '未选中 package',
-      reason ? `原因：${reason}` : '',
-      source,
-    ].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'reference_planner.decide') {
-    const refs = item.selectedReferences || (Array.isArray(result?.referenceIds) ? result.referenceIds : [])
-    const contracts = item.selectedContracts || (Array.isArray(result?.contractIds) ? result.contractIds : [])
-    const reason = typeof result?.reason === 'string' ? result.reason : ''
-    if (item.status === 'running') return '正在决定还需读取哪些 reference，以及是否直接进入生成/修复'
-    return [
-      result?.action === 'generate' ? '直接进入下一阶段' : (refs.length ? `reference: ${refs.join(', ')}` : '未新增 reference'),
-      contracts.length ? `contracts: ${contracts.join(', ')}` : '',
-      reason ? `原因：${reason}` : '',
-      item.fallbackReason ? `fallback: ${item.fallbackReason}` : '',
-    ].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'context_assembler.loadPackages' || item.toolName === 'context_assembler.load') {
-    if (item.status === 'running') return '正在装配 package / reference / contract 上下文'
-    const packages = item.selectedPackages || (Array.isArray(result?.selectedPackages) ? result.selectedPackages : [])
-    const refs = item.selectedReferences || (Array.isArray(result?.selectedReferences) ? result.selectedReferences : [])
-    const contracts = item.selectedContracts || (Array.isArray(result?.selectedContracts) ? result.selectedContracts : [])
-    return [
-      packages.length ? `packages: ${packages.join(', ')}` : '',
-      refs.length ? `references: ${refs.join(', ')}` : '',
-      contracts.length ? `contracts: ${contracts.join(', ')}` : '',
-    ].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'doc_loader.readReferenceDocs') {
-    if (item.status === 'running') return '正在读取所选 reference 文档'
-    const loaded = Array.isArray(result?.loadedReferences) ? result.loadedReferences : []
-    const docChars = typeof result?.docChars === 'number' ? `${result.docChars} chars` : ''
-    return [loaded.length ? `累计 references: ${loaded.join(', ')}` : '', docChars].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'file_intelligence.inspect') {
-    if (item.status === 'running') return '正在读取真实数据并提取字段画像、几何类型与可视化建议'
-    const featureCount = typeof result?.featureCount === 'number' ? `${result.featureCount} 个要素` : ''
-    const geometryTypes = result?.geometryTypeStats && typeof result.geometryTypeStats === 'object'
-      ? Object.keys(result.geometryTypeStats).join(', ')
-      : ''
-    return [featureCount, geometryTypes ? `几何类型: ${geometryTypes}` : ''].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'error_analyzer.analyze') {
-    if (item.status === 'running') return '正在结合错误证据分析根因'
-    const category = typeof result?.category === 'string' ? result.category : ''
-    const cause = typeof result?.likelyCause === 'string' ? result.likelyCause : ''
-    const packages = item.selectedPackages || (Array.isArray(result?.suggestedPackages) ? result.suggestedPackages : [])
-    return [
-      category ? `类别: ${category}` : '',
-      cause,
-      packages.length ? `建议 package: ${packages.join(', ')}` : '',
-    ].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'doc_loader.readSkillDoc') {
-    const skillName = String(args?.skillName ?? result?.skillName ?? '').trim()
-    if (item.status === 'running') {
-      const reason = typeof args?.selectionReason === 'string' ? `，原因：${args.selectionReason}` : ''
-      return `${skillName ? `正在读取 ${skillName}` : '正在读取 skill 文档'}${reason}`
-    }
-    const docChars = typeof result?.docChars === 'number' ? `${result.docChars} chars` : ''
-    const totalLoaded = typeof result?.totalLoadedSkills === 'number' ? `累计 ${result.totalLoadedSkills} 个 skill` : ''
-    const reason = typeof result?.selectionReason === 'string' ? `原因：${result.selectionReason}` : ''
-    return [skillName ? `已读取 ${skillName}` : '', docChars, totalLoaded, reason].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'code_generator.fixError') {
-    if (item.status === 'running') {
-      const matchedSkills = Array.isArray(args?.matchedSkills) ? args.matchedSkills : []
-      const skillInfo = matchedSkills.length ? `已加载 skills: ${matchedSkills.join(', ')}` : '未加载额外 skill 文档'
-      return `正在基于运行错误和当前代码生成修复方案 | ${skillInfo}`
-    }
-    if (typeof item.result === 'string') return item.result
-    const fixed = result?.fixed === true
-    const codeChars = typeof result?.codeChars === 'number' ? `${result.codeChars} chars` : ''
-    const matchedSkills = Array.isArray(result?.matchedSkills) && result.matchedSkills.length
-      ? `使用 skills: ${result.matchedSkills.join(', ')}`
-      : '未使用额外 skill 文档'
-    return [fixed ? '已生成修复代码' : '未生成可用修复代码', codeChars, matchedSkills].filter(Boolean).join(' | ')
-  }
-
-  if (item.toolName === 'code_generator.generateStream') {
-    if (item.status === 'running') {
-      const selectedSkills = Array.isArray(args?.selectedSkills) && args.selectedSkills.length
-        ? `skills: ${args.selectedSkills.join(', ')}`
-        : '未预加载 skill 文档'
-      return `正在生成回复/代码 | ${selectedSkills}`
-    }
-    const hasFinalCode = result?.hasFinalCode === true ? '包含最终代码' : '无最终代码'
-    const textChunks = typeof result?.textChunks === 'number' ? `文本块 ${result.textChunks}` : ''
-    const codeChunks = typeof result?.codeChunks === 'number' ? `代码块 ${result.codeChunks}` : ''
-    return [hasFinalCode, textChunks, codeChunks].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'skill_planner.selectSkills') {
-    if (item.status === 'running') return '规划器兜底中'
-    const selected = Array.isArray(result?.selectedSkills) ? result.selectedSkills : []
-    const reason = typeof result?.reason === 'string' ? result.reason : ''
-    return [
-      selected.length ? `选中 skills: ${selected.join(', ')}` : '未选中 skill',
-      reason ? `原因：${reason}` : '',
-    ].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'code_guard.validate') {
-    if (item.status === 'running') return '正在检查高风险接口调用与参数格式'
-    const issueCount = typeof result?.issueCount === 'number' ? result.issueCount : 0
-    const blocking = result?.blocking === true
-    return [
-      issueCount > 0 ? `发现 ${issueCount} 个风险点` : '未发现明显风险点',
-      blocking ? '包含阻断级问题' : '无阻断级问题',
-    ].filter(Boolean).join(' | ')
-  }
-
-  if (item.toolName === 'code_verifier.validate') {
-    if (item.status === 'running') return '正在执行阻断级 verifier 校验'
-    const issueCount = typeof result?.issueCount === 'number' ? result.issueCount : 0
-    const blocking = result?.blocking === true || item.vetoApplied === true
-    return [
-      issueCount > 0 ? `发现 ${issueCount} 个 verifier 风险点` : '未发现 verifier 风险点',
-      blocking ? '包含阻断级问题' : '无阻断级问题',
-    ].filter(Boolean).join(' | ')
-  }
-
-  if (item.toolName === 'skill_matcher.matchByKeywords') {
-    if (item.status === 'running') return '关键词兜底匹配中（说明上游 planner 异常）'
-    const matched = Array.isArray(result?.matchedSkills) ? result.matchedSkills : []
-    const source = typeof result?.source === 'string' ? result.source : ''
-    return [
-      matched.length ? `匹配结果: ${matched.join(', ')}` : '未匹配到 skill',
-      source ? `来源：${source}` : '',
-    ].filter(Boolean).join(' | ') || null
-  }
-
-  if (item.toolName === 'visual_inspector.capture') {
-    if (item.status === 'running') return '正在渲染页面并抓取地图截图'
-    if (typeof item.result === 'string') return item.result
-    const ok = result?.ok === true
-    const reason = typeof result?.reason === 'string' ? result.reason : ''
-    return ok ? '截图完成' : `截图失败${reason ? `：${reason}` : ''}`
-  }
-
-  if (item.toolName === 'visual_inspector.diagnose') {
-    if (item.status === 'running') return '正在调用AI进行视觉诊断'
-    if (typeof item.result === 'string') return item.result
-    const status = typeof result?.status === 'string' ? result.status : ''
-    const anomalous = result?.anomalous === true
-    const shouldRepair = result?.shouldRepair === true
-    const summary = typeof result?.summary === 'string' ? result.summary : ''
-    return [
-      status === 'unavailable'
-        ? '巡检不可用'
-        : anomalous
-          ? (shouldRepair ? '发现视觉异常（需补修）' : '发现视觉异常（无需补修）')
-          : '视觉巡检通过',
-      summary,
-    ].filter(Boolean).join(' | ')
-  }
-
-  return null
 }
 
-function getExplanation(item: ThoughtChainItem): string | null {
-  const result = asRecord(item.result)
+function buildRows(items: ThoughtChainItem[]): ActivityRow[] {
+  const visible = items.filter((item) => item.uiVisibility !== 'debug')
+  const rows: ActivityRow[] = []
 
-  if (!result) return null
+  for (let index = 0; index < visible.length; index += 1) {
+    const current = visible[index]
+    if (current.uiVisibility === 'grouped' && current.uiGroup) {
+      const groupItems = [current]
+      let nextIndex = index + 1
+      while (nextIndex < visible.length) {
+        const candidate = visible[nextIndex]
+        if (candidate.uiVisibility !== 'grouped' || candidate.uiGroup !== current.uiGroup) break
+        groupItems.push(candidate)
+        nextIndex += 1
+      }
+      rows.push(buildGroupRow(groupItems))
+      index = nextIndex - 1
+      continue
+    }
 
-  if (item.toolName === 'domain_selector.selectPackages') {
-    const parts = [
-      typeof result.intent === 'string' && result.intent.trim() ? `意图：${result.intent.trim()}` : '',
-      typeof result.reason === 'string' && result.reason.trim() ? `原因：${result.reason.trim()}` : '',
-      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
-    ]
-    return parts.filter(Boolean).join('\n') || null
+    rows.push(buildSingleRow(current))
   }
 
-  if (item.toolName === 'reference_planner.decide') {
-    const riskFlags = Array.isArray(result.riskFlags)
-      ? result.riskFlags.map(String).map((value) => value.trim()).filter(Boolean)
-      : []
-    const parts = [
-      typeof result.reason === 'string' && result.reason.trim() ? `规划原因：${result.reason.trim()}` : '',
-      typeof result.action === 'string' ? `下一步：${result.action === 'generate' ? '直接进入生成/修复' : '继续补充 reference 文档'}` : '',
-      riskFlags.length ? `风险标记：${riskFlags.join(', ')}` : '',
-      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
-    ]
-    return parts.filter(Boolean).join('\n') || null
-  }
-
-  if (item.toolName === 'error_analyzer.analyze') {
-    const checklist = Array.isArray(result.fixChecklist)
-      ? result.fixChecklist.map(String).map((value) => value.trim()).filter(Boolean).slice(0, 3)
-      : []
-    const parts = [
-      typeof result.likelyCause === 'string' && result.likelyCause.trim() ? `根因判断：${result.likelyCause.trim()}` : '',
-      checklist.length ? `修复清单：${checklist.join('；')}` : '',
-      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
-    ]
-    return parts.filter(Boolean).join('\n') || null
-  }
-
-  if (item.toolName === 'code_verifier.validate' || item.toolName === 'code_guard.validate') {
-    const critique = typeof result.critique === 'string' ? result.critique.trim() : ''
-    return critique ? `Verifier 说明：${critique}` : null
-  }
-
-  if (item.toolName === 'visual_inspector.diagnose') {
-    const parts = [
-      typeof result.summary === 'string' && result.summary.trim() ? `结论：${result.summary.trim()}` : '',
-      typeof result.diagnosis === 'string' && result.diagnosis.trim() ? `观察：${result.diagnosis.trim()}` : '',
-      typeof result.confidence === 'number' ? `把握度：${Math.round(result.confidence * 100)}%` : '',
-    ]
-    return parts.filter(Boolean).join('\n') || null
-  }
-
-  return null
-}
-
-function modeBadgeClass(mode: 'fix' | 'generate' | undefined) {
-  if (mode === 'fix') return 'bg-amber-50 text-amber-700 border-amber-200/80'
-  if (mode === 'generate') return 'bg-slate-50 text-slate-600 border-slate-200/80'
-  return 'bg-gray-50 text-gray-500 border-gray-200/80'
+  return rows
 }
 
 export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; streaming?: boolean }) {
-  if (!items.length) return null
+  const rows = buildRows(items)
+  if (!rows.length) return null
 
-  const runningCount = items.filter((i) => i.status === 'running').length
+  const runningCount = rows.filter((row) => row.status === 'running').length
+  const hiddenCount = items.length - rows.length
 
   return (
     <details open={streaming ? true : undefined} className="mb-2 rounded-xl border border-gray-200/80 bg-gray-50/70 overflow-hidden soft-panel">
@@ -348,8 +149,12 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4.5 6.75h15m-15 5.25h10.5m-10.5 5.25h15" />
             </svg>
           </span>
-          <span className="text-[12px] font-medium text-gray-700">ThoughtChain</span>
-          <span className="text-[11px] text-gray-400">{items.length} 步</span>
+          <div className="min-w-0">
+            <div className="text-[12px] font-medium text-gray-700">执行过程</div>
+            <div className="text-[10.5px] text-gray-400">
+              {rows.length} 个关键活动{hiddenCount > 0 ? `，已折叠 ${hiddenCount} 个内部步骤` : ''}
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {runningCount > 0 && (
@@ -365,80 +170,71 @@ export function ThoughtChain({ items, streaming }: { items: ThoughtChainItem[]; 
       </summary>
 
       <div className="px-2 pb-2 space-y-1.5 animate-fade-in">
-        {items.map((item) => {
-          const argsText = formatValue(item.args)
-          const resultText = formatValue(item.result)
-          const mode = getMode(item)
-          const title = getTitle(item)
-          const summary = getSummary(item)
-          const explanation = getExplanation(item)
-          const durationMs =
-            typeof item.startedAt === 'number' && typeof item.endedAt === 'number'
-              ? Math.max(0, item.endedAt - item.startedAt)
-              : null
+        {rows.map((row) => {
+          const body = (
+            <>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="text-[11.5px] font-medium text-gray-700 leading-relaxed truncate">{row.label}</div>
+                  {row.grouped && typeof row.stepCount === 'number' && (
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md border border-slate-200 bg-slate-50 text-slate-500">
+                      {row.stepCount} 步
+                    </span>
+                  )}
+                </div>
+                {row.summary && (
+                  <div className="text-[10.5px] text-gray-500 leading-relaxed whitespace-pre-wrap break-words mt-0.5">
+                    {row.summary}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {row.durationMs != null && row.status !== 'running' && (
+                  <span className="text-[10.5px] text-gray-400">{row.durationMs}ms</span>
+                )}
+                <span className={`text-[10.5px] px-1.5 py-0.5 rounded-md border ${statusClass(row.status)}`}>
+                  {statusLabel(row.status)}
+                </span>
+              </div>
+            </>
+          )
+
+          if (!row.grouped || !row.children?.length) {
+            return (
+              <div
+                key={row.key}
+                className="bg-white border border-gray-200/80 rounded-lg px-2.5 py-2 flex items-start justify-between gap-3 soft-panel"
+              >
+                {body}
+              </div>
+            )
+          }
 
           return (
             <details
-              key={item.toolCallId}
-              open={item.status === 'running' ? true : undefined}
+              key={row.key}
+              open={row.status === 'running' ? true : undefined}
               className="bg-white border border-gray-200/80 rounded-lg overflow-hidden soft-panel"
             >
-              <summary className="list-none cursor-pointer px-2.5 py-2 flex items-center justify-between gap-2 hover:bg-gray-50/60 soft-pop">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11.5px] font-medium text-gray-700 leading-relaxed">{title}</div>
-                  <div className="text-[10.5px] text-gray-400 truncate font-mono">{item.toolName}</div>
-                  {summary && (
-                    <div className="text-[10.5px] text-gray-500 leading-relaxed whitespace-pre-wrap break-words mt-0.5">
-                      {summary}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {mode && (
-                    <span className={`text-[10.5px] px-1.5 py-0.5 rounded-md border ${modeBadgeClass(mode)}`}>
-                      {mode === 'fix' ? '修复' : '生成'}
-                    </span>
-                  )}
-                  {durationMs != null && item.status !== 'running' && (
-                    <span className="text-[10.5px] text-gray-400">{durationMs}ms</span>
-                  )}
-                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded-md border ${statusClass(item)}`}>
-                    {statusLabel(item)}
-                  </span>
-                </div>
+              <summary className="list-none cursor-pointer px-2.5 py-2 flex items-start justify-between gap-3 hover:bg-gray-50/60 soft-pop">
+                {body}
               </summary>
-
-              <div className="border-t border-gray-100 px-2.5 py-2 space-y-2 animate-fade-in">
-                {explanation && (
-                  <div>
-                    <div className="text-[10.5px] text-gray-400 mb-1">节点说明</div>
-                    <div className="m-0 p-2 rounded-md bg-blue-50/60 text-[10.5px] leading-relaxed text-gray-700 whitespace-pre-wrap break-words soft-surface">
-                      {explanation}
+              <div className="border-t border-gray-100 px-2.5 py-2 space-y-1.5 bg-slate-50/55">
+                {row.children.map((child) => (
+                  <div key={child.key} className="flex items-start justify-between gap-3 rounded-md bg-white/75 border border-slate-100 px-2 py-1.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10.5px] font-medium text-slate-600 leading-relaxed truncate">{child.label}</div>
+                      {child.summary && (
+                        <div className="text-[10px] text-slate-500 leading-relaxed whitespace-pre-wrap break-words mt-0.5">
+                          {child.summary}
+                        </div>
+                      )}
                     </div>
+                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-md border ${statusClass(child.status)}`}>
+                      {statusLabel(child.status)}
+                    </span>
                   </div>
-                )}
-                <div>
-                  <div className="text-[10.5px] text-gray-400 mb-1">调用 ID</div>
-                  <div className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 break-all font-mono soft-surface">
-                    {item.toolCallId}
-                  </div>
-                </div>
-                {argsText && (
-                  <div>
-                    <div className="text-[10.5px] text-gray-400 mb-1">参数</div>
-                    <pre className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 whitespace-pre-wrap break-all font-mono soft-surface">
-                      {argsText}
-                    </pre>
-                  </div>
-                )}
-                {resultText && (
-                  <div>
-                    <div className="text-[10.5px] text-gray-400 mb-1">结果</div>
-                    <pre className="m-0 p-2 rounded-md bg-gray-50 text-[10.5px] leading-relaxed text-gray-600 whitespace-pre-wrap break-all font-mono soft-surface">
-                      {resultText}
-                    </pre>
-                  </div>
-                )}
+                ))}
               </div>
             </details>
           )

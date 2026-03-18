@@ -1,6 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { createLLM } from '../llm/createLLM.js'
-import type { LlmSelection } from '../provider/index.js'
 import { formatPlanningPolicyCards } from './PlanningPolicyCatalog.js'
 import { extractTextContent, parseJsonObject } from './PlannerJson.js'
 import type { ReferencePlan } from './AgentRuntimeTypes.js'
@@ -18,7 +17,6 @@ export class ReferencePlanner {
     fileData?: string
     runtimeError?: string
     mode: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): Promise<ReferencePlan> {
     const domains = params.selectedPackageIds
       .map((packageId) => this.skillStore.getPackageEntry(packageId)?.domainId)
@@ -59,7 +57,7 @@ export class ReferencePlanner {
     ].filter(Boolean).join('\n')
 
     try {
-      const llm = createLLM({ temperature: 0, maxTokens: 900, llmSelection: params.llmSelection })
+      const llm = createLLM({ temperature: 0, maxTokens: 900 })
       const response = await llm.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(userPrompt),

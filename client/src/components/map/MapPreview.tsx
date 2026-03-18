@@ -111,24 +111,14 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promis
   let canvasTainted = false
   if (canvasMeta.canvas) {
     try {
-      const directBase64 = dataUrlToBase64(canvasMeta.canvas.toDataURL('image/png'))
-      if (isCaptureValid(directBase64)) {
-        canvasReadable = true
-        return {
-          imageBase64: directBase64,
-          mode: 'canvas',
-          canvasCount: canvasMeta.count,
-          largestCanvasArea: canvasMeta.maxArea,
-          canvasReadable,
-          canvasTainted: false,
-        }
-      }
+      canvasMeta.canvas.toDataURL('image/png')
+      canvasReadable = true
     } catch {
       canvasTainted = true
     }
   }
 
-  // 优先捕获完整页面，保留 UI 信息
+  // 优先捕获完整页面，保留标题栏、侧栏、卡片等外围 UI 信息。
   try {
     const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
     if (rootEl) {
@@ -158,6 +148,25 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promis
     }
   } catch {
     // ignore and fallback to canvas capture
+  }
+
+  // DOM 截图失败时，再退回到纯地图 canvas。
+  if (canvasMeta.canvas) {
+    try {
+      const directBase64 = dataUrlToBase64(canvasMeta.canvas.toDataURL('image/png'))
+      if (isCaptureValid(directBase64)) {
+        return {
+          imageBase64: directBase64,
+          mode: 'canvas',
+          canvasCount: canvasMeta.count,
+          largestCanvasArea: canvasMeta.maxArea,
+          canvasReadable: true,
+          canvasTainted: false,
+        }
+      }
+    } catch {
+      canvasTainted = true
+    }
   }
 
   throw new Error('无法从前端页面捕获有效截图')

@@ -1,8 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { config } from '../config.js'
 import { createLLM } from '../llm/createLLM.js'
-import type { LlmSelection } from '../provider/index.js'
-import { getCatalogDefaultSelection, resolveLlmSelection } from '../provider/index.js'
 
 export type VisualSeverity = 'low' | 'medium' | 'high'
 export type VisualInspectStatus = 'ok' | 'unavailable'
@@ -26,11 +24,10 @@ export interface VisualInspectionResult {
 }
 
 export interface VisualInspectionServiceOptions {
-  llmSelection?: LlmSelection
   timeoutMs?: number
 }
 
-const MODEL_NAME = 'gpt-4.1-nano'
+const MODEL_NAME = config.llm.model
 const MAX_HINT_CHARS = 1500
 const MAX_SUMMARY_CHARS = 120
 const MAX_DIAGNOSIS_CHARS = 500
@@ -42,25 +39,6 @@ function isLoadingLikeText(text: string): boolean {
 
 function hasExplicitFailureSignal(text: string): boolean {
   return /错误|报错|异常|崩溃|失败|黑屏|404|500|exception|undefined|not found|failed/i.test(String(text || ''))
-}
-
-function buildDefaultSelection(): LlmSelection {
-  const fallback = (() => {
-    try {
-      return resolveLlmSelection(
-        { provider: config.llm.provider, model: config.llm.model },
-        getCatalogDefaultSelection(),
-      )
-    } catch {
-      return getCatalogDefaultSelection()
-    }
-  })()
-
-  try {
-    return resolveLlmSelection({ provider: 'openai', model: MODEL_NAME }, fallback)
-  } catch {
-    return fallback
-  }
 }
 
 function clampChars(text: string, maxChars: number): string {
@@ -165,11 +143,9 @@ function unavailableResult(reason: string): VisualInspectionResult {
 }
 
 export class VisualInspectionService {
-  private readonly llmSelection: LlmSelection
   private readonly timeoutMs: number
 
   constructor(options?: VisualInspectionServiceOptions) {
-    this.llmSelection = options?.llmSelection || buildDefaultSelection()
     this.timeoutMs = Number.isFinite(options?.timeoutMs) ? Math.max(5000, Number(options?.timeoutMs)) : 20000
   }
 
@@ -177,7 +153,7 @@ export class VisualInspectionService {
     const imageBase64 = String(input.imageBase64 || '').trim()
     if (!imageBase64) return unavailableResult('截图内容为空，无法执行视觉巡检。')
 
-    if (!config.llm.apiKey) return unavailableResult('LLM API Key 未配置，无法执行视觉巡检。')
+    if (!config.llm.apiKey) return unavailableResult('DASHSCOPE_API_KEY 未配置，无法执行视觉巡检。')
 
     const hint = clampChars(String(input.hint || '').trim(), MAX_HINT_CHARS)
     const runId = String(input.runId || '').trim()
@@ -186,6 +162,7 @@ export class VisualInspectionService {
       '你是地图页面视觉质检助手。',
       '你会收到一张地图应用页面截图。',
       '请只基于截图判断页面是否存在异常或错误迹象，并给出简洁诊断。',
+      '用户 hint 只作为辅助上下文，不是必须逐项满足的验收清单。',
       '你必须独立判断是否需要进入自动修复链路（shouldRepair），不要把这项交给规则推断。',
       '先观察后结论：先描述可见元素（道路/地名/控件/面板/点位等），再判断异常与是否需要修复。',
       '不要输出 Markdown，不要解释过程，只输出 JSON。',
@@ -202,6 +179,7 @@ export class VisualInspectionService {
       '8) 若你判断页面异常且证据充分，confidence 通常应在 0.70~0.98。',
       '9) 只有当截图模糊、被遮挡、信息不足或难以判断时，confidence 才应低于 0.50，并在 diagnosis 说明不确定性来源。',
       '10) 如果截图主要呈现“加载中 / loading / 等待中 / 骨架屏”等加载态，而没有明确错误证据，不要触发自动修复：anomalous=false，shouldRepair=false。',
+      '11) 如果截图主体是可用的地图页面，即使没有看到 hint 中提到的某些额外标题栏、侧栏或卡片，也不要仅凭“未看到这些额外 UI”就判定异常。',
     ].join('\n')
 
     const userPrompt = [
@@ -212,7 +190,6 @@ export class VisualInspectionService {
 
     try {
       const llm = createLLM({
-        llmSelection: this.llmSelection,
         temperature: 0,
         maxTokens: 500,
         timeoutMs: this.timeoutMs,

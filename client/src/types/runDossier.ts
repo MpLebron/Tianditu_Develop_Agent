@@ -47,7 +47,6 @@ export interface RunRequestSnapshot {
   userPrompt: string
   conversationHistory?: string
   existingCodeChars?: number
-  modelProvider?: string
   modelName?: string
   entrySource: RunEntrySource
   fileName?: string
@@ -66,7 +65,6 @@ export interface RunDossierSummary {
   entrySource: RunEntrySource
   sampleId?: string
   userPrompt: string
-  modelProvider?: string
   modelName?: string
   agentMode?: string
   verifierEnabled: boolean

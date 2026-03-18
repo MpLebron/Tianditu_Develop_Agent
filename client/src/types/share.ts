@@ -27,6 +27,7 @@ export interface ShareSuggestResult {
   title: string
   description: string
   source: 'ai' | 'fallback'
+  model?: string
 }
 
 export interface SharePublicListResult {

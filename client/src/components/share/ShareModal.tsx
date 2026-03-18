@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { shareApi } from '../../services/shareApi'
 import { useChatStore } from '../../stores/useChatStore'
 import type { Message } from '../../types/chat'
-import type { ShareCreateResult, ShareSuggestResult, ShareVisibility } from '../../types/share'
+import type { ShareCreateResult, ShareVisibility } from '../../types/share'
 import { copyText } from '../../utils/copyText'
 import { isLikelyBlankThumbnailBase64 } from '../../utils/isLikelyBlankThumbnail'
 import { captureMapPreviewPngBase64 } from '../../utils/mapPreviewCapture'
@@ -16,8 +16,13 @@ interface ShareModalProps {
 const PUBLISH_CAPTURE_ATTEMPTS = 4
 const PUBLISH_CAPTURE_RETRY_MS = 700
 
-function defaultTitle() {
-  return `地图快照 ${new Date().toLocaleString('zh-CN', { hour12: false })}`
+function hashText(text: string) {
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
+  }
+  return (hash >>> 0).toString(16)
 }
 
 function buildSuggestionPrompt(messages: Message[]): string {
@@ -60,25 +65,37 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
   const [visibility, setVisibility] = useState<ShareVisibility>('unlisted')
   const [submitting, setSubmitting] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
-  const [suggestion, setSuggestion] = useState<ShareSuggestResult | null>(null)
   const [suggestError, setSuggestError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ShareCreateResult | null>(null)
   const [copyHint, setCopyHint] = useState<string | null>(null)
+  const autoSuggestKeyRef = useRef('')
+  const suggestAbortRef = useRef<AbortController | null>(null)
+  const suggestRunIdRef = useRef(0)
+  const titleEditedRef = useRef(false)
+  const descriptionEditedRef = useRef(false)
 
   useEffect(() => {
     if (!open) return
-    setTitle(defaultTitle())
+    suggestAbortRef.current?.abort()
+    suggestAbortRef.current = null
+    setTitle('')
     setDescription('')
     setVisibility('unlisted')
     setSubmitting(false)
     setSuggesting(false)
-    setSuggestion(null)
     setSuggestError(null)
     setError(null)
     setResult(null)
     setCopyHint(null)
+    autoSuggestKeyRef.current = ''
+    titleEditedRef.current = false
+    descriptionEditedRef.current = false
   }, [open])
+
+  useEffect(() => () => {
+    suggestAbortRef.current?.abort()
+  }, [])
 
   const disabled = useMemo(() => !code || !code.trim() || submitting, [code, submitting])
   const suggestDisabled = useMemo(
@@ -86,8 +103,10 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
     [code, submitting, suggesting],
   )
   const suggestionPrompt = useMemo(() => buildSuggestionPrompt(messages), [messages])
-
-  if (!open) return null
+  const suggestionKey = useMemo(() => {
+    if (!code || !code.trim()) return ''
+    return `${hashText(code)}:${hashText(suggestionPrompt || '')}`
+  }, [code, suggestionPrompt])
 
   const captureThumbnailOnPublish = async (): Promise<string | undefined> => {
     for (let attempt = 0; attempt < PUBLISH_CAPTURE_ATTEMPTS; attempt += 1) {
@@ -146,31 +165,78 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
     setTimeout(() => setCopyHint(null), 2200)
   }
 
-  const handleSuggest = async () => {
+  const handleSuggest = async (origin: 'auto' | 'manual' = 'manual') => {
     if (!code || !code.trim()) {
       setSuggestError('当前没有可分享的地图代码，请先生成地图')
       return
     }
+    suggestAbortRef.current?.abort()
+    const controller = new AbortController()
+    suggestAbortRef.current = controller
+    const runId = suggestRunIdRef.current + 1
+    suggestRunIdRef.current = runId
+
     setSuggesting(true)
     setSuggestError(null)
+    if (origin === 'manual') {
+      setTitle('')
+      setDescription('')
+    }
+
     try {
-      const nextSuggestion = await shareApi.suggest({
+      await shareApi.suggestStream({
         code,
         hint: suggestionPrompt || undefined,
         prompt: suggestionPrompt || undefined,
+      }, {
+        signal: controller.signal,
+        onDelta: (event) => {
+          if (suggestRunIdRef.current !== runId) return
+          if (origin === 'manual') {
+            setTitle(event.title || '')
+            setDescription(event.description || '')
+            return
+          }
+          if (!titleEditedRef.current && event.title) {
+            setTitle(event.title)
+          }
+          if (!descriptionEditedRef.current && event.description) {
+            setDescription(event.description)
+          }
+        },
       })
-      setSuggestion(nextSuggestion)
     } catch (err: any) {
-      setSuggestError(err?.message || '灵感生成失败，请重试')
+      if (controller.signal.aborted) return
+      setSuggestError(origin === 'auto'
+        ? (err?.message || '自动生成页面介绍失败，请手动重试')
+        : (err?.message || '灵感生成失败，请重试'))
     } finally {
-      setSuggesting(false)
+      if (suggestRunIdRef.current === runId) {
+        setSuggesting(false)
+        if (suggestAbortRef.current === controller) {
+          suggestAbortRef.current = null
+        }
+      }
     }
   }
 
-  const applySuggestion = () => {
-    if (!suggestion) return
-    setTitle(suggestion.title)
-    setDescription(suggestion.description)
+  useEffect(() => {
+    if (!open || !suggestionKey || !code || !code.trim()) return
+    if (autoSuggestKeyRef.current === suggestionKey) return
+    autoSuggestKeyRef.current = suggestionKey
+    void handleSuggest('auto')
+  }, [open, suggestionKey, code])
+
+  if (!open) return null
+
+  const handleTitleChange = (value: string) => {
+    titleEditedRef.current = true
+    setTitle(value)
+  }
+
+  const handleDescriptionChange = (value: string) => {
+    descriptionEditedRef.current = true
+    setDescription(value)
   }
 
   return (
@@ -200,107 +266,45 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
             <div className="relative">
               <input
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => handleTitleChange(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 pr-[92px] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-                placeholder="输入分享标题"
+                placeholder={suggesting ? 'AI 正在生成分享标题...' : '输入分享标题'}
                 maxLength={80}
               />
               <button
                 type="button"
                 disabled={suggestDisabled}
-                onClick={handleSuggest}
+                onClick={() => handleSuggest('manual')}
                 className={`absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs transition ${
                   suggestDisabled
                     ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                     : 'bg-violet-50 text-violet-700 hover:bg-violet-100'
                 }`}
               >
-                {suggesting ? '生成中...' : '✨ 灵感'}
+                重新生成
               </button>
             </div>
             <div className="text-[11px] text-slate-400">
-              使用 AI 生成标题和描述建议，不会自动覆盖，需手动应用
+              打开弹窗后会自动补全标题和介绍，你也可以继续手动修改
             </div>
           </div>
 
           <div className="space-y-1.5">
             <label className="text-[13px] font-medium text-slate-700">描述（可选）</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-              placeholder="补充地图用途或数据说明"
-              maxLength={240}
-            />
+            <div className="relative">
+              <textarea
+                value={description}
+                onChange={(e) => handleDescriptionChange(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+                placeholder={suggesting ? 'AI 正在生成分享介绍...' : '补充地图用途或数据说明'}
+                maxLength={240}
+              />
+            </div>
           </div>
 
-          {(suggesting || suggestion || suggestError) && !result && (
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50/55 p-3 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-medium text-indigo-900">AI 灵感建议</div>
-                {suggestion?.source && (
-                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-indigo-100 text-indigo-700">
-                    {suggestion.source === 'ai' ? 'AI 生成' : '规则兜底'}
-                  </span>
-                )}
-              </div>
-
-              {suggesting && (
-                <div className="text-xs text-indigo-700">正在生成建议，请稍候...</div>
-              )}
-
-              {!suggesting && suggestion && (
-                <div className="space-y-2">
-                  <div className="rounded-lg border border-indigo-100 bg-white p-2.5">
-                    <div className="text-[11px] text-slate-500 mb-1">建议标题</div>
-                    <div className="text-sm text-slate-800">{suggestion.title}</div>
-                  </div>
-                  <div className="rounded-lg border border-indigo-100 bg-white p-2.5">
-                    <div className="text-[11px] text-slate-500 mb-1">建议描述</div>
-                    <div className="text-sm text-slate-700 leading-6">{suggestion.description}</div>
-                  </div>
-                </div>
-              )}
-
-              {!suggesting && suggestError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs px-2.5 py-2">
-                  {suggestError}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-0.5">
-                {suggestion && (
-                  <button
-                    type="button"
-                    onClick={applySuggestion}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700 transition"
-                  >
-                    应用建议
-                  </button>
-                )}
-                <button
-                  type="button"
-                  disabled={suggestDisabled}
-                  onClick={handleSuggest}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition ${
-                    suggestDisabled
-                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                      : 'border border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                  }`}
-                >
-                  换一个
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSuggestion(null)
-                    setSuggestError(null)
-                  }}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-xs hover:bg-slate-50 transition"
-                >
-                  关闭
-                </button>
-              </div>
+          {!result && suggestError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs px-3 py-2">
+              {suggestError}
             </div>
           )}
 

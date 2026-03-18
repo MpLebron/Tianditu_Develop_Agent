@@ -41,3 +41,4 @@ coverage/
 .playwright-cli/
 output/
 server/data/run-dossiers/
+server/data/share/snapshots/

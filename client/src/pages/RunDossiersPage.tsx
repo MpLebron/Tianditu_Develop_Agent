@@ -647,7 +647,7 @@ export function RunDossiersPage() {
                       <div className="rounded-2xl border border-slate-200 bg-[#f7f5f0] p-4">
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">模型</div>
                         <div className="mt-2 text-sm font-semibold text-slate-900">{detail.summary.modelName || '-'}</div>
-                        <div className="mt-1 text-xs text-slate-500">{detail.summary.modelProvider || 'unknown provider'}</div>
+                        <div className="mt-1 text-xs text-slate-500">固定单模型链路</div>
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-[#f7f5f0] p-4">
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">文件</div>

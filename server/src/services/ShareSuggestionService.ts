@@ -1,8 +1,6 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { config } from '../config.js'
 import { createLLM } from '../llm/createLLM.js'
-import type { LlmSelection } from '../provider/index.js'
-import { getCatalogDefaultSelection, resolveLlmSelection } from '../provider/index.js'
 
 export interface ShareSuggestionInput {
   code: string
@@ -13,13 +11,20 @@ export interface ShareSuggestionResult {
   title: string
   description: string
   source: 'ai' | 'fallback'
+  model?: string
 }
 
-const MAX_CODE_CHARS = 120 * 1024
+export interface ShareSuggestionStreamChunk extends ShareSuggestionResult {
+  done?: boolean
+}
+
+const MAX_CODE_CHARS = 48 * 1024
 const MAX_HINT_CHARS = 1500
 const MAX_TITLE_CHARS = 80
 const MAX_DESCRIPTION_CHARS = 240
+const MAX_PROMPT_CODE_EXCERPT_CHARS = 12 * 1024
 const GENERIC_TITLE_RE = /^(地图快照|地图应用快照|地图应用|地图页面)\s*\d{0,4}/
+const TECHNICAL_TEXT_RE = /(api|sdk|js api|tmapgl|langchain|openai|qwen|token|tk=|接口|技术|实现|代码|脚本|html|css|javascript|typescript|geojson|\/api\/)/i
 
 function trimText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -37,6 +42,13 @@ function sanitizeTitle(raw: string): string {
 function sanitizeDescription(raw: string): string {
   const compact = raw.replace(/\s+/g, ' ').trim()
   return clampChars(compact, MAX_DESCRIPTION_CHARS)
+}
+
+function stripTitleSuffix(raw: string): string {
+  return raw
+    .replace(/[（(]?(演示|示例|快照|页面|应用)[）)]?$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function jsonCandidate(text: string): string | null {
@@ -61,6 +73,23 @@ function parseSuggestionJson(rawText: string): { title?: string; description?: s
     }
   } catch {
     return null
+  }
+}
+
+export function parseLabeledSuggestionText(rawText: string): { title?: string; description?: string } {
+  const text = String(rawText || '')
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, ''))
+    .replace(/\r/g, '')
+
+  const titleMatch = text.match(/标题[:：]\s*([\s\S]*?)(?=\n描述[:：]|\n?$)/)
+  const descriptionMatch = text.match(/描述[:：]\s*([\s\S]*)$/)
+
+  const title = sanitizeTitle(titleMatch?.[1] || '')
+  const description = sanitizeDescription(descriptionMatch?.[1] || '')
+
+  return {
+    title: title || undefined,
+    description: description || undefined,
   }
 }
 
@@ -118,6 +147,7 @@ interface CodeSignals {
   headings: string[]
   apiEndpoints: string[]
   chinesePhrases: string[]
+  uiPhrases: string[]
 }
 
 function uniq<T>(arr: T[]): T[] {
@@ -132,12 +162,22 @@ function cleanSignalText(value: string): string {
     .trim()
 }
 
+function isTechnicalPhrase(value: string): boolean {
+  const text = cleanSignalText(value)
+  if (!text) return true
+  if (!/[\u4e00-\u9fa5]/.test(text)) return true
+  if (TECHNICAL_TEXT_RE.test(text)) return true
+  if (/^https?:\/\//i.test(text)) return true
+  if (/^[A-Za-z0-9_./:=?-]+$/.test(text)) return true
+  return false
+}
+
 function extractCodeSignals(code: string): CodeSignals {
   const titleMatch = code.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
-  const pageTitle = cleanSignalText(titleMatch?.[1] || '')
+  const pageTitle = stripTitleSuffix(cleanSignalText(titleMatch?.[1] || ''))
 
   const headingMatches = [...code.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi)]
-    .map((m) => cleanSignalText(m[1] || ''))
+    .map((m) => stripTitleSuffix(cleanSignalText(m[1] || '')))
     .filter(Boolean)
     .slice(0, 6)
 
@@ -154,120 +194,294 @@ function extractCodeSignals(code: string): CodeSignals {
     .slice(0, 40)
   const chinesePhrases = uniq(phraseCandidates).slice(0, 12)
 
+  const placeholderMatches = [...code.matchAll(/\b(?:placeholder|aria-label|title)\s*=\s*["']([^"'`\n]{2,40})["']/gi)]
+    .map((m) => cleanSignalText(m[1] || ''))
+  const buttonMatches = [...code.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/gi)]
+    .map((m) => cleanSignalText(m[1] || ''))
+  const uiPhrases = uniq([
+    ...headingMatches,
+    ...placeholderMatches,
+    ...buttonMatches,
+    ...chinesePhrases,
+  ])
+    .filter((text) => !isTechnicalPhrase(text))
+    .slice(0, 16)
+
   return {
     pageTitle,
     headings: headingMatches,
     apiEndpoints,
     chinesePhrases,
+    uiPhrases,
   }
 }
 
-function fallbackSuggestion(input: ShareSuggestionInput): ShareSuggestionResult {
+function pickBestTitle(signals: CodeSignals, hint: string, sceneLabel: string): string {
+  const hintLine = stripTitleSuffix(clampChars(hint.replace(/\s+/g, ' ').trim(), 30))
+  const titleCandidates = [
+    signals.pageTitle,
+    ...signals.headings,
+    ...signals.uiPhrases,
+    hintLine,
+    sceneLabel,
+  ]
+    .map((text) => stripTitleSuffix(text))
+    .filter(Boolean)
+    .filter((text) => !GENERIC_TITLE_RE.test(text))
+    .filter((text) => !isTechnicalPhrase(text) || text === sceneLabel)
+
+  return sanitizeTitle(titleCandidates[0] || sceneLabel)
+}
+
+function buildExperienceHighlights(sceneKey: string, signals: CodeSignals): string[] {
+  const joined = `${signals.pageTitle}\n${signals.headings.join(' ')}\n${signals.uiPhrases.join(' ')}`
+  const highlights: string[] = []
+
+  if (/搜索|检索|附近|周边|poi|结果/.test(joined.toLowerCase())) {
+    highlights.push('左侧可浏览搜索结果，地图会同步定位相关点位')
+  }
+  if (/当前位置|搜索中心|location|坐标|经度|纬度/.test(joined.toLowerCase())) {
+    highlights.push('支持查看当前定位中心及关键信息')
+  }
+  if (/详情|弹窗|popup|点击/.test(joined.toLowerCase())) {
+    highlights.push('点击地图点位后可查看详情信息')
+  }
+  if (sceneKey === 'drive') {
+    highlights.push('页面会展示起终点、路线轨迹和行程信息')
+  }
+  if (sceneKey === 'transit') {
+    highlights.push('页面会展示公交地铁换乘路线与出行信息')
+  }
+  if (sceneKey === 'admin') {
+    highlights.push('页面重点展示行政区范围与边界轮廓')
+  }
+  if (sceneKey === 'polygon') {
+    highlights.push('页面重点展示区域面数据及其专题信息')
+  }
+  if (sceneKey === 'marker' && !highlights.length) {
+    highlights.push('页面会在地图上突出显示重点点位')
+  }
+
+  return uniq(highlights).slice(0, 3)
+}
+
+function buildPromptCodeExcerpt(code: string, signals: CodeSignals): string {
+  if (!code) return ''
+
+  const snippets: string[] = []
+  const seenRanges = new Set<string>()
+  const anchors = uniq([
+    signals.pageTitle,
+    ...signals.headings,
+    ...signals.uiPhrases,
+  ])
+    .filter(Boolean)
+    .slice(0, 10)
+
+  const pushRange = (label: string, start: number, end: number) => {
+    const safeStart = Math.max(0, start)
+    const safeEnd = Math.min(code.length, end)
+    if (safeEnd <= safeStart) return
+    const key = `${safeStart}:${safeEnd}`
+    if (seenRanges.has(key)) return
+    seenRanges.add(key)
+    snippets.push(`[${label}]`)
+    snippets.push(code.slice(safeStart, safeEnd))
+  }
+
+  pushRange('head', 0, Math.min(code.length, 2400))
+
+  for (const anchor of anchors) {
+    const index = code.indexOf(anchor)
+    if (index < 0) continue
+    pushRange(`anchor:${anchor}`, index - 320, index + anchor.length + 480)
+  }
+
+  if (!snippets.length) {
+    return clampChars(code, MAX_PROMPT_CODE_EXCERPT_CHARS)
+  }
+
+  return clampChars(snippets.join('\n\n'), MAX_PROMPT_CODE_EXCERPT_CHARS)
+}
+
+export function buildFallbackShareSuggestion(input: ShareSuggestionInput): ShareSuggestionResult {
   const hint = trimText(input.hint)
   const signals = extractCodeSignals(input.code)
   const scene = detectScene(`${hint}\n${signals.pageTitle}\n${signals.headings.join(' ')}\n${input.code}`)
-  const hintPrefix = hint ? `${clampChars(hint.replace(/\s+/g, ' ').trim(), 24)} · ` : ''
-  const signalTitle = signals.pageTitle && !GENERIC_TITLE_RE.test(signals.pageTitle) ? signals.pageTitle : ''
-  const titleSeed = signalTitle || `${hintPrefix}${scene.label}`
-  const title = sanitizeTitle(titleSeed || scene.label)
+  const title = pickBestTitle(signals, hint, scene.label)
 
-  const sceneDescriptionMap: Record<string, string> = {
-    transit: '基于公交/地铁路径规划结果，展示路线、换乘信息与出行时长。',
-    drive: '基于驾车路径规划结果，展示起终点、路线轨迹与里程耗时。',
-    admin: '加载行政区划边界数据并进行区域轮廓可视化展示。',
-    poi: '在指定范围内检索并展示关键 POI 点位及属性信息。',
-    geocode: '通过地理编码与逆地理编码能力实现地址与坐标定位。',
-    heatmap: '使用空间热力分布展示重点区域的数据密度与趋势。',
-    marker: '在地图上展示核心点位标注，并提供交互信息提示。',
-    polygon: '展示 GeoJSON 面数据并结合状态字段进行专题表达。',
-    base: '基于天地图 JS API 生成的可交互地图页面快照。',
+  const sceneIntroMap: Record<string, string> = {
+    transit: `页面围绕“${title}”展开，适合查看公交地铁出行方案`,
+    drive: `页面围绕“${title}”展开，适合查看路线与出行信息`,
+    admin: `页面围绕“${title}”展开，适合查看行政区范围与边界信息`,
+    poi: `页面围绕“${title}”展开，适合查看周边点位与搜索结果`,
+    geocode: `页面围绕“${title}”展开，适合查看地点定位与坐标信息`,
+    heatmap: `页面围绕“${title}”展开，适合查看空间分布热点`,
+    marker: `页面围绕“${title}”展开，适合查看重点点位与位置分布`,
+    polygon: `页面围绕“${title}”展开，适合查看区域范围与专题信息`,
+    base: `页面围绕“${title}”展开，适合快速查看地图内容`,
   }
-  const endpointHint = signals.apiEndpoints.length
-    ? `主要接口：${signals.apiEndpoints.slice(0, 3).join('、')}。`
-    : ''
-  const phraseHint = signals.chinesePhrases.length
-    ? `关键要素：${signals.chinesePhrases.slice(0, 3).join('、')}。`
-    : ''
-  const description = sanitizeDescription(`${sceneDescriptionMap[scene.key]}${endpointHint}${phraseHint}`)
+  const highlights = buildExperienceHighlights(scene.key, signals)
+  const uiHint = signals.uiPhrases
+    .filter((text) => text !== title)
+    .slice(0, 3)
+    .join('、')
+  const description = sanitizeDescription([
+    sceneIntroMap[scene.key] || `页面围绕“${title}”展开`,
+    highlights.length ? `并且 ${highlights.join('；')}。` : '。',
+    uiHint ? `页面中还能看到 ${uiHint} 等信息。` : '',
+  ].join(''))
+
   return { title, description, source: 'fallback' }
 }
 
-function buildDefaultSelection(): LlmSelection {
-  const fallback = (() => {
-    try {
-      return resolveLlmSelection(
-        { provider: config.llm.provider, model: config.llm.model },
-        getCatalogDefaultSelection(),
-      )
-    } catch {
-      return getCatalogDefaultSelection()
-    }
-  })()
-
-  try {
-    // 分享文案生成固定优先 DeepSeek-V3（速度优先）
-    return resolveLlmSelection(
-      { provider: 'deepseek', model: 'DeepSeek-V3' },
-      fallback,
-    )
-  } catch {
-    return fallback
-  }
-}
-
 export class ShareSuggestionService {
-  private readonly llmSelection: LlmSelection
   private readonly tiandituToken?: string
 
-  constructor(options?: { llmSelection?: LlmSelection; tiandituToken?: string }) {
-    this.llmSelection = options?.llmSelection || buildDefaultSelection()
+  constructor(options?: { tiandituToken?: string }) {
     this.tiandituToken = options?.tiandituToken || config.tiandituToken
   }
 
-  async suggest(input: ShareSuggestionInput): Promise<ShareSuggestionResult> {
+  private buildSuggestionContext(input: ShareSuggestionInput) {
     const code = trimText(input.code)
     const hint = clampChars(trimText(input.hint), MAX_HINT_CHARS)
     if (!code) throw new Error('分享代码不能为空')
 
-    const fallback = fallbackSuggestion({ code, hint })
-    if (!config.llm.apiKey) return fallback
-
+    const fallback = buildFallbackShareSuggestion({ code, hint })
     const redactedCode = redactCodeForPrompt(code, this.tiandituToken)
     const truncatedCode = clampChars(redactedCode, MAX_CODE_CHARS)
     const signals = extractCodeSignals(redactedCode)
     const scene = detectScene(`${hint}\n${signals.pageTitle}\n${signals.headings.join(' ')}`).label
+    const focusedCodeExcerpt = buildPromptCodeExcerpt(truncatedCode, signals)
 
-    const systemPrompt = [
-      '你是地图分享文案助手。',
-      '请根据任务 prompt 与当前地图页面代码，生成一个简洁中文标题和描述。',
-      '标题和描述必须与当前地图页面实际内容强相关，优先使用代码中的业务实体（专题名、地名、图层/指标名称）。',
-      '禁止输出与页面无关的泛化文案。',
-      `硬性约束：标题 <= ${MAX_TITLE_CHARS} 字符，描述 <= ${MAX_DESCRIPTION_CHARS} 字符。`,
-      '只输出 JSON，不要输出 Markdown，不要代码块，不要额外解释。',
-      '输出格式：{"title":"...","description":"..."}',
-    ].join('\n')
-
-    const userPrompt = [
+    const basePromptLines = [
       `场景判定: ${scene}`,
       `任务Prompt（用户需求）: ${hint || '（无，需主要依据代码内容生成）'}`,
       signals.pageTitle ? `代码<title>: ${signals.pageTitle}` : '代码<title>: （无）',
       signals.headings.length ? `页面标题文本: ${signals.headings.join(' | ')}` : '页面标题文本: （无）',
-      signals.apiEndpoints.length ? `主要接口调用: ${signals.apiEndpoints.join('、')}` : '主要接口调用: （无）',
-      signals.chinesePhrases.length ? `代码关键词: ${signals.chinesePhrases.join('、')}` : '代码关键词: （无）',
-      '当前系统代码（已脱敏，必要时截断）:',
-      truncatedCode,
-    ].join('\n\n')
+      signals.uiPhrases.length ? `页面可见关键词: ${signals.uiPhrases.join('、')}` : '页面可见关键词: （无）',
+      signals.apiEndpoints.length ? `技术线索（仅作辅助，不要写进文案）: ${signals.apiEndpoints.join('、')}` : '技术线索（仅作辅助，不要写进文案）: （无）',
+      '代码片段摘录（已脱敏，仅保留与页面内容相关的关键片段；请用它确认页面内容，不要复述技术实现）:',
+      focusedCodeExcerpt || '（无）',
+    ]
+
+    return {
+      code,
+      hint,
+      fallback,
+      systemPrompt: [
+        '你是地图分享页文案助手。',
+        '你的文案会直接展示给最终用户，用来介绍这个网页里能看到什么、能做什么、适合什么场景。',
+        '请优先描述页面内容本身：主题对象、地点、列表/卡片/弹窗/路线/结果等用户可见元素，以及用户能完成的事情。',
+        '标题和描述必须与当前地图页面实际内容强相关，优先使用页面中的业务实体（专题名、地点名、机构名、对象名）。',
+        '不要把文案写成技术说明，不要介绍 API、SDK、接口路径、代码结构、实现方式、模型名称。',
+        '如果用户需求和最终页面内容不完全一致，应以页面当前实际呈现的内容为准。',
+        '禁止输出与页面无关的泛化文案。',
+        `硬性约束：标题 <= ${MAX_TITLE_CHARS} 字符，描述 <= ${MAX_DESCRIPTION_CHARS} 字符。`,
+      ].join('\n'),
+      jsonUserPrompt: [
+        ...basePromptLines,
+        '只输出 JSON，不要输出 Markdown，不要代码块，不要额外解释。',
+        '输出格式：{"title":"...","description":"..."}',
+      ].join('\n\n'),
+      labeledUserPrompt: [
+        ...basePromptLines,
+        '请严格按以下两行格式输出，不要输出 JSON，不要额外解释，不要编号。',
+        '标题：...',
+        '描述：...',
+      ].join('\n\n'),
+    }
+  }
+
+  async *suggestStream(input: ShareSuggestionInput): AsyncGenerator<ShareSuggestionStreamChunk> {
+    const context = this.buildSuggestionContext(input)
+    const { fallback } = context
+
+    if (!config.llm.apiKey) {
+      yield { ...fallback, done: true }
+      return
+    }
+
+    let fullContent = ''
+    let lastTitle = ''
+    let lastDescription = ''
 
     try {
       const llm = createLLM({
-        temperature: 0.4,
-        maxTokens: 280,
-        timeoutMs: Math.min(config.llm.requestTimeoutMs, 20000),
-        llmSelection: this.llmSelection,
+        temperature: 0.2,
+        maxTokens: 180,
+        timeoutMs: Math.min(config.llm.requestTimeoutMs, 12000),
+        modelKwargs: {
+          enable_thinking: false,
+        },
+      })
+
+      const stream = await llm.stream([
+        new SystemMessage(context.systemPrompt),
+        new HumanMessage(context.labeledUserPrompt),
+      ])
+
+      for await (const chunk of stream) {
+        const text = typeof chunk.content === 'string'
+          ? chunk.content
+          : Array.isArray(chunk.content)
+            ? chunk.content.map((part: any) => (typeof part?.text === 'string' ? part.text : '')).join('')
+            : ''
+        if (!text) continue
+
+        fullContent += text
+        const parsed = parseLabeledSuggestionText(fullContent)
+        const nextTitle = parsed.title || lastTitle
+        const nextDescription = parsed.description || lastDescription
+
+        if (nextTitle === lastTitle && nextDescription === lastDescription) continue
+
+        lastTitle = nextTitle
+        lastDescription = nextDescription
+        yield {
+          title: nextTitle,
+          description: nextDescription,
+          source: 'ai',
+          model: config.llm.model,
+        }
+      }
+
+      const parsed = parseLabeledSuggestionText(fullContent)
+      const title = sanitizeTitle(parsed.title || '') || fallback.title
+      const description = sanitizeDescription(parsed.description || '') || fallback.description
+
+      yield {
+        title,
+        description,
+        source: 'ai',
+        model: config.llm.model,
+        done: true,
+      }
+    } catch {
+      yield {
+        ...fallback,
+        done: true,
+      }
+    }
+  }
+
+  async suggest(input: ShareSuggestionInput): Promise<ShareSuggestionResult> {
+    const context = this.buildSuggestionContext(input)
+    const { fallback } = context
+    if (!config.llm.apiKey) return fallback
+
+    try {
+      const llm = createLLM({
+        temperature: 0.2,
+        maxTokens: 180,
+        timeoutMs: Math.min(config.llm.requestTimeoutMs, 12000),
+        modelKwargs: {
+          enable_thinking: false,
+        },
       })
       const response = await llm.invoke([
-        new SystemMessage(systemPrompt),
-        new HumanMessage(userPrompt),
+        new SystemMessage(context.systemPrompt),
+        new HumanMessage(context.jsonUserPrompt),
       ])
 
       const content = typeof response.content === 'string'
@@ -283,6 +497,7 @@ export class ShareSuggestionService {
         title,
         description,
         source: 'ai',
+        model: config.llm.model,
       }
     } catch {
       return fallback

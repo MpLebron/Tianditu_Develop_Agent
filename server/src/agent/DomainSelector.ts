@@ -1,6 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { createLLM } from '../llm/createLLM.js'
-import type { LlmSelection } from '../provider/index.js'
 import { extractTextContent, parseJsonObject } from './PlannerJson.js'
 import type { DomainDecision } from './AgentRuntimeTypes.js'
 import type { SkillStore } from './SkillStore.js'
@@ -15,7 +14,6 @@ export class DomainSelector {
     fileData?: string
     runtimeError?: string
     mode: 'generate' | 'fix'
-    llmSelection?: LlmSelection
   }): Promise<DomainDecision> {
     const systemPrompt = `你是一个天地图智能体的领域选择器。
 
@@ -53,7 +51,7 @@ export class DomainSelector {
     ].filter(Boolean).join('\n')
 
     try {
-      const llm = createLLM({ temperature: 0, maxTokens: 600, llmSelection: params.llmSelection })
+      const llm = createLLM({ temperature: 0, maxTokens: 600 })
       const response = await llm.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(userPrompt),

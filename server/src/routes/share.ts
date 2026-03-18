@@ -21,7 +21,7 @@ const suggestionService = new ShareSuggestionService({
   tiandituToken: config.tiandituToken,
 })
 const storeReady = store.init()
-const MAX_SUGGEST_CODE_CHARS = 120 * 1024
+const MAX_SUGGEST_CODE_CHARS = 48 * 1024
 
 function parseVisibility(value: unknown): ShareVisibility | undefined {
   if (value === 'public' || value === 'unlisted') return value
@@ -126,6 +126,53 @@ router.post('/maps/suggest', async (req, res, next) => {
       data: suggestion,
     })
   } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/share/maps/suggest/stream — 流式生成分享标题和描述
+router.post('/maps/suggest/stream', async (req, res, next) => {
+  try {
+    await storeReady
+    const rawCode = typeof req.body?.code === 'string' ? req.body.code : ''
+    const hintRaw = typeof req.body?.hint === 'string' ? req.body.hint : ''
+    const promptRaw = typeof req.body?.prompt === 'string' ? req.body.prompt : ''
+    const hint = [hintRaw, promptRaw].map((x) => x.trim()).filter(Boolean).join('\n')
+
+    if (!rawCode.trim()) {
+      return res.status(400).json({ success: false, error: '缺少可分析的地图代码' })
+    }
+
+    const code = rawCode.length > MAX_SUGGEST_CODE_CHARS
+      ? rawCode.slice(0, MAX_SUGGEST_CODE_CHARS)
+      : rawCode
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders?.()
+
+    let closed = false
+    req.on('close', () => {
+      closed = true
+    })
+
+    for await (const chunk of suggestionService.suggestStream({ code, hint: hint || undefined })) {
+      if (closed) break
+      res.write(`data: ${JSON.stringify({ type: 'suggestion_delta', ...chunk })}\n\n`)
+    }
+
+    if (!closed) {
+      res.write('data: [DONE]\n\n')
+      res.end()
+    }
+  } catch (err: any) {
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err?.message || '生成失败' })}\n\n`)
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
     next(err)
   }
 })
