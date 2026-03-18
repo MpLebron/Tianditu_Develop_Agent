@@ -3,9 +3,11 @@ import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 interface ChatInputProps {
   onSend: (message: string, file?: File) => void
   loading: boolean
+  disabled?: boolean
+  disabledReason?: string | null
 }
 
-export function ChatInput({ onSend, loading }: ChatInputProps) {
+export function ChatInput({ onSend, loading, disabled = false, disabledReason = null }: ChatInputProps) {
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [dragActive, setDragActive] = useState(false)
@@ -14,6 +16,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dragDepthRef = useRef(0)
+  const inputLocked = loading || disabled
 
   const isSupportedFile = (candidate: File) => {
     const name = candidate.name.toLowerCase()
@@ -21,6 +24,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
   }
 
   const attachFile = (candidate: File | null | undefined) => {
+    if (inputLocked) return
     if (!candidate) return
     if (!isSupportedFile(candidate)) {
       setUploadHint('仅支持 CSV / Excel / JSON / GeoJSON 文件')
@@ -34,7 +38,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
 
   const handleSend = () => {
     const msg = text.trim()
-    if (!msg || loading) return
+    if (!msg || inputLocked) return
     onSend(msg, file || undefined)
     setText('')
     setFile(null)
@@ -64,6 +68,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
   const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    if (inputLocked) return
     dragDepthRef.current += 1
 
     const hasFiles = Array.from(e.dataTransfer?.items || []).some((item) => item.kind === 'file')
@@ -77,6 +82,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    if (inputLocked) return
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
 
     const files = e.dataTransfer?.files
@@ -91,6 +97,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
   const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    if (inputLocked) return
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
     if (dragDepthRef.current > 0) return
 
@@ -102,6 +109,7 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    if (inputLocked) return
     dragDepthRef.current = 0
 
     const dropped = e.dataTransfer?.files?.[0]
@@ -200,8 +208,9 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
         {/* 附件按钮 */}
         <button
           onClick={() => fileRef.current?.click()}
-          className="p-2.5 text-gray-300 hover:text-blue-500 soft-pop shrink-0 self-center"
-          title="上传文件（CSV/Excel/GeoJSON）"
+          disabled={inputLocked}
+          className="p-2.5 text-gray-300 hover:text-blue-500 soft-pop shrink-0 self-center disabled:opacity-40 disabled:hover:text-gray-300"
+          title={disabledReason || '上传文件（CSV/Excel/GeoJSON）'}
         >
           <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
@@ -221,18 +230,22 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
           value={text}
           onChange={(e) => handleInput(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="描述你想要的地图效果..."
+          placeholder={disabledReason || '描述你想要的地图效果...'}
+          disabled={inputLocked}
           rows={1}
-          className="flex-1 resize-none bg-transparent border-0 text-[13.5px] text-gray-700 placeholder:text-gray-300 py-3 pr-2 focus:outline-none min-h-[44px] max-h-[120px] leading-[1.45]"
+          className="flex-1 resize-none bg-transparent border-0 text-[13.5px] text-gray-700 placeholder:text-gray-300 py-3 pr-2 focus:outline-none min-h-[44px] max-h-[120px] leading-[1.45] disabled:text-gray-400 disabled:cursor-not-allowed"
           style={{ overflow: 'hidden' }}
         />
 
         {/* 发送按钮 */}
         <button
           onClick={handleSend}
-          disabled={!text.trim() || loading}
-          className="p-2 mr-1.5 shrink-0 rounded-xl soft-pop disabled:opacity-0 disabled:scale-90 text-white bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 shadow-sm hover:shadow-md hover:shadow-blue-500/20 active:scale-95"
-          title="发送"
+          disabled={!text.trim() || inputLocked}
+          className={[
+            'p-2 mr-1.5 shrink-0 rounded-xl soft-pop text-white bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 shadow-sm hover:shadow-md hover:shadow-blue-500/20 active:scale-95',
+            disabledReason ? 'disabled:opacity-40 disabled:scale-100' : 'disabled:opacity-0 disabled:scale-90',
+          ].join(' ')}
+          title={disabledReason || '发送'}
         >
           {loading ? (
             <div className="w-[18px] h-[18px] border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -247,6 +260,11 @@ export function ChatInput({ onSend, loading }: ChatInputProps) {
 
       {/* 底部提示（仅在有上传状态时显示） */}
       <div className="mt-1.5 px-1 flex items-center gap-2">
+        {disabledReason && (
+          <div className="min-w-0 flex-1 text-[11px] truncate text-amber-500">
+            {disabledReason}
+          </div>
+        )}
         {(uploadHint || dragReject) && (
           <div className={`min-w-0 flex-1 text-[11px] truncate ${dragReject ? 'text-red-500' : 'text-blue-500'}`}>
             {uploadHint}

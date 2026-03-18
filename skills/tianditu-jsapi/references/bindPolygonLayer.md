@@ -80,17 +80,16 @@ paint: {
 
 ## 常用模式：GeoJSON 几何类型过滤
 
-当数据源包含混合几何类型时，用 `filter` 只渲染多边形：
+当数据源包含混合几何类型时，用 `filter` 只渲染多边形。
+
+注意：当前运行环境里 `['geometry-type']` 会把 `MultiPolygon` 归并为 `Polygon`，所以这里应写 `Polygon`，不要写 `MultiPolygon`。
 
 ```javascript
 map.addLayer({
     id: 'polygons-only',
     type: 'fill',
     source: 'mixed-data',
-    filter: ['any',
-        ['==', ['geometry-type'], 'Polygon'],
-        ['==', ['geometry-type'], 'MultiPolygon']
-    ],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     paint: { 'fill-color': '#1890ff', 'fill-opacity': 0.5 }
 });
 ```
@@ -100,3 +99,4 @@ map.addLayer({
 1. Polygon 坐标必须**闭合**（首尾坐标相同）
 2. `fill-outline-color` 只在 `fill-opacity < 1` 时可见
 3. 要更粗的边界线效果，使用 fill + line 组合
+4. 如果数据源本身已经确认全是 `Polygon/MultiPolygon`，可以直接不写几何类型 `filter`，避免把要素意外过滤掉

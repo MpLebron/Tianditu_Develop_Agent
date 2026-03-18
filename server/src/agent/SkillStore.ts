@@ -67,7 +67,7 @@ interface RawReferenceDoc {
  *
  * 当前实现对外暴露“canonical id + legacy alias”双轨能力：
  * - canonical id: `jsapi/map-init`、`lbs/geocoder`
- * - legacy alias: `map-init`、`geocoder`、`tianditu-js-api-v5/map-init`
+ * - legacy alias: `map-init`、`geocoder`、`tianditu-jsapi/map-init`
  *
  * 这样可以在不打断旧链路的前提下，把运行时切到 package/domain first 的知识组织方式。
  */
@@ -622,14 +622,10 @@ function buildPackageEntryLocation(sourcePackage: SourceSkillPackageMeta): strin
 }
 
 function inferCanonicalPackageIdsForSourcePackage(sourcePackageId: string): string[] {
-  if (sourcePackageId === 'tianditu-js-api-v5') return ['tianditu-jsapi', 'tianditu-lbs']
   return [sourcePackageId]
 }
 
 function inferCanonicalPackageIdForReference(sourcePackageId: string, refName: string): string {
-  if (sourcePackageId === 'tianditu-js-api-v5') {
-    return isLegacyLbsReference(refName) ? 'tianditu-lbs' : 'tianditu-jsapi'
-  }
   return sourcePackageId
 }
 
@@ -638,28 +634,13 @@ function inferDomainIdForPackage(packageId: string): SkillDomainId {
   if (packageId === 'tianditu-lbs') return 'lbs'
   if (packageId === 'tianditu-ui-design') return 'ui'
   if (packageId === 'error-solution') return 'error'
-  if (packageId === 'tianditu-echarts-bridge') return 'echarts-bridge'
   if (packageId === 'echarts-charts') return 'echarts-charts'
   if (packageId === 'root-skill') return 'root'
   return 'misc'
 }
 
 function inferReferenceDomain(sourcePackageId: string, refName: string): SkillDomainId {
-  if (sourcePackageId === 'tianditu-js-api-v5') {
-    return isLegacyLbsReference(refName) ? 'lbs' : 'jsapi'
-  }
   return inferDomainIdForPackage(sourcePackageId)
-}
-
-function isLegacyLbsReference(refName: string): boolean {
-  return [
-    'geocoder',
-    'search-v2',
-    'search-poi',
-    'search-admin',
-    'search-route',
-    'search-transit',
-  ].includes(refName)
 }
 
 function getPackageTitle(packageId: string): string {
@@ -667,7 +648,6 @@ function getPackageTitle(packageId: string): string {
   if (packageId === 'tianditu-lbs') return '天地图 LBS'
   if (packageId === 'tianditu-ui-design') return '地图 UI 设计'
   if (packageId === 'error-solution') return '错误修复'
-  if (packageId === 'tianditu-echarts-bridge') return '地图图表联动'
   if (packageId === 'echarts-charts') return 'ECharts 图表'
   return packageId
 }
@@ -684,7 +664,6 @@ function packageSortWeight(id: string): number {
     'tianditu-lbs',
     'tianditu-ui-design',
     'error-solution',
-    'tianditu-echarts-bridge',
     'echarts-charts',
   ]
   const idx = ordered.indexOf(id)

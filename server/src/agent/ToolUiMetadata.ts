@@ -98,9 +98,11 @@ export function buildToolUiMetadata(params: {
       }
     case 'context_assembler.loadPackages':
       return {
-        ...buildGroupedStep(mode === 'fix' ? 'repair_capabilities' : 'local_capabilities', mode === 'fix' ? '读取修复资料' : '读取地图资料'),
-        uiLabel: mode === 'fix' ? '读取修复相关资料' : '读取地图内置资料',
-        uiSummary: status === 'running' ? (mode === 'fix' ? '正在读取修复相关资料' : '正在读取地图内置资料') : (mode === 'fix' ? '修复资料已准备好' : '地图资料已准备好'),
+        ...buildGroupedStep(mode === 'fix' ? 'repair_capabilities' : 'local_capabilities', mode === 'fix' ? '读取修复参考文档' : '读取参考文档'),
+        uiLabel: mode === 'fix' ? '读取修复参考文档' : '读取参考文档',
+        uiSummary: status === 'running'
+          ? (mode === 'fix' ? '正在读取修复参考文档' : '正在读取参考文档')
+          : (mode === 'fix' ? '修复参考文档已准备好' : '参考文档已准备好'),
       }
     case 'doc_loader.readReferenceDocs':
       return {

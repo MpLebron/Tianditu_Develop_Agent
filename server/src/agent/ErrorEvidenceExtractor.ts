@@ -30,6 +30,8 @@ export function extractErrorEvidence(error: string, code: string): ErrorEvidence
   if (/map\.addLayer\s*\([\s\S]{0,2000}?,\s*['"`][^'"`]+['"`]\s*\)/.test(code)) codeSignals.push('layer-beforeid-literal')
   if (/api\.tianditu\.gov\.cn\/v2\/search|api\.tianditu\.gov\.cn\/search\/v1\/poi/i.test(code)) codeSignals.push('direct-search-endpoint')
   if (/style\s*:\s*['"]default['"]/.test(code)) codeSignals.push('invalid-default-style')
+  if (/style\s*:\s*['"](black|blue)['"]/.test(code)) codeSignals.push('invalid-styleid-field')
+  if (/styleId\s*:\s*['"]default['"]/.test(code)) codeSignals.push('invalid-styleid-default')
   if (/coordinatesPreview/.test(code)) codeSignals.push('preview-field')
   if (
     matchedSignals.includes('sdk-property-read')

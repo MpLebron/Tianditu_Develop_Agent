@@ -28,7 +28,7 @@ allowed-tools: Read Bash(node *)
 
 ## 典型联动
 
-- GeoJSON / 数据格式错误：联动 `tianditu-js-api-v5` 的 `bindGeoJSON`
+- GeoJSON / 数据格式错误：联动 `tianditu-jsapi` 的 `bindGeoJSON`
 - 事件/交互报错：联动 `bindEvents` / `popup`
 - 网络 404 / AJAXError：优先检查 URL、同源、代理与返回结构
 - 语法与作用域问题（如重复声明）：先修 JS，再谈地图 API

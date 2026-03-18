@@ -35,12 +35,6 @@ const KEYWORD_MAP: Record<string, string[]> = {
   'bindEcharts': ['echarts', 'ECharts', '图表', '柱状图', '折线图', '饼图', '联动', '雷达图', '散点图'],
   'bindOverlays': ['覆盖物', '圆', '遮罩', '画圆', '圆形'],
 
-  // UI 设计与页面打磨
-  'ui-planning-workflow': ['页面丑', '太丑', '美观', 'ui', 'UI', '界面', '视觉', '风格', '改版', '重设计', '优化页面', '重新设计', '页面设计', '设计规范', '设计系统'],
-  'tianditu-layout-recipes': ['布局', '首页', '卡片', 'hero', '工作区', '左侧栏', '侧边栏', '地图+面板', 'map+sidebar', '排版', '版式'],
-  'visual-style-system': ['配色', '颜色', '字体', '阴影', '圆角', '间距', 'css变量', 'token', '设计语言', '视觉系统'],
-  'component-polish-checklist': ['交互细节', '对齐', 'hover', 'active', 'focus', 'loading', 'empty', 'error', '组件打磨', '质感'],
-
   // 搜索服务
   'geocoder': ['地理编码', '逆地理', '地址转坐标', '坐标转地址', 'geocode'],
   'search-v2': ['地名搜索', '地名搜索v2', 'search2', 'v2/search', 'querytype', '视野内搜索', '周边搜索', '多边形搜索', '行政区划区域搜索', '分类搜索', '统计搜索', 'specify', 'mapbound', 'pointlonlat', 'queryradius', 'datatypes'],

@@ -126,6 +126,7 @@ function reverseGeocode(lng, lat) {
 6. 必须维护 `loading / ready / empty / error` 四态，避免界面永久停在 loading
 7. 当前项目代理里，正向编码只接受 `/api/tianditu/geocode?address=...`，不要误写成 `query`
 8. 当前项目代理返回坐标位于 `payload.data.location.lon / lat`，不要误读成 `payload.data.lon / lat`
+9. 如果编码结果会立刻 `addTo(map)`、`flyTo(...)` 或 `fitBounds(...)`，必须等 `map.on('load', ...)` 完成后再启动编码流程
 
 ## 常用模式：地址定位并标注（推荐两步法）
 

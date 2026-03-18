@@ -1,4 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { config } from '../config.js'
 import { createLLM } from '../llm/createLLM.js'
 import { formatPlanningPolicyCards } from './PlanningPolicyCatalog.js'
 import { extractTextContent, parseJsonObject } from './PlannerJson.js'
@@ -57,7 +58,11 @@ export class ReferencePlanner {
     ].filter(Boolean).join('\n')
 
     try {
-      const llm = createLLM({ temperature: 0, maxTokens: 900 })
+      const llm = createLLM({
+        temperature: 0,
+        maxTokens: 900,
+        modelName: config.llm.auxModel,
+      })
       const response = await llm.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(userPrompt),
@@ -157,8 +162,7 @@ export class ReferencePlanner {
       if (params.selectedPackageIds.includes('tianditu-lbs')) {
         pushLbsSceneFallbacks(text, pushIfAvailable)
       }
-      if (params.selectedPackageIds.includes('tianditu-ui-design')) pushIfAvailable('ui-planning-workflow')
-      if (params.selectedPackageIds.includes('tianditu-echarts-bridge')) pushIfAvailable('bindEcharts')
+      if (/echarts|图表|柱状图|折线图|饼图|雷达图|散点图|仪表盘/.test(text)) pushIfAvailable('bindEcharts')
       if (params.selectedPackageIds.includes('echarts-charts')) pushIfAvailable('echarts-index')
     }
 

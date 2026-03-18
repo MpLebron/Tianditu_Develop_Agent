@@ -1,4 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { config } from '../config.js'
 import { createLLM } from '../llm/createLLM.js'
 import type { ErrorAnalysisResult } from './AgentRuntimeTypes.js'
 import { extractTextContent, parseJsonObject } from './PlannerJson.js'
@@ -18,7 +19,11 @@ export class ErrorAnalyzer {
     const evidenceText = formatEvidence(evidence)
     const runtimeFileContract = extractRuntimeFileContract(params.fileData)
     try {
-      const llm = createLLM({ temperature: 0, maxTokens: 800 })
+      const llm = createLLM({
+        temperature: 0,
+        maxTokens: 800,
+        modelName: config.llm.auxModel,
+      })
       const response = await llm.invoke([
         new SystemMessage(`你是一个代码修复错误分析器。根据错误证据输出 JSON。
 
@@ -32,7 +37,7 @@ export class ErrorAnalyzer {
 - fixChecklist: string[]
 
 规则：
-- package 只能从 tianditu-jsapi、tianditu-lbs、tianditu-ui-design、error-solution、tianditu-echarts-bridge、echarts-charts 中选择
+- package 只能从 tianditu-jsapi、tianditu-lbs、tianditu-ui-design、error-solution、echarts-charts 中选择
 - suggestedReferences 优先输出 canonical 或 legacy reference 名称
 - 只输出 JSON`),
         new HumanMessage([
@@ -314,6 +319,8 @@ function fallbackChecklist(
   if (evidence.matchedSignals.includes('network')) checklist.push('打印最终请求 URL，并核对代理 envelope 解析路径。')
   if (evidence.matchedSignals.includes('administrative')) checklist.push('优先使用 /api/tianditu/administrative 返回的 boundaryGeoJSON。')
   if (evidence.codeSignals.includes('invalid-default-style')) checklist.push('移除 style: "default"。')
+  if (evidence.codeSignals.includes('invalid-styleid-field')) checklist.push('把 style: "black"/"blue" 改成 styleId: "black"/"blue"。')
+  if (evidence.codeSignals.includes('invalid-styleid-default')) checklist.push('把 styleId: "default" 改成省略 styleId，或改成 styleId: "normal"。')
   if (evidence.codeSignals.includes('preview-field')) checklist.push('停止读取 coordinatesPreview，改用 geometry.coordinates。')
   return checklist
 }

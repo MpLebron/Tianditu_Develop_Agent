@@ -64,9 +64,13 @@ var locations = [
 ];
 
 var bounds = new TMapGL.LngLatBounds();
+var hasBoundsPoint = false;
 
 locations.forEach(function(loc) {
-    bounds.extend([loc.lng, loc.lat]);
+    if (Number.isFinite(loc.lng) && Number.isFinite(loc.lat)) {
+        bounds.extend([loc.lng, loc.lat]);
+        hasBoundsPoint = true;
+    }
 
     var popup = new TMapGL.Popup({ offset: [0, -30] })
         .setHTML('<b>' + loc.name + '</b><br>' + loc.desc);
@@ -77,7 +81,9 @@ locations.forEach(function(loc) {
         .addTo(map);
 });
 
-map.fitBounds(bounds, { padding: 50 });
+if (hasBoundsPoint) {
+    map.fitBounds(bounds, { padding: 50 });
+}
 ```
 
 ## 常用模式：自定义彩色标记

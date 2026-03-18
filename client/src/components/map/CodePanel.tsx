@@ -137,47 +137,47 @@ export function CodePanel() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50 text-slate-900">
       {/* 工具栏 */}
-      <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-slate-200 bg-white/90 backdrop-blur-md">
-        <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-3 px-4 py-2.5 shrink-0 border-b border-slate-200 bg-white/90 backdrop-blur-md">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
           {/* 文件类型标识 */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-orange-100 text-orange-600">
+          <div className="flex shrink-0 items-center gap-1.5 px-2 py-0.5 rounded-md bg-orange-100 text-orange-600">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M1.5 0h21l-1.91 21.563L11.977 24l-8.565-2.438L1.5 0zm7.031 9.75l-.232-2.718 10.059.003.071-.757.089-.998.063-.728H6.905l.601 6.863h6.822l-.361 3.694-2.213.668-2.172-.656-.142-1.494H7.414l.228 3.115L11.8 17.97l4.15-1.15.673-7.07H8.531z" />
             </svg>
             <span className="text-[11px] font-mono font-medium">HTML</span>
           </div>
           {codeStreaming ? (
-            <span className="flex items-center gap-1.5 text-[11px] text-blue-400">
+            <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-blue-400">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              {streamStatusLabel}
+              <span className="truncate">{streamStatusLabel}</span>
             </span>
           ) : renderDiff && lastFixDiff ? (
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] text-slate-500 truncate">{lastFixDiff.summary}</span>
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500" title={lastFixDiff.summary}>{lastFixDiff.summary}</span>
               {(diffStats.additions > 0 || diffStats.deletions > 0) && (
-                <span className="text-[11px] font-medium text-slate-400 whitespace-nowrap">
+                <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-slate-400">
                   <span className="text-emerald-600">+{diffStats.additions}</span>
                   <span className="mx-1 text-slate-300">/</span>
                   <span className="text-rose-500">-{diffStats.deletions}</span>
                 </span>
               )}
               {lastFixDiff.fallbackMode === 'rewrite' && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+                <span className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
                   整页重写兜底
                 </span>
               )}
             </div>
           ) : (
-            <span className="text-[11px] text-slate-500">{lineCount} 行</span>
+            <span className="truncate text-[11px] text-slate-500">{lineCount} 行</span>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {/* 复制按钮 */}
           <button
             onClick={handleCopy}
             disabled={codeStreaming}
-            className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg transition-all duration-200 ${
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] px-2.5 py-1.5 rounded-lg transition-all duration-200 ${
               copied
                 ? 'bg-green-500/15 text-green-400'
                 : codeStreaming
@@ -206,7 +206,7 @@ export function CodePanel() {
           <button
             onClick={handleDownload}
             disabled={codeStreaming}
-            className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg transition-all duration-200 ${
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] px-2.5 py-1.5 rounded-lg transition-all duration-200 ${
               downloaded
                 ? 'bg-green-500/15 text-green-400'
                 : codeStreaming

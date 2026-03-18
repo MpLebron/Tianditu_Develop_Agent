@@ -32,6 +32,9 @@ export function analyzeGeneratedCode(code: string, options?: { fileData?: string
   }
 
   issues.push(...analyzeOverlayApiCompatibility(code))
+  issues.push(...analyzeBoundsApiCompatibility(code))
+  issues.push(...analyzeMapStyleCompatibility(code))
+  issues.push(...analyzeGeometryTypeFilterCompatibility(code))
 
   const mapMutationTimingIssues = analyzeMapLoadTiming(code)
   issues.push(...mapMutationTimingIssues)
@@ -55,15 +58,6 @@ export function analyzeGeneratedCode(code: string, options?: { fileData?: string
       code: 'wrong-geocoder-params',
       message: '检测到 geocoder 使用 address= 参数，属于错误调用格式。',
       suggestion: '正向编码请使用代理 /api/tianditu/geocode；解释官方协议时使用 ds=<JSON>。',
-    })
-  }
-
-  if (/\bstyle\s*:\s*['"]default['"]/.test(code)) {
-    issues.push({
-      severity: 'error',
-      code: 'invalid-default-style',
-      message: '检测到 style: "default"，当前运行环境可能触发底图 404。',
-      suggestion: '删除 style 字段，或仅使用已验证样式值。',
     })
   }
 
@@ -518,6 +512,99 @@ function analyzeOverlayApiCompatibility(code: string): VerificationIssue[] {
       code: 'popup-setelement-unsupported',
       message: '检测到对 TMapGL.Popup 调用 setElement(...)；当前已验证 reference 中不存在该 API。',
       suggestion: 'TMapGL.Popup 请改用 .setLngLat(...).setHTML(html).addTo(map) 或 .setText(text).addTo(map)，不要混入其他地图 SDK 的 Popup.setElement(...) 写法。',
+    })
+  }
+
+  return issues
+}
+
+function analyzeBoundsApiCompatibility(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+  if (!/\bTMapGL\.LngLatBounds\b/.test(code)) return issues
+
+  const boundsVariableNames = new Set<string>()
+  for (const match of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+TMapGL\.LngLatBounds\b/g)) {
+    boundsVariableNames.add(match[1])
+  }
+
+  const namedBoundsIsValid = Array.from(boundsVariableNames).some((name) => {
+    const pattern = new RegExp(`\\b${escapeRegExp(name)}\\s*\\.\\s*isValid\\s*\\(\\s*\\)`)
+    return pattern.test(code)
+  })
+  const directBoundsIsValid = /new\s+TMapGL\.LngLatBounds\s*\([^)]*\)\s*\.\s*isValid\s*\(\s*\)/.test(code)
+
+  if (namedBoundsIsValid || directBoundsIsValid) {
+    issues.push({
+      severity: 'error',
+      code: 'lnglatbounds-isvalid-unsupported',
+      message: '检测到对 TMapGL.LngLatBounds 调用 isValid()；当前天地图 JSAPI v5 reference 中不存在该方法。',
+      suggestion: '改为在 extend 前过滤非法坐标，并维护 hasBoundsPoint / validBoundsPointCount；只有确认至少加入过 1 个有效点后才调用 map.fitBounds(bounds, ...)。',
+    })
+  }
+
+  return issues
+}
+
+function analyzeMapStyleCompatibility(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+
+  if (/\bstyle\s*:\s*['"]default['"]/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'invalid-style-default',
+      message: '检测到 style: "default"；v5 个性化底图不应通过 style 字段传默认样式。',
+      suggestion: '默认底图请直接省略 style/styleId，或按需改成 styleId: "normal"。',
+    })
+  }
+
+  if (/\bstyle\s*:\s*['"](black|blue)['"]/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'invalid-styleid-field',
+      message: '检测到把命名个性化底图写进 style 字段；v5 官方写法应使用 styleId。',
+      suggestion: '把 style: "black"/"blue" 改成 styleId: "black"/"blue"；默认底图则省略 styleId 或使用 styleId: "normal"。',
+    })
+  }
+
+  if (/\bstyleId\s*:\s*['"]default['"]/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'invalid-styleid-default',
+      message: '检测到 styleId: "default"；当前已验证命名值应使用 "normal" / "black" / "blue"。',
+      suggestion: '把 styleId: "default" 改成省略 styleId，或改成 styleId: "normal"。',
+    })
+  }
+
+  return issues
+}
+
+function analyzeGeometryTypeFilterCompatibility(code: string): VerificationIssue[] {
+  const issues: VerificationIssue[] = []
+
+  if (/\['geometry-type'\][\s\S]{0,80}['"]MultiPolygon['"]|['"]MultiPolygon['"][\s\S]{0,80}\['geometry-type'\]/.test(code)) {
+    issues.push({
+      severity: 'error',
+      code: 'geometry-type-multipolygon-filter',
+      message: '检测到使用 geometry-type 过滤 MultiPolygon；当前运行环境里 MultiPolygon 会归并到 Polygon，容易把面要素全部过滤掉。',
+      suggestion: '把过滤条件改成 [\'==\', [\'geometry-type\'], \'Polygon\']，或在数据源本身全是面要素时直接删除该 filter。',
+    })
+  }
+
+  if (/\['geometry-type'\][\s\S]{0,80}['"]MultiLineString['"]|['"]MultiLineString['"][\s\S]{0,80}\['geometry-type'\]/.test(code)) {
+    issues.push({
+      severity: 'warning',
+      code: 'geometry-type-multilinestring-filter',
+      message: '检测到使用 geometry-type 过滤 MultiLineString；当前运行环境里多线通常按 LineString 归并。',
+      suggestion: '优先改成 [\'==\', [\'geometry-type\'], \'LineString\']。',
+    })
+  }
+
+  if (/\['geometry-type'\][\s\S]{0,80}['"]MultiPoint['"]|['"]MultiPoint['"][\s\S]{0,80}\['geometry-type'\]/.test(code)) {
+    issues.push({
+      severity: 'warning',
+      code: 'geometry-type-multipoint-filter',
+      message: '检测到使用 geometry-type 过滤 MultiPoint；当前运行环境里多点通常按 Point 归并。',
+      suggestion: '优先改成 [\'==\', [\'geometry-type\'], \'Point\']。',
     })
   }
 

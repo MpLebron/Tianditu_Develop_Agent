@@ -9,9 +9,10 @@ export function createLLM(options: {
   maxTokens?: number
   timeoutMs?: number
   maxRetries?: number
+  modelName?: string
   modelKwargs?: Record<string, unknown>
 } = {}) {
-  const modelName = config.llm.model
+  const modelName = options.modelName || config.llm.model
   const modelLower = modelName.toLowerCase()
 
   if (!config.llm.apiKey) {

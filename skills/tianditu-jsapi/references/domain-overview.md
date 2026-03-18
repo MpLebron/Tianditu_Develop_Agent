@@ -18,6 +18,7 @@
 - 覆盖物：`jsapi/marker`、`jsapi/popup`、`jsapi/bindOverlays`
 - 控件/事件：`jsapi/bindControls`、`jsapi/bindEvents`
 - 专题能力：`jsapi/bindHeatmap`、`jsapi/bindCluster`、`jsapi/bindExtrusion`、`jsapi/bindTerrain`
+- 地图图表联动：`jsapi/bindEcharts`
 - 坐标/投影：`jsapi/coordinate-transform`
 - 栅格服务：`jsapi/bindRasterLayers`
 

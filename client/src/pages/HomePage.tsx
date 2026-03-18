@@ -47,6 +47,16 @@ const jiangsuVillageBatchPrompt = `请把以下地点在地图上精确显示，
 江苏省徐州市新沂市棋盘镇花厅村
 江苏省无锡市锡山区东港镇黄土塘村`
 
+const lifeTreeStoryPrompt = `请先联网调研电视剧《生命树》里与青海省藏羚羊保护相关的故事背景、关键地点、真实原型线索和生态保护脉络，再据此生成一个有感染力的故事地图网页。
+
+要求：
+1. 不要直接复述搜索结果，要先提炼出适合地图叙事的主线，再组织成可视化页面；
+2. 页面整体要像“叙事地图”而不是普通后台：地图是主角，故事面板负责引导阅读；
+3. 地图范围聚焦青海高原与相关保护区域，关键地点、路线、阶段节点都要尽量基于你检索到的资料来组织；
+4. 文案要克制、真诚，有纪念感，突出长期守护、人与自然共生、代际接力这些情感；
+5. 页面至少要有：标题区、故事主线、关键地点说明、地图图例，以及地图与故事之间的联动；
+6. 必须使用天地图 JS API v5（TMapGL），保证代码可运行、无报错、移动端也能正常阅读。`
+
 const examples: ExampleCard[] = [
   {
     title: '基础地图',
@@ -142,6 +152,22 @@ const examples: ExampleCard[] = [
     gradient: 'from-red-500 to-orange-500',
     bgLight: 'bg-red-50',
     iconColor: 'text-red-500',
+  },
+  {
+    title: '生命树·藏羚羊守护',
+    desc: '用故事地图讲述青海高原上关于巡山、保护区与生态接力的守护历程',
+    prompt: lifeTreeStoryPrompt,
+    category: '叙事地图',
+    preview: 'history',
+    icon: (
+      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21c4.142 0 7.5-2.91 7.5-6.5 0-2.88-2.165-5.324-5.168-6.16A4.75 4.75 0 006 9.5c0 .247.02.49.06.728C3.84 11.03 2.25 12.97 2.25 15.25 2.25 18.426 5.161 21 8.75 21H12z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21v-6m0 0c-1.65 0-3-1.455-3-3.25S10.35 8.5 12 8.5s3 1.455 3 3.25S13.65 15 12 15z" />
+      </svg>
+    ),
+    gradient: 'from-emerald-600 to-teal-500',
+    bgLight: 'bg-emerald-50',
+    iconColor: 'text-emerald-600',
   },
   {
     title: '中国洪水事件专题',

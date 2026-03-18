@@ -19,9 +19,9 @@ const POLICY_CARDS: PlanningPolicyCard[] = [
     appliesTo: ['generate'],
     domains: ['ui'],
     guidance: [
-      '用户明确要求页面丑、重设计、优化视觉、调整布局时，先读取 ui-planning-workflow。',
-      '涉及版式和卡片布局时补 tianditu-layout-recipes，涉及配色/字体时补 visual-style-system。',
-      '细节打磨时再补 component-polish-checklist。',
+      '用户明确要求页面丑、重设计、优化视觉、调整布局时，先做简短设计简报，再进入编码。',
+      '先确定地图与面板的主次关系，再确定视觉方向，不要直接套通用后台模板。',
+      '实现时必须补齐 loading、empty、error、hover、focus 等关键状态。',
     ],
   },
   {

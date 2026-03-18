@@ -21,7 +21,7 @@ var map = new TMapGL.Map("mapDiv", {
 | maxZoom | Number | 18 | 最大缩放 |
 | pitch | Number | 0 | 倾斜角 0-60 |
 | bearing | Number | 0 | 旋转角 0-360 |
-| style | String | 'default' | 地图样式，见 `map-style.md` |
+| styleId | String | （省略或 `'normal'`） | 个性化底图样式，当前已验证示例值：`'normal'` / `'black'` / `'blue'`，见 `map-style.md` |
 | mapType | String | - | 底图类型：`'image'`(卫星) / `'terrain'`(地形) |
 
 ## 视图操作方法
@@ -64,6 +64,7 @@ var lngLat = map.unproject([400, 300]);      // 屏幕像素 → 经纬度
 1. `center` 是 `[经度, 纬度]`，不是 `[纬度, 经度]`
 2. 图层、控件、数据源操作必须在 `map.on("load", ...)` 回调内执行
 3. `fitBounds` 的参数是 `[[西南lng, 西南lat], [东北lng, 东北lat]]`
+4. 个性化底图优先使用 `styleId`；不要把 `black` / `blue` / `normal` 这类命名样式误写成 `style: 'black'`
 
 ## 完整示例
 

@@ -224,8 +224,15 @@ map.on('load', function () {
       new TMapGL.Marker().setLngLat(shanghai).addTo(map);
 
       var bounds = new TMapGL.LngLatBounds();
-      coords.forEach(function (c) { bounds.extend(c); });
-      map.fitBounds(bounds, { padding: 60 });
+      var hasBoundsPoint = false;
+      coords.forEach(function (c) {
+        if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return;
+        bounds.extend(c);
+        hasBoundsPoint = true;
+      });
+      if (hasBoundsPoint) {
+        map.fitBounds(bounds, { padding: 60 });
+      }
 
       // 路线信息面板（真实数据）
       var hours = Number.isFinite(durationSec) ? (durationSec / 3600) : 0;
@@ -269,3 +276,4 @@ map.on('load', function () {
 8. 命名地点路线规划时，当前项目的地理编码代理参数名是 `address`，不是 `query`
 9. 当前项目的地理编码代理结果要读 `payload.data.location.lon / lat`，不是 `payload.data.lon / lat`
 10. 起终点标记与弹窗仍然使用标准 TMapGL v5 写法：`new TMapGL.Marker().setLngLat(...).addTo(map)`，以及 `new TMapGL.Popup().setLngLat(...).setHTML(...).addTo(map)`
+11. `TMapGL.LngLatBounds` 没有 `isValid()` 方法；路线坐标自动缩放时先确认至少 extend 过一个有效坐标，再决定是否 `fitBounds`

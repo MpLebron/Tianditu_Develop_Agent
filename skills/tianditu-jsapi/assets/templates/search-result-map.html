@@ -36,12 +36,15 @@
             map.addControl(new TMapGL.ScaleControl({ unit: "metric" }), "bottom-left");
 
             var bounds = new TMapGL.LngLatBounds();
+            var hasBoundsPoint = false;
 
             poiData.forEach(function(poi) {
                 var coords = poi.lonlat.split(",");
                 var lng = parseFloat(coords[0]);
                 var lat = parseFloat(coords[1]);
+                if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
                 bounds.extend([lng, lat]);
+                hasBoundsPoint = true;
 
                 var el = document.createElement("div");
                 el.style.backgroundImage = "url(http://lbs.tianditu.gov.cn/js-api-v5-portal/image/marker.png)";
@@ -61,7 +64,7 @@
 
             document.getElementById("result-count").textContent = "共 " + poiData.length + " 个结果";
 
-            if (poiData.length > 1) map.fitBounds(bounds, { padding: 50 });
+            if (hasBoundsPoint && poiData.length > 1) map.fitBounds(bounds, { padding: 50 });
         });
     </script>
 </body>

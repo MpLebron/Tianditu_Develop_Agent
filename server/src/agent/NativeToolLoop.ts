@@ -300,14 +300,22 @@ export class NativeToolLoop {
     if (this.deps.decisionModelFactory) {
       return this.deps.decisionModelFactory()
     }
-    return createLLM({ temperature: 0, maxTokens: 500 }) as DecisionModel
+    return createLLM({
+      temperature: 0,
+      maxTokens: 500,
+      modelName: config.llm.nativeToolLoopAuxModel,
+    }) as DecisionModel
   }
 
   private createToolAvailabilityModel(): DecisionModel {
     if (this.deps.toolAvailabilityModelFactory) {
       return this.deps.toolAvailabilityModelFactory()
     }
-    return createLLM({ temperature: 0, maxTokens: 300 }) as DecisionModel
+    return createLLM({
+      temperature: 0,
+      maxTokens: 300,
+      modelName: config.llm.nativeToolLoopAuxModel,
+    }) as DecisionModel
   }
 
   private async planAvailableTools(params: NativeToolLoopRunParams): Promise<{

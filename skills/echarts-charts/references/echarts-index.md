@@ -1,10 +1,10 @@
 # ECharts 图表示例索引（纯图表参考）
 
-ECharts 相关参考文档索引。用于天地图 + ECharts 联动场景中的“图表本体配置”参考；地图联动方式请优先阅读 `skills/tianditu-echarts-bridge/references/bindEcharts.md`。
+ECharts 相关参考文档索引。用于天地图 + ECharts 联动场景中的“图表本体配置”参考；地图联动方式请优先阅读 `skills/tianditu-jsapi/references/bindEcharts.md`。
 
 ## 使用建议
 
-- 地图联动先读：`skills/tianditu-echarts-bridge/references/bindEcharts.md`（布局、地图事件、图表更新）
+- 地图联动先读：`skills/tianditu-jsapi/references/bindEcharts.md`（布局、地图事件、图表更新）
 - 图表样式与 option 细节再读本索引中的 `echarts-*` 示例
 - 不要一次性加载全部 `echarts-*` 文档，按图表类型和需求选择 1~2 个最接近示例
 - 与地图页面拼装时，颜色常量/图表实例/共享统计数据放在页面顶层，避免在图层函数内定义后在面板函数里引用

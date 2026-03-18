@@ -17,6 +17,21 @@ html, body, #root {
   -moz-osx-font-smoothing: grayscale;
 }
 
+button:not(:disabled),
+a[href],
+summary,
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 /* ===== 思考动画 - 三个脉冲圆点 ===== */
 @keyframes bounce-dot {
   0%, 80%, 100% { transform: translateY(0) scale(0.92); opacity: 0.38; }

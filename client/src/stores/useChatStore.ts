@@ -38,6 +38,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   activeFileContext: null,
 
   sendMessage: async (content, file, syntheticFile, sampleId) => {
+    const mapState = useMapStore.getState()
+    const blockedByVisualFlow = mapState.visualChecking || (mapState.fixing && mapState.fixingSource === 'visual')
+    if (get().loading || blockedByVisualFlow) return
+
     const displayFile = file ? { name: file.name, size: file.size } : syntheticFile
     const userMsg: Message = {
       id: createId(),

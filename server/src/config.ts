@@ -98,6 +98,8 @@ export const config = {
     baseUrl: process.env.DASHSCOPE_BASE_URL || process.env.LLM_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     responsesBaseUrl: process.env.DASHSCOPE_RESPONSES_BASE_URL || 'https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1',
     model: process.env.LLM_MODEL || 'qwen3.5-plus',
+    auxModel: process.env.AUX_LLM_MODEL || process.env.NATIVE_TOOL_LOOP_AUX_MODEL || 'qwen3-coder-next',
+    nativeToolLoopAuxModel: process.env.NATIVE_TOOL_LOOP_AUX_MODEL || process.env.AUX_LLM_MODEL || 'qwen3-coder-next',
     maxOutputTokens: parseInt(process.env.LLM_MAX_OUTPUT_TOKENS || '8192'),
     requestTimeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '240000'),
     maxRetries: parseInt(process.env.LLM_MAX_RETRIES || '2'),

@@ -1,11 +1,19 @@
 import { useChatStore } from '../../stores/useChatStore'
+import { useMapStore } from '../../stores/useMapStore'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 
 export function ChatPanel() {
   const { messages, loading, error, sendMessage, clearMessages } = useChatStore()
+  const { visualChecking, fixing, fixingSource } = useMapStore()
   const scrollRef = useAutoScroll([messages])
+  const inputLocked = visualChecking || (fixing && fixingSource === 'visual')
+  const inputLockReason = visualChecking
+    ? 'AI 正在进行视觉巡检，请稍候后再发送消息'
+    : (fixing && fixingSource === 'visual'
+        ? 'AI 正在处理视觉补修，请稍候后再发送消息'
+        : null)
 
   // 判断是否在 "等待响应"（loading 但还没创建 assistant 消息）
   const lastMsg = messages[messages.length - 1]
@@ -95,7 +103,12 @@ export function ChatPanel() {
       </div>
 
       {/* 输入区 */}
-      <ChatInput onSend={sendMessage} loading={loading} />
+      <ChatInput
+        onSend={sendMessage}
+        loading={loading}
+        disabled={inputLocked}
+        disabledReason={inputLockReason}
+      />
     </div>
   )
 }

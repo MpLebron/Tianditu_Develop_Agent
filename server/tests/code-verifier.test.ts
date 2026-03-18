@@ -231,6 +231,101 @@ describe('CodeVerifier symbol text font checks', () => {
     expect(issues.some((issue) => issue.code === 'popup-setelement-unsupported')).toBe(true)
   })
 
+  it('flags bounds.isValid usage on TMapGL.LngLatBounds instances', () => {
+    const issues = analyzeGeneratedCode(`
+      var bounds = new TMapGL.LngLatBounds()
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: 50 })
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'lnglatbounds-isvalid-unsupported')).toBe(true)
+  })
+
+  it('flags black named style values when they are written into style instead of styleId', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', {
+        center: [116.4, 39.9],
+        zoom: 10,
+        style: 'black'
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'invalid-styleid-field')).toBe(true)
+  })
+
+  it('flags default styleId values and suggests normal instead', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', {
+        center: [116.4, 39.9],
+        zoom: 10,
+        styleId: 'default'
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'invalid-styleid-default')).toBe(true)
+  })
+
+  it('allows verified styleId values and satellite mapType without style warnings', () => {
+    const issues = analyzeGeneratedCode(`
+      var map = new TMapGL.Map('map', {
+        center: [116.4, 39.9],
+        zoom: 10,
+        styleId: 'black',
+        mapType: 'image'
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'invalid-styleid-field')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'invalid-style-default')).toBe(false)
+    expect(issues.some((issue) => issue.code === 'invalid-styleid-default')).toBe(false)
+  })
+
+  it('flags MultiPolygon geometry-type filters that can hide polygon features', () => {
+    const issues = analyzeGeneratedCode(`
+      map.addLayer({
+        id: 'village-fill',
+        type: 'fill',
+        source: 'village-data',
+        filter: ['==', ['geometry-type'], 'MultiPolygon'],
+        paint: { 'fill-color': '#1890ff' }
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'geometry-type-multipolygon-filter')).toBe(true)
+  })
+
+  it('allows Polygon geometry-type filters for polygon rendering', () => {
+    const issues = analyzeGeneratedCode(`
+      map.addLayer({
+        id: 'village-fill',
+        type: 'fill',
+        source: 'village-data',
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'fill-color': '#1890ff' }
+      })
+    `)
+
+    expect(issues.some((issue) => issue.code === 'geometry-type-multipolygon-filter')).toBe(false)
+  })
+
+  it('does not flag unrelated isValid usage when LngLatBounds is present', () => {
+    const issues = analyzeGeneratedCode(`
+      var bounds = new TMapGL.LngLatBounds()
+      var validator = {
+        isValid: function() {
+          return true
+        }
+      }
+
+      if (validator.isValid()) {
+        console.log(bounds)
+      }
+    `)
+
+    expect(issues.some((issue) => issue.code === 'lnglatbounds-isvalid-unsupported')).toBe(false)
+  })
+
   it('flags unguarded map.getLayer cleanup that can explode before map is ready', () => {
     const issues = analyzeGeneratedCode(`
       var map = new TMapGL.Map('map', { center: [118.78, 32.04], zoom: 8 })

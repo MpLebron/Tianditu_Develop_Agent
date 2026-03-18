@@ -63,6 +63,12 @@ fetch(url.toString())
 - `payload.data.lon`
 - `payload.data.lat`
 
+如果地理编码结果会立刻用于 `new TMapGL.Marker().addTo(map)`、`map.flyTo(...)`、`map.fitBounds(...)` 或弹窗展示，必须先确保地图已经完成 `map.on('load', ...)`。最稳妥的写法是：
+
+1. 先初始化地图
+2. 在 `map.on('load', ...)` 里启动批量地理编码
+3. 拿到单条编码结果后再添加 marker / popup / flyTo
+
 
 ## 适用任务
 
@@ -146,6 +152,7 @@ curl -s "http://api.tianditu.gov.cn/geocoder?ds={\"keyWord\":\"故宫博物院\"
 - 当前项目代理参数名是 `address`，不要误写成 `query`
 - 当前项目代理端点是 `/api/tianditu/geocode`，不要把官方直连 `geocoder?ds=...` 原样搬到项目代理里
 - 当前项目代理返回坐标在 `payload.data.location`，不要误写成 `payload.data.lon / payload.data.lat`
+- 如果编码结果会直接上图，不要在地图 load 之前就启动批量编码；否则首个 marker / popup / flyTo 很容易把后续 Promise 链打断，界面会一直停在“处理中”
 
 ## 组合场景提示
 

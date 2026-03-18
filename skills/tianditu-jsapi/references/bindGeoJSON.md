@@ -33,22 +33,21 @@ GeoJSON 可能包含 Point、LineString、Polygon 等混合类型，用 `filter`
 // 面填充
 map.addLayer({
     id: 'data-fill', type: 'fill', source: 'my-data',
-    filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     paint: { 'fill-color': 'rgba(66,133,244,0.5)', 'fill-outline-color': '#1a73e8' }
 });
 
 // 线
 map.addLayer({
     id: 'data-line', type: 'line', source: 'my-data',
-    filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'MultiLineString'],
-             ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+    filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'Polygon']],
     paint: { 'line-color': '#1a73e8', 'line-width': 2 }
 });
 
 // 点
 map.addLayer({
     id: 'data-point', type: 'circle', source: 'my-data',
-    filter: ['any', ['==', ['geometry-type'], 'Point'], ['==', ['geometry-type'], 'MultiPoint']],
+    filter: ['==', ['geometry-type'], 'Point'],
     paint: { 'circle-radius': 6, 'circle-color': '#ea4335', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' }
 });
 ```
@@ -58,14 +57,23 @@ map.addLayer({
 ```javascript
 function fitToGeoJSON(map, geojson) {
     var bounds = new TMapGL.LngLatBounds();
+    var hasBoundsPoint = false;
     function processCoords(coords) {
-        if (typeof coords[0] === 'number') { bounds.extend(coords); }
-        else { coords.forEach(processCoords); }
+        if (!Array.isArray(coords) || !coords.length) return;
+        if (typeof coords[0] === 'number') {
+            if (!Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return;
+            bounds.extend(coords);
+            hasBoundsPoint = true;
+            return;
+        }
+        coords.forEach(processCoords);
     }
     geojson.features.forEach(function(f) {
         if (f.geometry && f.geometry.coordinates) processCoords(f.geometry.coordinates);
     });
-    map.fitBounds(bounds, { padding: 50, maxZoom: 16 });
+    if (hasBoundsPoint) {
+        map.fitBounds(bounds, { padding: 50, maxZoom: 16 });
+    }
 }
 ```
 
@@ -138,7 +146,9 @@ var lat = pt[1];
 ## 踩坑提醒
 
 1. Source 和 Layer 操作必须在 `map.on("load", ...)` 内
-2. GeoJSON 的 Polygon 坐标必须闭合（首尾相同）
-3. 使用 URL 加载时注意 CORS 跨域问题
-4. `addSource` 的 id 必须唯一，重复会报错
-5. 不要在运行时代码中使用 `coordinatesPreview`，统一从 `geometry.coordinates` 提取
+2. `TMapGL.LngLatBounds` 没有 `isValid()` 方法；自动定位范围时，先维护 `hasBoundsPoint`，不要写 `bounds.isValid()`
+3. `['geometry-type']` 过滤表达式在当前运行环境里使用单类型名：`Point` / `LineString` / `Polygon`；不要写 `MultiPoint` / `MultiLineString` / `MultiPolygon`
+4. GeoJSON 的 Polygon 坐标必须闭合（首尾相同）
+5. 使用 URL 加载时注意 CORS 跨域问题
+6. `addSource` 的 id 必须唯一，重复会报错
+7. 不要在运行时代码中使用 `coordinatesPreview`，统一从 `geometry.coordinates` 提取

@@ -1,4 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { config } from '../config.js'
 import { createLLM } from '../llm/createLLM.js'
 import { extractTextContent, parseJsonObject } from './PlannerJson.js'
 import type { DomainDecision } from './AgentRuntimeTypes.js'
@@ -24,7 +25,6 @@ export class DomainSelector {
 - tianditu-lbs：搜索、地理编码、行政区划、驾车、公交
 - tianditu-ui-design：页面视觉和布局
 - error-solution：错误分类与修复策略
-- tianditu-echarts-bridge：地图 + 图表联动桥接
 - echarts-charts：ECharts 图表本体配置
 
 规则：
@@ -33,7 +33,7 @@ export class DomainSelector {
 - 需要地图展示搜索结果、路线或行政边界时，允许同时选择 tianditu-jsapi + tianditu-lbs
 - 修复模式下，若运行错误明显是修复任务，通常包含 error-solution
 - UI 请求才选择 tianditu-ui-design
-- 图表联动请求才选择 tianditu-echarts-bridge / echarts-charts
+- 地图 + 图表联动优先选择 tianditu-jsapi，图表 option 细节再补 echarts-charts
 
 输出格式：
 {"packageIds":["tianditu-jsapi"],"intent":"基础地图","reason":"需要创建地图并渲染内容","confidence":0.92}`
@@ -51,7 +51,11 @@ export class DomainSelector {
     ].filter(Boolean).join('\n')
 
     try {
-      const llm = createLLM({ temperature: 0, maxTokens: 600 })
+      const llm = createLLM({
+        temperature: 0,
+        maxTokens: 600,
+        modelName: config.llm.auxModel,
+      })
       const response = await llm.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(userPrompt),
@@ -125,7 +129,6 @@ export class DomainSelector {
       packageIds.add('error-solution')
     }
     if (/echarts|图表|柱状图|折线图|饼图|雷达图|仪表盘/.test(text)) {
-      packageIds.add('tianditu-echarts-bridge')
       if (/option|series|legend|tooltip|datazoom|柱状图|折线图|饼图|雷达图|仪表盘/.test(text)) {
         packageIds.add('echarts-charts')
       }

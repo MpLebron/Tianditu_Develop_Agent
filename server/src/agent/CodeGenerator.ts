@@ -1110,8 +1110,9 @@ export class CodeGenerator {
 2.3 只能使用当前已加载 reference 文档/示例中已经出现并可直接对照的 TMapGL API；未在 reference 中看到明确示例的 API 不要猜写
 2.4 如果当前 reference 没有给出某个能力的明确用法，必须退回到已有示例能覆盖的实现路径；例如没有可靠 Marker 示例时，优先改用 GeoJSON + circle/symbol 图层，不要自行发明覆盖物 API
 3. 控件/图层/数据源更新：必须满足“地图 ready + source ready”
-3.1 任何 \`map.addSource\`、\`map.addLayer\`、\`map.addControl\`、\`map.fitBounds\`、\`map.setPaintProperty\`、\`map.setLayoutProperty\`、基于图层 ID 的事件绑定（如 \`map.on('click', 'layer-id', ...)\`）默认都必须在 \`map.on("load", ...)\` 之后执行
+3.1 任何 \`map.addSource\`、\`map.addLayer\`、\`map.addControl\`、\`map.fitBounds\`、\`new TMapGL.Marker(...).addTo(map)\`、\`new TMapGL.Popup(...).addTo(map)\`、\`map.setPaintProperty\`、\`map.setLayoutProperty\`、基于图层 ID 的事件绑定（如 \`map.on('click', 'layer-id', ...)\`）默认都必须在 \`map.on("load", ...)\` 之后执行
 3.2 远程/文件数据允许在 \`map.on("load")\` 之前发起 fetch；但真正的渲染提交（如 \`map.addSource\` / \`map.addLayer\` / \`map.getSource(...).setData(...)\` / \`map.fitBounds(...)\`）只能在地图 ready 之后执行
+3.2.1 \`TMapGL.LngLatBounds\` 没有 \`.isValid()\` 方法；需要自动缩放到数据范围时，必须自行维护 \`hasBoundsPoint\` / \`validBoundsPointCount\`，只有确认至少 extend 过 1 个有效坐标后才能 \`map.fitBounds(bounds, ...)\`
 3.3 如果 source 是在 \`map.on("load")\` 里创建的，任何 \`map.getSource('id')\` / \`.setData(...)\` 都必须先确认 source 已存在；可以采用“缓存数据 -> load 后再 apply”或“load 与 fetch 并行，汇合后再 setData”的模式，但不要写成 \`initMap(); loadData();\` 后立刻 \`map.getSource(...).setData(...)\`
 3.4 不要写“先 fetch 并 addSource/addLayer，最后才注册 map.on('load')”的时序；这会导致 SDK 内部状态未就绪并触发难以解释的运行时错误
 3.4.1 如果需要清理旧图层/旧数据源，不要直接写 \`if (map.getLayer('id')) map.removeLayer('id')\` 或 \`if (map.getSource('id')) map.removeSource('id')\`；必须先确认 \`map\` 实例已存在并且对应方法可用，例如 \`if (map && map.getLayer && map.getLayer('id')) ...\`
@@ -1123,8 +1124,14 @@ export class CodeGenerator {
 4. 坐标格式：[经度, 纬度]
 5. 输出：完整可运行 HTML 文件
 6. 中文注释
-7. 默认底图时不要显式设置 style（不要写 style: 'default'，该写法在当前运行环境可能触发底图 404）
-8. 如需主题样式，仅使用 'black' 或 'blue'，禁止使用 mapbox:// 或任何其他样式 URL
+7. 默认底图时不要显式设置 \`style\`（不要写 \`style: 'default'\`）
+8. 天地图 JS API v5 个性化底图优先使用 \`styleId\`；当前已验证命名值为 \`'normal'\` / \`'black'\` / \`'blue'\`
+8.1 不要把命名样式误写到 \`style\` 字段里，例如 \`style: 'black'\` / \`style: 'blue'\` / \`style: 'default'\`；这会在当前运行容器里触发底图 404 或 \`Failed to parse URL from black/blue\`
+8.2 如果只是想要更深色或更有设计感的页面，除了 \`styleId\` 之外，也可以通过页面背景、面板、图例、遮罩和图层配色增强视觉效果
+8.2 如果用户明确要卫星或地形底图，使用 \`mapType: 'image'\` 或 \`mapType: 'terrain'\`
+8.3 禁止生成 mapbox://、自造 style URL，或任何未经当前 reference 明确验证的 style 配置
+8.4 如果使用 \`['geometry-type']\` 过滤 GeoJSON 几何类型，统一使用单类型名：\`'Point' | 'LineString' | 'Polygon'\`；不要写 \`MultiPoint\` / \`MultiLineString\` / \`MultiPolygon\`
+8.5 如果运行时文件契约或自动数据理解已经明确数据源全是 \`Polygon/MultiPolygon\`，优先直接不写几何类型 \`filter\`；若必须写，使用 \`['==', ['geometry-type'], 'Polygon']\`
 9. 地图实例变量统一使用 \`var map\`，禁止在同一 HTML 中重复 \`let/const map\` 声明（避免 "Identifier 'map' has already been declared"）
 10. 默认不要添加 \`symbol + text-field\` 的常驻文字标注图层（容易触发字体 pbf 请求告警）；优先用侧边栏/弹窗展示文字信息。仅当用户明确要求“地图上常驻文字标注”时才添加文本图层
 10.1 如果确实需要 \`symbol + text-field\` 文本图层，必须显式设置 \`'text-font': ['WenQuanYi Micro Hei Mono']\`，不要依赖默认字体栈；默认字体栈可能请求 \`Open Sans Regular,Arial Unicode MS Regular\` 并触发字体 pbf 404
@@ -1198,6 +1205,7 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 5. 如果是异步加载/事件时序问题，要增加必要的判空和时机保护
 5.1 如果提供了“错误诊断”信息，必须先遵循诊断中的根因与检查清单再改代码
 5.2 对地图渲染时序，优先检查是否在 \`map.on("load")\` 之前调用了 \`map.addSource\` / \`map.addLayer\` / \`map.addControl\` / \`map.fitBounds\`，以及是否在 source 未创建时就直接 \`map.getSource(...).setData(...)\`
+5.2.3 如果错误包含 \`isValid is not a function\` 且代码中使用了 \`TMapGL.LngLatBounds\`，优先检查是否误写了 \`bounds.isValid()\`；修复时应改为“有效坐标标记/计数器 + 条件性 \`fitBounds\`”，不要继续沿用其他地图 SDK 的 Bounds API 习惯
 5.2.1 如果代码需要清理旧图层/旧 source，先检查是否在 \`map\` 可能尚未初始化时直接调用了 \`map.getLayer(...)\` / \`map.getSource(...)\` / \`map.removeLayer(...)\` / \`map.removeSource(...)\`
 5.2.2 如果错误包含 \`Cannot add layer "... before non-existing layer ..."\`，优先检查是否把 \`map.addLayer(layerDef, beforeId)\` 的 \`beforeId\` 写死成了不存在的底图图层（如 \`waterway-label\`）；修复时必须先 \`map.getLayer(beforeId)\` 再决定是否传第二个参数
 5.3 修复时只能使用当前已加载 reference 文档中已经明确出现的 TMapGL API；没有示例支撑的 API 不要猜写
@@ -1218,7 +1226,9 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 7.4.1 如果错误表现为 \`Cannot read properties of undefined (reading 'getLayer')\` / \`'getSource'\`，优先检查是否在清理旧图层/旧 source 时漏掉了 \`map\` 判空与方法存在性校验
 7.4.2 如果错误表现为 \`Cannot add layer "... before non-existing layer ..."\`，优先删除或守卫 \`map.addLayer(..., beforeId)\` 的固定锚点层；只有在 \`map.getLayer(beforeId)\` 为真时才传 \`beforeId\`
 7.5 如果错误发生在 \`map.addLayer\` 附近或表现为 SDK 内部属性读取异常，优先检查图层类型与 \`paint/layout\` 属性是否匹配；例如 \`fill\` 图层不能使用 \`fill-width\`，若要可调边框宽度应新增 \`line\` 图层
-8. 如果错误包含 "AJAXError: Not Found (404): default"，优先检查并移除/修正 style: 'default'（默认样式应省略 style 字段）
+8. 如果错误包含 "AJAXError: Not Found (404): default"、"Failed to parse URL from black" 或 "Failed to parse URL from blue"，优先检查是否把 v5 个性化底图字段 \`styleId\` 误写成了 \`style\`；应改为 \`styleId: 'black' | 'blue' | 'normal'\`，默认底图也可直接省略 \`styleId\`
+8.1 如果 GeoJSON source 已成功加载、图层也创建成功，但面/线/点完全不显示，优先检查 \`['geometry-type']\` 过滤条件是否误写成 \`MultiPolygon\` / \`MultiLineString\` / \`MultiPoint\`；当前运行环境应改用 \`Polygon\` / \`LineString\` / \`Point\`
+8.2 如果界面一直停在“正在处理 N/M”或某个批量地理编码序列卡在第一条，优先检查是否在地图 \`load\` 完成前就启动了 geocode，并在 geocode 回调里立刻 \`addTo(map)\` / \`flyTo\` / \`fitBounds\`；修复时应把批量流程移到 \`map.on("load", ...)\` 后再启动
 9. 如果错误包含 "Identifier 'map' has already been declared"：
    - 检查是否存在重复 \`let/const map\` 声明
    - 统一改为单次声明或改为 \`var map\`

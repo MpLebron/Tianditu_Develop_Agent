@@ -113,8 +113,8 @@ export class SkillPlanner {
   - 如果用户明确要求某类图表（折线/柱状/饼图/散点/雷达/仪表盘）或强调 option/series/dataZoom 等图表配置，通常还需要读取 "echarts-index" 或一个具体 "echarts-*" 示例
   - 如果图表类型不明确，优先先读 "echarts-index"
 - UI 设计特例（重要）：
-  - 若用户明确说“页面丑/优化UI/改版首页/布局不好看/视觉风格要提升”，优先先读 UI 规划文档（ui-planning-workflow）
-  - 涉及布局结构时再补 tianditu-layout-recipes；涉及配色/字体/间距时补 visual-style-system；涉及细节打磨时补 component-polish-checklist
+  - 若用户明确说“页面丑/优化UI/改版首页/布局不好看/视觉风格要提升”，先做设计简报，再进入编码
+  - 要先确定页面气质、布局主次、状态设计，再生成代码
   - 先规划后编码，不要直接 generate 粗糙页面
 
 输出规则：
@@ -215,7 +215,7 @@ export class SkillPlanner {
 - 搜索/地理编码/路径规划类请求，优先选对应 search-* / geocoder
 - 涉及交互点击悬停时，可补充 bindEvents
 - 涉及图表联动时，优先选择 bindEcharts（联动桥接）；若用户明确要求图表类型/图表样式/option/series 配置，必须再补 "echarts-index" 或 1 个具体 "echarts-*" 示例（bindEcharts 本身不包含足够的图表本体配置）
-- 涉及页面视觉改版/UI 优化/布局重构时，优先选择 ui-planning-workflow，并按需补充 tianditu-layout-recipes / visual-style-system / component-polish-checklist
+- 涉及页面视觉改版/UI 优化/布局重构时，优先先做设计简报，再进入实现
 
 输出规则：
 - 只输出 JSON，不要输出 Markdown，不要解释
@@ -367,68 +367,6 @@ export class SkillPlanner {
     // 3) 纯问答/排错不触发 UI 规划，避免噪声
     const shouldApplyUiPlanning = hasUiIntent
     if (!shouldApplyUiPlanning) return null
-
-    const available = new Set(this.skillStore.getSkillNames())
-    const loaded = new Set(params.loadedSkills)
-
-    const uiPlanning = resolveSkillByRefName(available, 'ui-planning-workflow')
-    const layoutRecipes = resolveSkillByRefName(available, 'tianditu-layout-recipes')
-    const visualSystem = resolveSkillByRefName(available, 'visual-style-system')
-    const polishChecklist = resolveSkillByRefName(available, 'component-polish-checklist')
-
-    const batch: string[] = []
-    const pushIfNeeded = (skillName: string | null) => {
-      if (!skillName) return
-      if (loaded.has(skillName)) return
-      if (batch.includes(skillName)) return
-      batch.push(skillName)
-    }
-
-    pushIfNeeded(uiPlanning)
-
-    const hasCoreSkillLoaded = params.loadedSkills.some((s) => isCoreMapSkill(s))
-    if ((hasMapBuildIntent || hasDataIntent) && !hasCoreSkillLoaded) {
-      pushIfNeeded(resolveSkillByRefName(available, 'map-init'))
-      if (hasDataIntent) pushIfNeeded(resolveSkillByRefName(available, 'bindGeoJSON'))
-
-      if (/点数据|点位|marker|point|中心分布|坐标点|pointlayer/.test(lower)) {
-        pushIfNeeded(resolveSkillByRefName(available, 'bindPointLayer'))
-      } else if (/轨迹|路径|line|string|线图层/.test(lower)) {
-        pushIfNeeded(resolveSkillByRefName(available, 'bindLineLayer'))
-      } else if (/地块|面|polygon|fill|区域/.test(lower)) {
-        pushIfNeeded(resolveSkillByRefName(available, 'bindPolygonLayer'))
-      }
-    }
-
-    if (/首页|卡片|hero|landing|入口页/.test(lower) || /首页|卡片/.test(text)) {
-      pushIfNeeded(layoutRecipes)
-    }
-    if (/配色|字体|视觉|风格|品牌|主题|token|css变量/.test(lower) || /配色|字体|视觉|风格|品牌|主题|变量/.test(text)) {
-      pushIfNeeded(visualSystem)
-    }
-    if (/细节|打磨|对齐|hover|focus|loading|empty|error|状态/.test(lower) || /细节|打磨|对齐|状态/.test(text)) {
-      pushIfNeeded(polishChecklist)
-    }
-
-    // 对“普通地图生成请求”（如标注点/热力图/路线）补一个默认视觉系统，避免产出过于朴素
-    if (!hasUiIntent && hasMapBuildIntent) {
-      pushIfNeeded(visualSystem)
-    }
-
-    if (batch.length > 0) {
-      const reason = hasUiIntent
-        ? (batch.length > 1
-          ? '检测到明确 UI 优化诉求，本轮先读取 UI 规划文档并补充布局/视觉打磨文档，再进入生成。'
-          : '检测到明确 UI 设计诉求，先读取 ui-planning-workflow 做“先规划后编码”。')
-        : '检测到地图生成任务，按默认策略先做一轮轻量 UI 规划（ui-planning-workflow + visual-style-system），再进入功能代码生成。'
-
-      return {
-        action: 'read_skill_docs',
-        skillNames: batch,
-        reason,
-        raw: '[steering] ui design intent -> ui planning docs',
-      }
-    }
 
     return null
   }
@@ -659,12 +597,7 @@ export class SkillPlanner {
     const hasUiDesignIntent = /页面丑|太丑|优化ui|优化界面|美观|视觉风格|改版|重设计|布局不对|排版|卡片样式|页面设计|设计系统|ui/.test(lower)
       || /页面丑|太丑|优化UI|优化界面|美观|视觉风格|改版|重设计|布局不对|排版|卡片样式|页面设计|设计系统/.test(text)
     if (hasUiDesignIntent) {
-      const hasUiPlanning = loaded.has('ui-planning-workflow')
-      if (!hasUiPlanning) {
-        hints.push('检测到页面视觉优化意图：建议先读 ui-planning-workflow，再按需补充 tianditu-layout-recipes / visual-style-system。')
-      } else if (!loaded.has('component-polish-checklist')) {
-        hints.push('已进入 UI 规划阶段：可补读 component-polish-checklist，完善 hover/focus/loading/empty/error 等细节状态。')
-      }
+      hints.push('检测到页面视觉优化意图：建议先做设计简报，明确审美方向、布局主次和关键状态，再进入编码。')
     }
 
     return hints

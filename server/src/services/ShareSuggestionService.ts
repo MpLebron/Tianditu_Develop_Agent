@@ -411,6 +411,7 @@ export class ShareSuggestionService {
         temperature: 0.2,
         maxTokens: 180,
         timeoutMs: Math.min(config.llm.requestTimeoutMs, 12000),
+        modelName: config.llm.auxModel,
         modelKwargs: {
           enable_thinking: false,
         },
@@ -442,7 +443,7 @@ export class ShareSuggestionService {
           title: nextTitle,
           description: nextDescription,
           source: 'ai',
-          model: config.llm.model,
+          model: config.llm.auxModel,
         }
       }
 
@@ -454,7 +455,7 @@ export class ShareSuggestionService {
         title,
         description,
         source: 'ai',
-        model: config.llm.model,
+        model: config.llm.auxModel,
         done: true,
       }
     } catch {
@@ -475,6 +476,7 @@ export class ShareSuggestionService {
         temperature: 0.2,
         maxTokens: 180,
         timeoutMs: Math.min(config.llm.requestTimeoutMs, 12000),
+        modelName: config.llm.auxModel,
         modelKwargs: {
           enable_thinking: false,
         },
@@ -497,7 +499,7 @@ export class ShareSuggestionService {
         title,
         description,
         source: 'ai',
-        model: config.llm.model,
+        model: config.llm.auxModel,
       }
     } catch {
       return fallback

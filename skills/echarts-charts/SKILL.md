@@ -1,6 +1,6 @@
 ---
 name: echarts-charts
-description: ECharts 图表代码参考技能（纯图表，不含地图 API）。用于在地图侧边栏/详情面板/联动场景中生成或改写 ECharts option 与图表页面代码，适用于折线图、柱状图、饼图、散点图、雷达图、仪表盘等图表配置参考。当任务需要 ECharts 图表样式、series 配置、坐标轴、tooltip、legend、dataZoom 等图表本体能力时触发。若涉及天地图联动，请同时使用 `tianditu-echarts-bridge` skill 包中的 `bindEcharts` 参考文档。
+description: ECharts 图表代码参考技能（纯图表，不含地图 API）。用于在地图侧边栏/详情面板/联动场景中生成或改写 ECharts option 与图表页面代码，适用于折线图、柱状图、饼图、散点图、雷达图、仪表盘等图表配置参考。当任务需要 ECharts 图表样式、series 配置、坐标轴、tooltip、legend、dataZoom 等图表本体能力时触发。若涉及天地图联动，请同时使用 `tianditu-jsapi` 中的 `bindEcharts` 参考文档。
 license: Apache-2.0
 ---
 
@@ -15,7 +15,7 @@ license: Apache-2.0
 
 不适用场景：
 - 天地图地图初始化、图层、事件、搜索、路径规划（这些应使用天地图技能）
-- 地图点击事件与图表联动桥接逻辑（请使用 `tianditu-echarts-bridge` skill 包中的 `bindEcharts`）
+- 地图点击事件与图表联动桥接逻辑（请使用 `tianditu-jsapi` 中的 `bindEcharts`）
 
 ## 使用方式（建议）
 

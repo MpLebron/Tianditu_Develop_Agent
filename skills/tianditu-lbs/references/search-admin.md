@@ -155,22 +155,33 @@ async function loadAdministrative(keyword) {
   });
 
   var bounds = new TMapGL.LngLatBounds();
+  var hasBoundsPoint = false;
   features.forEach(function (f) {
     var g = f.geometry;
     if (!g) return;
     if (g.type === 'Polygon') {
       g.coordinates.forEach(function (ring) {
-        ring.forEach(function (pt) { bounds.extend(pt); });
+        ring.forEach(function (pt) {
+          if (!Array.isArray(pt) || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return;
+          bounds.extend(pt);
+          hasBoundsPoint = true;
+        });
       });
     } else if (g.type === 'MultiPolygon') {
       g.coordinates.forEach(function (poly) {
         poly.forEach(function (ring) {
-          ring.forEach(function (pt) { bounds.extend(pt); });
+          ring.forEach(function (pt) {
+            if (!Array.isArray(pt) || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) return;
+            bounds.extend(pt);
+            hasBoundsPoint = true;
+          });
         });
       });
     }
   });
-  map.fitBounds(bounds, { padding: 50, maxZoom: 10 });
+  if (hasBoundsPoint) {
+    map.fitBounds(bounds, { padding: 50, maxZoom: 10 });
+  }
 }
 ```
 
@@ -215,6 +226,7 @@ Invalid LngLat object: (NaN, ...)
 1. 检查是否在前端手拆 WKT 并生成了非法坐标。
 2. 切回代理 `boundaryFormat=geojson`。
 3. `bounds.extend` 前做坐标有限值检查。
+4. 不要调用 `bounds.isValid()`；天地图 `TMapGL.LngLatBounds` 没有这个方法，应改用 `hasBoundsPoint` / 计数器判断是否执行 `fitBounds`。
 
 ---
 

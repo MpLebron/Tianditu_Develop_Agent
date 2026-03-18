@@ -41,7 +41,7 @@
         var map = new TMapGL.Map("map", {
             center: [116.40, 39.90],
             zoom: 10,
-            style: "black"  // 暗黑底图适合数据可视化
+            styleId: "black"
         });
 
         map.on("load", function() {
@@ -49,6 +49,8 @@
             map.addControl(new TMapGL.ScaleControl({ unit: "metric" }), "bottom-left");
 
             // === 在此添加数据源和图层 ===
+            // 个性化底图请使用 styleId，不要误写成 style: "black"
+            // 也可以继续通过图例面板、遮罩和图层配色增强视觉效果
             // map.addSource('data', { type: 'geojson', data: ... });
             // map.addLayer({ id: 'data-layer', type: 'circle', source: 'data', paint: { ... } });
         });

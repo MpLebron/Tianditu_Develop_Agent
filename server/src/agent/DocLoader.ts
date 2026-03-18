@@ -32,8 +32,8 @@ export class DocLoader {
    */
   async loadTemplate(templateName: string): Promise<string | null> {
     const candidatePaths = [
-      // 新结构：独立天地图 skill 包
-      resolve(config.skillsDir, 'tianditu-js-api-v5', 'assets/templates', templateName),
+      // 当前结构：模板归入 tianditu-jsapi
+      resolve(config.skillsDir, 'tianditu-jsapi', 'assets/templates', templateName),
       // 旧结构兼容：根 skills/assets/templates
       resolve(config.skillsDir, 'assets/templates', templateName),
     ]
