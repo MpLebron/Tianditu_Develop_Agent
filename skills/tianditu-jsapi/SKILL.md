@@ -43,6 +43,8 @@ allowed-tools: Read Bash(node *)
 6. `TMapGL.LngLatBounds` 没有 `isValid()` 方法；如果要 `fitBounds`，必须自己维护“是否已经加入过有效坐标”的布尔标记或计数器，只有确认至少 extend 过 1 个有效点后才能调用 `map.fitBounds(bounds, ...)`
 7. 天地图 JS API v5 个性化底图优先使用 `styleId`，可按当前已验证示例写成 `styleId: 'normal' | 'black' | 'blue'`；不要把这些命名样式误写进 `style` 字段（如 `style: 'black'`），否则运行时可能把它当作 URL 解析并报错
 8. 当前运行环境里，`['geometry-type']` 过滤表达式应使用单类型名：`'Point' | 'LineString' | 'Polygon'`；不要写 `'MultiPoint' | 'MultiLineString' | 'MultiPolygon'`，多几何在这里会归并到对应单类型
+9. 如果要做 `circle` / `symbol` / `heatmap` / `cluster` 这类点专题图，传给 `map.addSource({ type: 'geojson', data })` 的数据应尽量是 **Point FeatureCollection**；若原始数据含 `MultiPoint`，必须先归一化成 `Point` 再上图，不要直接拿 `MultiPoint` 去做热力图或聚合图
+10. 任何 `map.getSource(...)` / `map.getLayer(...)` / `map.removeLayer(...)` / `map.removeSource(...)` / `map.addLayer(layer, beforeId)` 都要先做时机与存在性守卫：优先放进 `map.on("load", ...)`，并在使用 `beforeId` 前先确认 `map.getLayer(beforeId)` 为真
 
 ## 生成/修复策略
 
@@ -52,3 +54,5 @@ allowed-tools: Read Bash(node *)
 - 如果代码里要基于 GeoJSON、路线、行政区边界或点位集合自动缩放视野，不要写 `bounds.isValid()`；优先先过滤非法坐标，再用 `hasBoundsPoint` / `validBoundsPointCount` 控制是否执行 `fitBounds`
 - 如果用户想要“暗黑地图 / 蓝色地图 / 个性化底图”，优先使用 `styleId`；如果只是想让页面更有设计感，也可以在保留默认底图的前提下，通过深色信息面板、图例、半透明遮罩和高对比度图层配色增强视觉效果
 - 如果 GeoJSON 数据源已经明确全是 `Polygon/MultiPolygon`，最稳妥的做法是直接不写几何类型 `filter`；若确实需要过滤，统一写 `['==', ['geometry-type'], 'Polygon']`
+- 如果 GeoJSON 数据源里可能混有 `MultiPoint`，而目标图层是 `circle` / `symbol` / `heatmap` / `cluster`，优先先做 `normalizePointFeature()` / `normalizePointFeatures()`，把 `MultiPoint` 拆成或降级成 `Point` FeatureCollection，再 `addSource`
+- 如果代码里需要更新已有 source 或清理旧图层，优先写成“判空再操作”的防御式模式：`var src = map && map.getSource && map.getSource(id)` / `if (map.getLayer(beforeId)) { map.addLayer(layer, beforeId) } else { map.addLayer(layer) }`

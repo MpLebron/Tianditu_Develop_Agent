@@ -27,7 +27,7 @@ export interface VisualInspectionServiceOptions {
   timeoutMs?: number
 }
 
-const MODEL_NAME = config.llm.model
+const MODEL_NAME = config.visualInspection.model || config.llm.model
 const MAX_HINT_CHARS = 1500
 const MAX_SUMMARY_CHARS = 120
 const MAX_DIAGNOSIS_CHARS = 500
@@ -193,6 +193,7 @@ export class VisualInspectionService {
         temperature: 0,
         maxTokens: 500,
         timeoutMs: this.timeoutMs,
+        modelName: MODEL_NAME,
       })
 
       const response = await llm.invoke([

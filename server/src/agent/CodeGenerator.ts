@@ -1228,6 +1228,7 @@ ${params.skillCatalog ? '## 可用文档目录\n' + params.skillCatalog : ''}
 7.5 如果错误发生在 \`map.addLayer\` 附近或表现为 SDK 内部属性读取异常，优先检查图层类型与 \`paint/layout\` 属性是否匹配；例如 \`fill\` 图层不能使用 \`fill-width\`，若要可调边框宽度应新增 \`line\` 图层
 8. 如果错误包含 "AJAXError: Not Found (404): default"、"Failed to parse URL from black" 或 "Failed to parse URL from blue"，优先检查是否把 v5 个性化底图字段 \`styleId\` 误写成了 \`style\`；应改为 \`styleId: 'black' | 'blue' | 'normal'\`，默认底图也可直接省略 \`styleId\`
 8.1 如果 GeoJSON source 已成功加载、图层也创建成功，但面/线/点完全不显示，优先检查 \`['geometry-type']\` 过滤条件是否误写成 \`MultiPolygon\` / \`MultiLineString\` / \`MultiPoint\`；当前运行环境应改用 \`Polygon\` / \`LineString\` / \`Point\`
+8.1.1 如果点专题图 / 热力图 / 聚合图的原始数据里出现 \`MultiPoint\`，不要直接把 \`MultiPoint\` 原样传给 \`cluster\` / \`heatmap\` / \`circle\` 图层；修复时应先归一化成 \`Point FeatureCollection\`
 8.2 如果界面一直停在“正在处理 N/M”或某个批量地理编码序列卡在第一条，优先检查是否在地图 \`load\` 完成前就启动了 geocode，并在 geocode 回调里立刻 \`addTo(map)\` / \`flyTo\` / \`fitBounds\`；修复时应把批量流程移到 \`map.on("load", ...)\` 后再启动
 9. 如果错误包含 "Identifier 'map' has already been declared"：
    - 检查是否存在重复 \`let/const map\` 声明

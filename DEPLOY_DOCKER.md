@@ -46,6 +46,7 @@ LLM_API_KEY=your_aihubmix_key
 LLM_BASE_URL=https://aihubmix.com/v1
 # 单模型默认走阿里云百炼 Qwen3.5 Plus
 LLM_MODEL=qwen3.5-plus
+VISUAL_INSPECTION_MODEL=qwen3.5-flash
 DASHSCOPE_API_KEY=your_dashscope_api_key
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 DASHSCOPE_RESPONSES_BASE_URL=https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1

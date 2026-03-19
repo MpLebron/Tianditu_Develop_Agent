@@ -5,10 +5,43 @@
 ## 基础用法
 
 ```javascript
+function normalizePointFeatures(featureCollection) {
+    var input = featureCollection && Array.isArray(featureCollection.features) ? featureCollection.features : [];
+    var normalized = [];
+
+    input.forEach(function(feature) {
+        if (!feature || !feature.geometry || !Array.isArray(feature.geometry.coordinates)) return;
+        var props = feature.properties || {};
+
+        if (feature.geometry.type === 'Point') {
+            var point = feature.geometry.coordinates;
+            if (Array.isArray(point) && point.length >= 2) {
+                normalized.push(feature);
+            }
+            return;
+        }
+
+        if (feature.geometry.type === 'MultiPoint') {
+            feature.geometry.coordinates.forEach(function(point, index) {
+                if (!Array.isArray(point) || point.length < 2) return;
+                normalized.push({
+                    type: 'Feature',
+                    properties: Object.assign({}, props, { __pointIndex: index }),
+                    geometry: { type: 'Point', coordinates: point }
+                });
+            });
+        }
+    });
+
+    return { type: 'FeatureCollection', features: normalized };
+}
+
+var clusterData = normalizePointFeatures(pointsGeoJSON);
+
 // 开启聚合的数据源
 map.addSource('cluster-source', {
     type: 'geojson',
-    data: pointsGeoJSON,
+    data: clusterData,
     cluster: true,
     clusterMaxZoom: 14,
     clusterRadius: 50
@@ -118,3 +151,6 @@ map.on('click', 'unclustered-point', function(e) {
 2. `point_count_abbreviated` 是自动生成的缩写数字（如 1.2k）
 3. `getClusterExpansionZoom` 是异步回调，不是 Promise
 4. 聚合数量文本属于 `symbol + text-field`，必须显式设置 `text-font: ['WenQuanYi Micro Hei Mono']`，不要使用 `Microsoft YaHei` 之类页面字体名
+5. 聚合图最稳的输入是 **Point FeatureCollection**；如果原始 GeoJSON 含 `MultiPoint`，先归一化成 `Point` 再 `addSource`
+6. 不要写 `['==', ['geometry-type'], 'MultiPoint']`；当前运行环境里多点会按 `Point` 归并
+7. 如果要更新已有聚合 source，先守卫：`var src = map && map.getSource && map.getSource('cluster-source')`，确认存在后再 `setData(...)`

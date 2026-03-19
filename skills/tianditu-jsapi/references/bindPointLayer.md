@@ -152,3 +152,5 @@ map.on('click', 'point-layer', function(e) {
 4. 点击事件里访问 `e.features[0]` 前必须判空：`if (!e.features || !e.features.length) return`
 5. 坐标校验优先看 `geometry.coordinates`，禁止读取预览字段 `coordinatesPreview`
 6. 如果用了 `symbol + text-field`，必须显式设置 `text-font: ['WenQuanYi Micro Hei Mono']`，避免 `vector.tianditu.gov.cn/static/font/*.pbf` 404
+7. 如果原始 GeoJSON 里含 `MultiPoint`，先归一化成 `Point` FeatureCollection 再上 `circle` / `symbol` / `heatmap` / `cluster`；不要依赖 `['geometry-type'] === 'MultiPoint'`
+8. 如果要更新点图层 source，先守卫 `map` 和 source：`var src = map && map.getSource && map.getSource('points')`，确认存在后再 `src.setData(...)`

@@ -18,6 +18,8 @@ interface MapStore {
   codeViewMode: 'code' | 'diff'
   fixRetryCount: number
   visualChecking: boolean
+  visualBlocking: boolean
+  visualCheckingOwner: 'inspection' | 'repair' | null
   visualFixRetryCount: number
   lastVisualCheckedCodeHash: string | null
   shareThumbnailBase64: string | null
@@ -34,7 +36,8 @@ interface MapStore {
   finishCodeStream: (finalCode: string) => void
   setExecError: (error: string | null) => void
   setExecuting: (v: boolean) => void
-  setVisualChecking: (v: boolean) => void
+  setVisualChecking: (v: boolean, owner?: 'inspection' | 'repair' | null) => void
+  setVisualBlocking: (v: boolean) => void
   markVisualChecked: (hash: string | null) => void
   setShareThumbnailBase64: (base64: string | null) => void
   setCurrentRunId: (runId: string | null) => void
@@ -59,6 +62,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
   codeViewMode: 'code',
   fixRetryCount: 0,
   visualChecking: false,
+  visualBlocking: false,
+  visualCheckingOwner: null,
   visualFixRetryCount: 0,
   lastVisualCheckedCodeHash: null,
   shareThumbnailBase64: null,
@@ -74,6 +79,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     lastFixDiff: null,
     codeViewMode: 'code',
     visualChecking: false,
+    visualBlocking: false,
+    visualCheckingOwner: null,
     visualFixRetryCount: 0,
     lastVisualCheckedCodeHash: null,
     shareThumbnailBase64: null,
@@ -87,6 +94,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     lastFixDiff: null,
     codeViewMode: 'code',
     visualChecking: false,
+    visualBlocking: false,
+    visualCheckingOwner: null,
     shareThumbnailBase64: null,
   }),
 
@@ -117,6 +126,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
     lastFixDiff: null,
     codeViewMode: 'code',
     visualChecking: false,
+    visualBlocking: false,
+    visualCheckingOwner: null,
     visualFixRetryCount: 0,
     lastVisualCheckedCodeHash: null,
     shareThumbnailBase64: null,
@@ -124,7 +135,12 @@ export const useMapStore = create<MapStore>((set, get) => ({
 
   setExecError: (error) => set({ execError: error }),
   setExecuting: (v) => set({ executing: v }),
-  setVisualChecking: (v) => set({ visualChecking: v }),
+  setVisualChecking: (v, owner = null) => set({
+    visualChecking: v,
+    visualCheckingOwner: v ? (owner || 'inspection') : null,
+    visualBlocking: v ? true : false,
+  }),
+  setVisualBlocking: (v) => set({ visualBlocking: v }),
   markVisualChecked: (hash) => set({ lastVisualCheckedCodeHash: hash }),
   setShareThumbnailBase64: (base64) => set({ shareThumbnailBase64: base64 }),
   setCurrentRunId: (runId) => set({ currentRunId: runId }),
@@ -163,6 +179,8 @@ export const useMapStore = create<MapStore>((set, get) => ({
           execError: null,
           fixing: false,
           fixingSource: null,
+          visualBlocking: false,
+          visualCheckingOwner: null,
           lastFixDiff: json.data?.diff || null,
           codeViewMode: json.data?.diff ? 'diff' : 'code',
           fixRetryCount: fixRetryCount + 1,
@@ -170,11 +188,11 @@ export const useMapStore = create<MapStore>((set, get) => ({
         })
       } else {
         console.log('[AutoFix] 修复失败:', json.data?.explanation)
-        set({ fixing: false, fixingSource: null, fixRetryCount: fixRetryCount + 1 })
+        set({ fixing: false, fixingSource: null, visualBlocking: false, visualCheckingOwner: null, fixRetryCount: fixRetryCount + 1 })
       }
     } catch (err: any) {
       console.error('[AutoFix] 请求错误:', err.message)
-      set({ fixing: false, fixingSource: null, fixRetryCount: fixRetryCount + 1 })
+      set({ fixing: false, fixingSource: null, visualBlocking: false, visualCheckingOwner: null, fixRetryCount: fixRetryCount + 1 })
     }
   },
 }))

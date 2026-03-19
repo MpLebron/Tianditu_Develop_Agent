@@ -285,6 +285,7 @@ export function MapPreview() {
   const visualRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const thumbnailTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualInFlightRef = useRef(false)
+  const queuedVisualCodeHashRef = useRef<string | null>(null)
   const thumbnailInFlightRef = useRef(false)
   const defaultLoaded = useRef(false)
   const deferredVisualRetryRef = useRef<{ codeHash: string; count: number }>({ codeHash: '', count: 0 })
@@ -480,6 +481,9 @@ export function MapPreview() {
   // 渲染稳定后自动触发视觉巡检
   useEffect(() => {
     deferredVisualRetryRef.current = { codeHash: '', count: 0 }
+    if (!visualInFlightRef.current) {
+      queuedVisualCodeHashRef.current = null
+    }
     if (visualRetryTimerRef.current) {
       clearTimeout(visualRetryTimerRef.current)
       visualRetryTimerRef.current = null
@@ -503,16 +507,21 @@ export function MapPreview() {
       const state = useMapStore.getState()
       if (state.previewCode && state.codeStreaming) return
       if (!state.currentCode || state.executing || state.fixing || state.execError) return
-      if (visualInFlightRef.current) return
+      if (visualInFlightRef.current) {
+        queuedVisualCodeHashRef.current = codeHash
+        return
+      }
 
+      queuedVisualCodeHashRef.current = null
       visualInFlightRef.current = true
-      useMapStore.setState({ visualChecking: true })
+      useMapStore.getState().setVisualChecking(true, 'inspection')
 
       try {
         const messages = useChatStore.getState().messages
         const latestUser = [...messages].reverse().find((m) => m.role === 'user')
         const hint = latestUser?.content?.trim() || ''
         const runId = `${Date.now()}-${codeHash.slice(0, 8)}`
+        const inspectionRunId = state.currentRunId || ''
         const capture = await captureVisualInspectionCandidate(iframeRef.current)
         const captureMeta = capture.captureMeta
         if (capture.imageBase64) {
@@ -530,7 +539,13 @@ export function MapPreview() {
         })
 
         const latestState = useMapStore.getState()
-        if (latestState.execError || latestState.executing) return
+        const latestCodeHash = latestState.currentCode ? hashCode(latestState.currentCode) : ''
+        const requestBecameStale =
+          latestCodeHash !== codeHash
+          || useChatStore.getState().loading
+          || (inspectionRunId && latestState.currentRunId !== inspectionRunId)
+
+        if (latestState.execError || latestState.executing || requestBecameStale) return
 
         if (result.status === 'unavailable') {
           if (captureMeta.loadingHintDetected && scheduleDeferredVisualRetry(codeHash)) {
@@ -593,6 +608,7 @@ export function MapPreview() {
           `修复建议: ${result.repairHint}`,
         ].join('\n')
 
+        useMapStore.getState().setVisualChecking(true, 'repair')
         await useChatStore.getState().autoFixMapError({
           source: 'visual',
           overrideError: repairError,
@@ -603,6 +619,24 @@ export function MapPreview() {
       } finally {
         useMapStore.getState().setVisualChecking(false)
         visualInFlightRef.current = false
+
+        const latestState = useMapStore.getState()
+        const latestCodeHash = latestState.currentCode ? hashCode(latestState.currentCode) : ''
+        const queuedHash = queuedVisualCodeHashRef.current
+        const shouldReplayQueuedInspection =
+          !!queuedHash
+          && queuedHash === latestCodeHash
+          && queuedHash !== codeHash
+          && !latestState.previewCode
+          && !latestState.codeStreaming
+          && !latestState.executing
+          && !latestState.fixing
+          && !latestState.execError
+
+        if (shouldReplayQueuedInspection) {
+          queuedVisualCodeHashRef.current = null
+          setVisualRetryNonce((value) => value + 1)
+        }
       }
     }, VISUAL_STABLE_DELAY_MS)
 
@@ -634,6 +668,7 @@ export function MapPreview() {
         clearTimeout(visualRetryTimerRef.current)
         visualRetryTimerRef.current = null
       }
+      queuedVisualCodeHashRef.current = null
     }
   }, [])
 

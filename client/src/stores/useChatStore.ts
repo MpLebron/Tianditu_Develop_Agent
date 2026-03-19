@@ -31,6 +31,15 @@ function buildHistory(messages: Message[]): string | undefined {
     .join('\n')
 }
 
+function hashCode(text: string): string {
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
+  }
+  return `h${(hash >>> 0).toString(16)}`
+}
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
   loading: false,
@@ -417,9 +426,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const source = options?.source === 'visual' ? 'visual' : 'runtime'
     const MAX_RUNTIME_FIX_RETRIES = 2
     const MAX_VISUAL_FIX_RETRIES = 2
+    const VISUAL_FIX_TIMEOUT_MS = 30000
     const maxRetries = source === 'visual' ? MAX_VISUAL_FIX_RETRIES : MAX_RUNTIME_FIX_RETRIES
     const currentRetryCount = source === 'visual' ? visualFixRetryCount : fixRetryCount
     const effectiveError = (options?.overrideError || execError || '').trim()
+    const currentCodeHash = currentCode ? hashCode(currentCode) : null
 
     if (fixing || !currentCode || !effectiveError || currentRetryCount >= maxRetries) return
 
@@ -530,10 +541,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     useMapStore.getState().setCodeViewMode('code')
     console.log(`[AutoFixStream][${source}] 第 ${attempt} 次修复尝试:`, effectiveError)
 
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const timeoutId = source === 'visual' && controller
+      ? window.setTimeout(() => {
+          controller.abort(new DOMException('视觉补修超时', 'AbortError'))
+        }, VISUAL_FIX_TIMEOUT_MS)
+      : null
+
     try {
       const response = await fetch('/api/chat/fix/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller?.signal,
         body: JSON.stringify({
           code: currentCode,
           error: effectiveError,
@@ -751,7 +770,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           fixingSource: null,
           codeStreaming: false,
           streamingCode: null,
-          ...(source === 'visual' ? { lastVisualCheckedCodeHash: null } : {}),
+          ...(source === 'visual'
+            ? { lastVisualCheckedCodeHash: currentCodeHash }
+            : {}),
           ...(source === 'visual'
             ? { visualFixRetryCount: attempt }
             : { fixRetryCount: attempt }),
@@ -761,19 +782,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     } catch (err: any) {
       console.error('[AutoFixStream] 请求错误:', err.message)
       ensureAssistantMessage()
-      appendText(`\n\n修复请求失败：${err.message || '未知错误'}`)
+      const isAbort = err?.name === 'AbortError'
+      appendText(`\n\n${isAbort
+        ? '视觉补修超时：服务繁忙或排队过久，系统已结束本轮自动补修并恢复输入。'
+        : `修复请求失败：${err.message || '未知错误'}`}`)
       useMapStore.setState({
         previewCode: null,
         fixing: false,
         fixingSource: null,
         codeStreaming: false,
         streamingCode: null,
-        ...(source === 'visual' ? { lastVisualCheckedCodeHash: null } : {}),
+        ...(source === 'visual'
+          ? { lastVisualCheckedCodeHash: currentCodeHash }
+          : {}),
         ...(source === 'visual'
           ? { visualFixRetryCount: attempt }
           : { fixRetryCount: attempt }),
       })
       finalizeMessage()
+    } finally {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+      }
     }
   },
 
@@ -790,5 +820,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }))
   },
 
-  clearMessages: () => set({ messages: [], error: null, activeFileContext: null }),
+  clearMessages: () => {
+    useMapStore.setState({
+      currentRunId: null,
+      execError: null,
+      fixing: false,
+      fixingSource: null,
+      visualChecking: false,
+      visualBlocking: false,
+      visualCheckingOwner: null,
+    })
+    set({ messages: [], error: null, activeFileContext: null, loading: false })
+  },
 }))

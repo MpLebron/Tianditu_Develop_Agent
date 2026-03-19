@@ -139,6 +139,7 @@ export const config = {
 
   visualInspection: {
     enabled: process.env.VISUAL_INSPECTION_ENABLED !== 'false',
+    model: process.env.VISUAL_INSPECTION_MODEL || 'qwen3.5-flash',
     baseUrl: process.env.VISUAL_INSPECTION_BASE_URL || `http://127.0.0.1:${parseInt(process.env.PORT || '3000')}`,
     chromiumPath: process.env.VISUAL_INSPECTION_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '',
     timeoutMs: parseInt(process.env.VISUAL_INSPECTION_TIMEOUT_MS || '35000'),

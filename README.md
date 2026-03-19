@@ -20,6 +20,7 @@
 ## 当前模型方案
 
 - 主模型：`qwen3.5-plus`
+- 视觉巡检模型：`qwen3.5-flash`
 - 接口形态：
   - 普通文本生成：DashScope OpenAI 兼容接口
   - Agent 工具主循环：DashScope Responses API
@@ -59,6 +60,7 @@ cp .env.example .env
 TIANDITU_TOKEN=你的天地图Token
 DASHSCOPE_API_KEY=你的阿里云百炼Key
 LLM_MODEL=qwen3.5-plus
+VISUAL_INSPECTION_MODEL=qwen3.5-flash
 ```
 
 ### 3. 启动服务
@@ -112,6 +114,7 @@ npm test
   - `DASHSCOPE_BASE_URL`
   - `DASHSCOPE_RESPONSES_BASE_URL`
   - `LLM_MODEL`
+  - `VISUAL_INSPECTION_MODEL`
 - 分享与视觉巡检
   - `SHARE_DIR`
   - `SHARE_THUMBNAIL_*`

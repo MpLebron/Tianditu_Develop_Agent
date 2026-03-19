@@ -5,19 +5,40 @@
 ## 基础用法
 
 ```javascript
+function normalizeHeatmapFeatures(featureCollection) {
+    var input = featureCollection && Array.isArray(featureCollection.features) ? featureCollection.features : [];
+    var normalized = [];
+
+    input.forEach(function(feature) {
+        if (!feature || !feature.geometry || !Array.isArray(feature.geometry.coordinates)) return;
+        var props = feature.properties || {};
+
+        if (feature.geometry.type === 'Point') {
+            normalized.push(feature);
+            return;
+        }
+
+        if (feature.geometry.type === 'MultiPoint') {
+            feature.geometry.coordinates.forEach(function(point, index) {
+                if (!Array.isArray(point) || point.length < 2) return;
+                normalized.push({
+                    type: 'Feature',
+                    properties: Object.assign({}, props, { __pointIndex: index }),
+                    geometry: { type: 'Point', coordinates: point }
+                });
+            });
+        }
+    });
+
+    return { type: 'FeatureCollection', features: normalized };
+}
+
+var heatData = normalizeHeatmapFeatures(rawGeoJSON);
+
 // 数据源（GeoJSON 点 + weight 属性）
 map.addSource('heat-source', {
     type: 'geojson',
-    data: {
-        type: 'FeatureCollection',
-        features: points.map(function(p) {
-            return {
-                type: 'Feature',
-                geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
-                properties: { weight: p.value }
-            };
-        })
-    }
+    data: heatData
 });
 
 // 热力图层
@@ -84,3 +105,6 @@ for (var i = 0; i < 200; i++) {
 1. `heatmap-color` 的插值基于 `heatmap-density`（0-1），不是数据值
 2. `heatmap-weight` 用 `['get', 'weight']` 从属性读取，确保值在 0-1 范围
 3. `heatmap-radius` 是像素单位，放大缩小地图时圆的屏幕大小不变
+4. 热力图输入最稳的是 **Point FeatureCollection**；如果原始数据含 `MultiPoint`，先归一化成 `Point` 再 `addSource`
+5. 不要用 `['==', ['geometry-type'], 'MultiPoint']` 过滤热力图点；当前运行环境里应统一按 `Point` 处理
+6. 如果热力图要插到某个图层前面，先 `map.getLayer(beforeId)`，存在时再传 `beforeId`

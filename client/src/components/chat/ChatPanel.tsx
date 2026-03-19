@@ -8,13 +8,13 @@ import { WorkspaceExampleGallery } from './WorkspaceExampleGallery'
 
 export function ChatPanel() {
   const { messages, loading, error, sendMessage, clearMessages } = useChatStore()
-  const { visualChecking, fixing, fixingSource } = useMapStore()
+  const { visualChecking, visualCheckingOwner, fixing, fixingSource } = useMapStore()
   const scrollRef = useAutoScroll([messages])
   const inputLocked = visualChecking || (fixing && fixingSource === 'visual')
-  const inputLockReason = visualChecking
-    ? 'AI 正在进行视觉巡检，请稍候后再发送消息'
-    : (fixing && fixingSource === 'visual'
-        ? 'AI 正在处理视觉补修，请稍候后再发送消息'
+  const inputLockReason = (fixing && fixingSource === 'visual') || visualCheckingOwner === 'repair'
+    ? 'AI 正在处理视觉补修，请稍候后再发送消息'
+    : (visualChecking
+        ? 'AI 正在进行视觉巡检，请稍候后再发送消息'
         : null)
 
   // 判断是否在 "等待响应"（loading 但还没创建 assistant 消息）
