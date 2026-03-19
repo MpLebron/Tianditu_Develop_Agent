@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { useChatStore } from '../../stores/useChatStore'
 import { useMapStore } from '../../stores/useMapStore'
 import { useAutoScroll } from '../../hooks/useAutoScroll'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
+import { WorkspaceExampleGallery } from './WorkspaceExampleGallery'
 
 export function ChatPanel() {
   const { messages, loading, error, sendMessage, clearMessages } = useChatStore()
@@ -19,39 +21,23 @@ export function ChatPanel() {
   const lastMsg = messages[messages.length - 1]
   const isWaiting = loading && (!lastMsg || lastMsg.role === 'user')
 
+  useEffect(() => {
+    if (messages.length === 0 && scrollRef.current) {
+      scrollRef.current.scrollTop = 0
+    }
+  }, [messages.length, scrollRef])
+
   return (
     <div className="flex flex-col h-full bg-white">
       {/* 消息列表 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
-          /* 空状态 — 简约引导 */
-          <div className="flex flex-col items-center justify-center h-full px-6">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/20 soft-surface animate-fade-in">
-              <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.893 13.393l-1.135-1.135a2.252 2.252 0 01-.421-.585l-1.08-2.16a.414.414 0 00-.663-.107.827.827 0 01-.812.21l-1.273-.363a.89.89 0 00-.738 1.595l.587.39c.59.395.674 1.23.172 1.732l-.2.2c-.212.212-.33.498-.33.796v.41c0 .409-.11.809-.32 1.158l-1.315 2.191a2.11 2.11 0 01-1.81 1.025 1.055 1.055 0 01-1.055-1.055v-1.172c0-.92-.56-1.747-1.414-2.089l-.655-.261a2.25 2.25 0 01-1.383-2.46l.007-.042a2.25 2.25 0 01.29-.787l.09-.15a2.25 2.25 0 012.37-1.048l1.178.236a1.125 1.125 0 001.302-.795l.208-.73a1.125 1.125 0 00-.578-1.315l-.665-.332-.091.091a2.25 2.25 0 01-1.591.659h-.18c-.249 0-.487.1-.662.274a.931.931 0 01-1.458-1.137l1.411-2.353a2.25 2.25 0 00.286-.76m11.928 9.869A9 9 0 008.965 3.525m11.928 9.868A9 9 0 118.965 3.525" />
-              </svg>
-            </div>
-            <h3 className="text-base font-semibold text-gray-800 mb-1.5">天地图智能助手</h3>
-            <p className="text-[13px] text-gray-400 text-center leading-relaxed max-w-[220px]">
-              描述你想要的地图效果，我来帮你生成
-            </p>
-            {/* 快捷建议 */}
-            <div className="mt-6 space-y-2 w-full max-w-[260px]">
-              {[
-                '创建一个北京的基础地图',
-                '在地图上标注 5 个景点',
-                '生成全国 GDP 热力图',
-              ].map((hint) => (
-                <button
-                  key={hint}
-                  onClick={() => sendMessage(hint)}
-                  className="w-full text-left text-[12.5px] text-gray-500 hover:text-blue-600 bg-gray-50/80 hover:bg-blue-50/60 border border-gray-100 hover:border-blue-200/60 rounded-xl px-3.5 py-2.5 soft-pop"
-                >
-                  <span className="opacity-50 mr-1.5">→</span>{hint}
-                </button>
-              ))}
-            </div>
-          </div>
+          <WorkspaceExampleGallery
+            disabled={loading || inputLocked}
+            onSelectExample={(prompt, sampleId) => {
+              void sendMessage(prompt, undefined, undefined, sampleId)
+            }}
+          />
         ) : (
           /* 消息列表 */
           <div className="px-4 py-5 space-y-1">
