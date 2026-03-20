@@ -266,7 +266,7 @@ describe('native tool loop', () => {
     expect(finalResult.reason).toContain('本地能力')
   })
 
-  it('hides web_search for tianditu transit page generation requests', async () => {
+  it('fast-paths tianditu transit page generation requests into continue mode', async () => {
     const fetchUrl = vi.fn()
     const apply = vi.fn()
     const responsesCreate = vi.fn().mockResolvedValueOnce(createResponse({
@@ -295,10 +295,10 @@ describe('native tool loop', () => {
       if (event.type === 'final') finalResult = event.result
     }
 
-    const firstRequest = responsesCreate.mock.calls[0]?.[0] as Record<string, any>
-    expect(firstRequest.tools.some((tool: Record<string, unknown>) => tool.type === 'web_search')).toBe(false)
+    expect(responsesCreate).not.toHaveBeenCalled()
     expect(finalResult.replyMode).toBe('continue')
-    expect(finalResult.reason).toContain('公交地铁路线规划页面')
+    expect(finalResult.reason).toContain('直接进入主链路')
+    expect(finalResult.fallbackReason).toBe('local_tianditu_generation_fast_path')
   })
 
   it('forces continue mode for uploaded file interpretation requests and exposes a compact file digest', async () => {

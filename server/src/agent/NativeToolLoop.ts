@@ -116,6 +116,25 @@ export class NativeToolLoop {
 
   async *run(params: NativeToolLoopRunParams): AsyncGenerator<NativeToolLoopEvent> {
     const records: ToolExecutionRecord[] = []
+    const fastPathDecision = getFastPathDecision(params)
+    if (fastPathDecision) {
+      yield {
+        type: 'final',
+        result: {
+          replyMode: fastPathDecision.replyMode,
+          reason: fastPathDecision.reason,
+          finalText: '',
+          rawFinalText: '',
+          toolContext: '',
+          records,
+          rounds: 0,
+          decisionSource: 'fallback',
+          fallbackReason: fastPathDecision.fallbackReason,
+        },
+      }
+      return
+    }
+
     const client = this.createResponsesClient()
     const toolAvailability = await this.planAvailableTools(params)
     const tools = buildResponsesToolDefinitions(toolAvailability.availableTools)
@@ -722,6 +741,35 @@ function shouldHideWebSearchForLocalTiandituTask(params: NativeToolLoopRunParams
   }
 
   return /(天地图|tmapgl|\/api\/tianditu\/|公交|地铁|换乘|路线规划|路径规划|busline|transit|drive|geocode|poi|行政区|热力图|聚合|geojson|图层|marker|popup|起点|终点|左侧控制面板|右侧地图)/i.test(text)
+}
+
+function getFastPathDecision(params: NativeToolLoopRunParams): {
+  replyMode: 'continue'
+  reason: string
+  fallbackReason: string
+} | null {
+  if (shouldFastPathContinueForLocalTiandituGeneration(params)) {
+    return {
+      replyMode: 'continue',
+      reason: '当前请求是明确的天地图页面 / 代码生成任务，且本地能力已覆盖所需地图与 LBS 能力，直接进入主链路生成可减少首包等待。',
+      fallbackReason: 'local_tianditu_generation_fast_path',
+    }
+  }
+
+  return null
+}
+
+function shouldFastPathContinueForLocalTiandituGeneration(params: NativeToolLoopRunParams): boolean {
+  if (params.mode !== 'generate') return false
+  if (!params.userInput?.trim()) return false
+  if (!shouldHideWebSearchForLocalTiandituTask(params)) return false
+
+  const text = `${params.userInput}\n${params.conversationHistory || ''}`.toLowerCase()
+  if (/(你能|是否|支持吗|是什么|什么意思|怎么回事|为什么|能不能|可不可以)/i.test(text)) {
+    return false
+  }
+
+  return /(生成|创建|实现|开发|编写|搭建|做一个|做个|页面|网页|组件|界面|demo|示例|代码)/i.test(text)
 }
 
 function parseDecisionJson(raw: string): {
