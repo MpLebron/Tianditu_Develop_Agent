@@ -63,6 +63,34 @@ describe('FileParser', () => {
     expect(result.rows[0]['中央红军（红一方面军）'][0]).toEqual({ 地名: '江西于都' })
     expect(result.encoding).toBe('gb18030')
   })
+
+  it('rejects geojson files whose content is not a valid GeoJSON structure', async () => {
+    const filePath = await writeTempFile('invalid.geojson', Buffer.from('{"foo":"bar"}', 'utf-8'))
+    const parser = new FileParser()
+
+    await expect(parser.parse(filePath)).rejects.toThrow('GeoJSON 文件内容不合法')
+  })
+
+  it('rejects json objects that cannot support current visualization flow', async () => {
+    const filePath = await writeTempFile('invalid.json', Buffer.from('{"foo":"bar"}', 'utf-8'))
+    const parser = new FileParser()
+
+    await expect(parser.parse(filePath)).rejects.toThrow('JSON 文件内容不合法')
+  })
+
+  it('accepts object-root json files that contain top-level object arrays', async () => {
+    const filePath = await writeTempFile(
+      'long-march-like.json',
+      Buffer.from('{"中央红军":[{"地名":"江西于都","经度":114.9,"纬度":25.95}],"红二方面军":[{"地名":"湖南","经度":111.7,"纬度":27.3}]}', 'utf-8'),
+    )
+    const parser = new FileParser()
+
+    const result = await parser.parse(filePath)
+
+    expect(result.type).toBe('json')
+    expect(result.rootShape).toBe('object')
+    expect(result.topLevelKeys).toEqual(['中央红军', '红二方面军'])
+  })
 })
 
 async function writeTempFile(name: string, content: Buffer): Promise<string> {

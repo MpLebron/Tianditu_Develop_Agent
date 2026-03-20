@@ -20,6 +20,12 @@ export interface ThoughtChainItem {
   uiVisibility?: 'activity' | 'grouped' | 'debug'
 }
 
+export interface MessageFileAttachment {
+  name: string
+  size: number
+  previewText?: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -28,8 +34,5 @@ export interface Message {
   timestamp: number
   streaming?: boolean
   thoughtChain?: ThoughtChainItem[]
-  file?: {
-    name: string
-    size: number
-  }
+  file?: MessageFileAttachment
 }

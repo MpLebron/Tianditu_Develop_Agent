@@ -432,10 +432,10 @@ export class NativeToolLoop {
   }> {
     const direct = parseDecisionJson(raw)
     if (direct) {
-      return {
+      return applyDecisionGuards({
         ...direct,
         decisionSource: 'llm',
-      }
+      }, params)
     }
 
     const decisionModel = this.createDecisionModel()
@@ -448,6 +448,7 @@ export class NativeToolLoop {
         'JSON 格式：{"replyMode":"continue|tool_only","reason":"...","assistantText":"..."}',
         '如果用户是在询问能力、权限、是否支持某工具，replyMode=tool_only，并直接回答能力说明。',
         '如果用户是在对上一轮回答做短追问或要求澄清，replyMode=tool_only，并基于对话历史直接解释。',
+        '如果用户是在要求解读、分析、统计、概括已上传文件的具体内容，replyMode=continue，让下游主链路基于完整文件上下文回答。',
         '如果用户的真实目标是继续生成/修改代码或页面，replyMode=continue。',
         '只有在 tool_only 时 assistantText 才应写给用户；continue 时 assistantText 置空。',
       ].join('\n')),
@@ -458,7 +459,7 @@ export class NativeToolLoop {
         params.userInput || '',
         params.conversationHistory ? `\n## 对话历史\n${params.conversationHistory.slice(-1600)}` : '',
         params.existingCode ? '\n## 当前已有代码\n存在已有代码。' : '',
-        params.fileData ? '\n## 文件上下文\n存在文件上下文。' : '',
+        params.fileData ? `\n## 文件上下文摘要\n${buildFileDataDigest(params.fileData)}` : '',
         raw ? `\n## 模型原始输出\n${raw}` : '',
         toolContext ? `\n${toolContext}` : '',
       ].filter(Boolean).join('\n')),
@@ -466,22 +467,22 @@ export class NativeToolLoop {
 
     const repaired = parseDecisionJson(extractTextContent(response.content).trim())
     if (repaired) {
-      return {
+      return applyDecisionGuards({
         ...repaired,
         decisionSource: 'llm',
         fallbackReason: raw
           ? '模型首次输出未遵循 JSON 协议，已通过决策整理器修复。'
           : '模型未产出最终文本，已通过决策整理器补全最终决策。',
-      }
+      }, params)
     }
 
-    return {
+    return applyDecisionGuards({
       replyMode: params.mode === 'fix' ? 'continue' : 'tool_only',
       reason: '模型未返回可解析的最终决策，使用安全回退。',
       assistantText: params.mode === 'fix' ? '' : (raw || '我需要你再具体说明一下你的目标，我再继续处理。'),
       decisionSource: 'fallback',
       fallbackReason: 'decision_model_parse_failed',
-    }
+    }, params)
   }
 }
 
@@ -562,6 +563,7 @@ function buildSystemPrompt(params: NativeToolLoopRunParams): string {
     '决策规则：',
     '- 如果用户是在询问你的能力、权限、是否支持某工具，直接 tool_only 回答，禁止为了证明能力而调用工具。',
     '- 如果用户是在追问上一轮回答的含义，优先基于对话历史做澄清，通常不需要调用工具。',
+    '- 如果用户是在要求解读、分析、统计、概括已上传文件的具体内容，不要只做泛泛确认，默认 replyMode=continue，让下游主链路基于完整文件上下文回答。',
     '- 如果用户需要外部最新事实、新闻、官方资料、开源实现，优先使用 web_search。',
     '- 如果 web_search 已定位到候选来源，但你还需要更精确的页面正文，请继续调用 web_fetch 读取具体 URL。',
     '- 只有当用户明确要求修改工程文件，并且你已经掌握精确 oldString/newString 时，才调用 snippet_edit。',
@@ -579,7 +581,7 @@ function buildUserPrompt(params: NativeToolLoopRunParams): string {
     params.userInput || '',
     params.conversationHistory ? `\n## 对话历史\n${params.conversationHistory.slice(-1600)}` : '',
     params.existingCode ? '\n## 当前已有代码\n存在已有代码，需要按需继续修改或继续生成。' : '',
-    params.fileData ? '\n## 文件上下文\n存在用户文件数据上下文。' : '',
+    params.fileData ? `\n## 文件上下文摘要\n${buildFileDataDigest(params.fileData)}` : '',
     params.localCapabilityCatalog ? `\n## 本地能力目录\n${params.localCapabilityCatalog.slice(0, 5000)}` : '',
     '\n## 额外要求',
     '- 如果你决定进入下游代码生成链路，assistantText 可以留空，但 reason 必须说明为什么继续。',
@@ -599,6 +601,106 @@ function buildResponsesInitialInput(params: NativeToolLoopRunParams): Array<Reco
       content: buildUserPrompt(params),
     },
   ]
+}
+
+function buildFileDataDigest(fileData?: string): string {
+  if (!fileData?.trim()) return '存在文件上下文。'
+
+  const lines = fileData
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const importantPatterns = [
+    /^文件:/,
+    /^文件获取链接URL:/,
+    /^- 数据读取状态:/,
+    /^- 根结构:/,
+    /^- 要素数量:/,
+    /^- 几何类型统计:/,
+    /^- 数据范围:/,
+    /^- 字段数量:/,
+    /^- 推荐可视化:/,
+    /^- 推荐分组\/分色字段:/,
+    /^- 推荐权重\/强度字段:/,
+    /^- 安全坐标提取:/,
+    /^- 顶层 key:/,
+    /^- 根数组长度:/,
+    /^- 坐标识别:/,
+    /^- 访问示例:/,
+    /^- 原始文件结构说明:/,
+  ]
+
+  const selected: string[] = []
+  const seen = new Set<string>()
+  const pushLine = (line: string) => {
+    if (!line || seen.has(line)) return
+    selected.push(line)
+    seen.add(line)
+  }
+
+  for (const line of lines) {
+    if (importantPatterns.some((pattern) => pattern.test(line))) {
+      pushLine(line)
+    }
+    if (selected.length >= 12) break
+  }
+
+  if (selected.length === 0) {
+    for (const line of lines) {
+      if (/^```/.test(line) || /^[{\[]$/.test(line)) continue
+      pushLine(line)
+      if (selected.length >= 8) break
+    }
+  }
+
+  return selected.join('\n') || '存在文件上下文。'
+}
+
+function shouldContinueForFileInterpretation(params: NativeToolLoopRunParams): boolean {
+  if (params.mode !== 'generate') return false
+  if (!params.fileData?.trim()) return false
+
+  const text = String(params.userInput || '').trim()
+  if (!text) return false
+
+  const visibilityOnlyPattern = /(能看见|看到了吗|看到吗|收到(了|吗)?|接收到|上传成功|能打开|能预览)/i
+  const analysisPattern = /(解读|分析|解析|总结|概括|说明|解释|介绍|看一下|看下|看看|读一下|梳理|识别|统计|字段|结构|记录|条数|多少条|多少个|有哪些|有什么|包含|内容|特征|分布|概览)/i
+
+  if (visibilityOnlyPattern.test(text) && !analysisPattern.test(text)) {
+    return false
+  }
+
+  return analysisPattern.test(text)
+}
+
+function applyDecisionGuards(
+  decision: {
+    replyMode: 'continue' | 'tool_only'
+    reason: string
+    assistantText: string
+    decisionSource: DecisionSource
+    fallbackReason?: string
+  },
+  params: NativeToolLoopRunParams,
+): {
+  replyMode: 'continue' | 'tool_only'
+  reason: string
+  assistantText: string
+  decisionSource: DecisionSource
+  fallbackReason?: string
+} {
+  if (decision.replyMode === 'tool_only' && shouldContinueForFileInterpretation(params)) {
+    return {
+      replyMode: 'continue',
+      reason: '用户正在请求解读已上传数据，需要进入主链路基于完整文件上下文回答。',
+      assistantText: '',
+      decisionSource: 'fallback',
+      fallbackReason: 'file_interpretation_requires_full_file_context',
+    }
+  }
+
+  return decision
 }
 
 function parseDecisionJson(raw: string): {

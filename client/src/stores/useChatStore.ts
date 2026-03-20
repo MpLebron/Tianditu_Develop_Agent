@@ -1,18 +1,25 @@
 import { create } from 'zustand'
-import type { Message, ThoughtChainItem } from '../types/chat'
+import type { Message, MessageFileAttachment, ThoughtChainItem } from '../types/chat'
 import type { CodeDiffPayload } from '../types/codeDiff'
 import { useMapStore } from './useMapStore'
 import { useWorkspaceStore } from './useWorkspaceStore'
 import { createId } from '../utils/createId'
 import { extractFirstCompleteHtmlDocument } from '../utils/extractFirstCompleteHtmlDocument'
 import { injectTiandituTokenPlaceholders } from '../utils/injectTiandituTokenPlaceholders'
+import { isJsonPreviewableFileName } from '../utils/jsonPreview'
 
 interface ChatStore {
   messages: Message[]
   loading: boolean
   error: string | null
   activeFileContext: string | null
-  sendMessage: (content: string, file?: File, syntheticFile?: { name: string; size: number }, sampleId?: string) => Promise<void>
+  sendMessage: (
+    content: string,
+    file?: File,
+    syntheticFile?: { name: string; size: number },
+    sampleId?: string,
+    filePreviewText?: string | null,
+  ) => Promise<void>
   autoFixMapError: (options?: {
     userInputHint?: string
     overrideError?: string
@@ -40,18 +47,46 @@ function hashCode(text: string): string {
   return `h${(hash >>> 0).toString(16)}`
 }
 
+async function createDisplayFile(
+  file?: File,
+  syntheticFile?: { name: string; size: number },
+  filePreviewText?: string | null,
+) : Promise<MessageFileAttachment | undefined> {
+  if (!file && !syntheticFile) return undefined
+
+  const baseFile = file
+    ? { name: file.name, size: file.size }
+    : syntheticFile
+
+  if (!baseFile) return undefined
+
+  let resolvedPreviewText = filePreviewText || undefined
+  if (!resolvedPreviewText && file && isJsonPreviewableFileName(file.name)) {
+    try {
+      resolvedPreviewText = await file.text()
+    } catch {
+      resolvedPreviewText = undefined
+    }
+  }
+
+  return {
+    ...baseFile,
+    previewText: isJsonPreviewableFileName(baseFile.name) ? resolvedPreviewText : undefined,
+  }
+}
+
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
   loading: false,
   error: null,
   activeFileContext: null,
 
-  sendMessage: async (content, file, syntheticFile, sampleId) => {
+  sendMessage: async (content, file, syntheticFile, sampleId, filePreviewText) => {
     const mapState = useMapStore.getState()
     const blockedByVisualFlow = mapState.visualChecking || (mapState.fixing && mapState.fixingSource === 'visual')
     if (get().loading || blockedByVisualFlow) return
 
-    const displayFile = file ? { name: file.name, size: file.size } : syntheticFile
+    const displayFile = await createDisplayFile(file, syntheticFile, filePreviewText)
     const userMsg: Message = {
       id: createId(),
       role: 'user',
@@ -191,7 +226,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         if (chunk.type === 'file_context') {
           const content = typeof chunk.content === 'string' ? chunk.content.trim() : ''
           if (content) {
-            set({ activeFileContext: content })
+            set((s) => ({
+              activeFileContext: content,
+              messages: s.messages.map((m) => {
+                if (m.id !== userMsg.id || !m.file || m.file.previewText || !isJsonPreviewableFileName(m.file.name)) {
+                  return m
+                }
+                return {
+                  ...m,
+                  file: {
+                    ...m.file,
+                    previewText: content,
+                  },
+                }
+              }),
+            }))
           }
           return
         }

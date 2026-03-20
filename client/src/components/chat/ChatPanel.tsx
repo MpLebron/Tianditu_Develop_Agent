@@ -10,6 +10,9 @@ export function ChatPanel() {
   const { messages, loading, error, sendMessage, clearMessages } = useChatStore()
   const { visualChecking, visualCheckingOwner, fixing, fixingSource } = useMapStore()
   const scrollRef = useAutoScroll([messages])
+  const handleSend = (content: string, file?: File, filePreviewText?: string | null) => {
+    void sendMessage(content, file, undefined, undefined, filePreviewText)
+  }
   const inputLocked = visualChecking || (fixing && fixingSource === 'visual')
   const inputLockReason = (fixing && fixingSource === 'visual') || visualCheckingOwner === 'repair'
     ? 'AI 正在处理视觉补修，请稍候后再发送消息'
@@ -90,7 +93,7 @@ export function ChatPanel() {
 
       {/* 输入区 */}
       <ChatInput
-        onSend={sendMessage}
+        onSend={handleSend}
         loading={loading}
         disabled={inputLocked}
         disabledReason={inputLockReason}

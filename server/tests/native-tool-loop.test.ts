@@ -265,4 +265,58 @@ describe('native tool loop', () => {
     expect(finalResult.replyMode).toBe('continue')
     expect(finalResult.reason).toContain('本地能力')
   })
+
+  it('forces continue mode for uploaded file interpretation requests and exposes a compact file digest', async () => {
+    const fetchUrl = vi.fn()
+    const apply = vi.fn()
+    const responsesCreate = vi.fn().mockResolvedValueOnce(createResponse({
+      outputText: '{"replyMode":"tool_only","reason":"可以直接口头回答","assistantText":"我目前只知道你上传了文件。"}',
+    }))
+    const toolAvailabilityInvoke = vi.fn().mockResolvedValueOnce({
+      content: '{"availableTools":["web_fetch","snippet_edit"],"reason":"本地能力足以处理上传数据分析。"}',
+    })
+
+    const loop = new NativeToolLoop({
+      webFetch: { fetchUrl } as any,
+      snippetEdit: { apply } as any,
+      responsesClientFactory: () => ({
+        responses: { create: responsesCreate },
+      }),
+      toolAvailabilityModelFactory: () => ({ invoke: toolAvailabilityInvoke }),
+    })
+
+    const fileData = [
+      '文件: 2006_2017_flood_event.geojson',
+      '文件获取链接URL: http://localhost:5173/uploads/demo/2006_2017_flood_event.geojson',
+      '## 自动数据理解结果（系统已读取真实文件，高优先级）',
+      '- 数据读取状态: 成功',
+      '- 根结构: FeatureCollection',
+      '- 要素数量: 284',
+      '- 几何类型统计: Point=284',
+      '- 字段数量: 12',
+      '- 推荐可视化: 点聚合；时间分段点位图；省市统计图',
+      '- 推荐分组/分色字段: year、province',
+    ].join('\n')
+
+    let finalResult: any
+    for await (const event of loop.run({
+      userInput: '你好，请你解读一下这个数据',
+      fileData,
+      localCapabilityCatalog: '<available_packages><package>tianditu-jsapi: 地图本体、渲染、图层、控件、事件、覆盖物</package></available_packages>',
+      mode: 'generate',
+    })) {
+      if (event.type === 'final') finalResult = event.result
+    }
+
+    const firstRequest = responsesCreate.mock.calls[0]?.[0] as Record<string, any>
+    const userPrompt = Array.isArray(firstRequest.input)
+      ? String(firstRequest.input[1]?.content || '')
+      : ''
+
+    expect(userPrompt).toContain('文件: 2006_2017_flood_event.geojson')
+    expect(userPrompt).toContain('要素数量: 284')
+    expect(finalResult.replyMode).toBe('continue')
+    expect(finalResult.reason).toContain('解读已上传数据')
+    expect(finalResult.fallbackReason).toBe('file_interpretation_requires_full_file_context')
+  })
 })

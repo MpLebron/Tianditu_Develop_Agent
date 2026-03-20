@@ -289,45 +289,41 @@ async function saveNormalizedRuntimeFile(req: Request, normalizedData: any, ext:
 
 /** 解析上传的文件为文本摘要（含文件访问 URL） */
 async function parseUploadedFile(file: Express.Multer.File, req: Request): Promise<string | undefined> {
-  try {
-    const parsed = await fileParser.parse(file.path)
-    // 构建原始文件 URL（仅兜底使用）
-    const rawFileUrl = buildUploadRelativeUrl(file.path)
-    const rawPreferredFileUrl = buildAbsoluteFileUrl(req, rawFileUrl) || rawFileUrl
-    const normalizedRuntime = normalizeStructuredRuntime(parsed)
-    const originalSummaryLine = parsed.summary.split('\n')[0] || parsed.summary
+  const parsed = await fileParser.parse(file.path)
+  // 构建原始文件 URL（仅兜底使用）
+  const rawFileUrl = buildUploadRelativeUrl(file.path)
+  const rawPreferredFileUrl = buildAbsoluteFileUrl(req, rawFileUrl) || rawFileUrl
+  const normalizedRuntime = normalizeStructuredRuntime(parsed)
+  const originalSummaryLine = parsed.summary.split('\n')[0] || parsed.summary
 
-    if (normalizedRuntime?.runtimeKind === 'geojson') {
-      const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.geojson')
-      return buildGeojsonFileContext({
-        fileName: file.originalname,
-        fileUrl: normalizedFileUrl,
-        originalSummaryLine,
-        normalizedGeoJSON: normalizedRuntime.normalizedData,
-      })
-    }
-
-    if (normalizedRuntime?.runtimeKind === 'json') {
-      const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.json')
-      return buildJsonFileContext({
-        fileName: file.originalname,
-        fileUrl: normalizedFileUrl,
-        originalSummaryLine,
-        normalizedJson: normalizedRuntime.normalizedData,
-      })
-    }
-
-    const rowSamples = parsed.rows.slice(0, SAMPLE_ROW_COUNT).map((row) => sanitizeForSample(row))
-    return [
-      `文件: ${file.originalname}`,
-      `文件获取链接URL: ${rawPreferredFileUrl}`,
-      parsed.summary,
-      `前 ${SAMPLE_ROW_COUNT} 行数据（已截断长字段）:`,
-      JSON.stringify(rowSamples, null, 2),
-    ].join('\n')
-  } catch (err: any) {
-    return `文件解析失败: ${err.message}`
+  if (normalizedRuntime?.runtimeKind === 'geojson') {
+    const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.geojson')
+    return buildGeojsonFileContext({
+      fileName: file.originalname,
+      fileUrl: normalizedFileUrl,
+      originalSummaryLine,
+      normalizedGeoJSON: normalizedRuntime.normalizedData,
+    })
   }
+
+  if (normalizedRuntime?.runtimeKind === 'json') {
+    const normalizedFileUrl = await saveNormalizedRuntimeFile(req, normalizedRuntime.normalizedData, '.json')
+    return buildJsonFileContext({
+      fileName: file.originalname,
+      fileUrl: normalizedFileUrl,
+      originalSummaryLine,
+      normalizedJson: normalizedRuntime.normalizedData,
+    })
+  }
+
+  const rowSamples = parsed.rows.slice(0, SAMPLE_ROW_COUNT).map((row) => sanitizeForSample(row))
+  return [
+    `文件: ${file.originalname}`,
+    `文件获取链接URL: ${rawPreferredFileUrl}`,
+    parsed.summary,
+    `前 ${SAMPLE_ROW_COUNT} 行数据（已截断长字段）:`,
+    JSON.stringify(rowSamples, null, 2),
+  ].join('\n')
 }
 
 async function parseBuiltinSampleFile(sampleId: BuiltinSampleId, req: Request): Promise<string> {

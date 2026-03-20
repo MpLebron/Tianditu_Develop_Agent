@@ -28,7 +28,9 @@ export const upload = multer({
     if (allowed.includes(ext)) {
       cb(null, true)
     } else {
-      cb(new Error(`不支持的文件格式: ${ext}`))
+      const error = new Error(`不支持的文件格式: ${ext}`) as Error & { statusCode?: number }
+      error.statusCode = 400
+      cb(error)
     }
   },
 })

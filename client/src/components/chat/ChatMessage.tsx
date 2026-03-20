@@ -4,7 +4,10 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { useChatStore } from '../../stores/useChatStore'
 import { ThoughtChain } from './ThoughtChain'
+import { JsonPreviewModal } from '../common/JsonPreviewModal'
+import { isJsonPreviewableFileName } from '../../utils/jsonPreview'
 
 function CodeBlock({ language, children }: { language: string; children: string }) {
   const [copied, setCopied] = useState(false)
@@ -105,53 +108,126 @@ const mdComponents: Components = {
 
 export function ChatMessage({ msg }: { msg: Message }) {
   const isUser = msg.role === 'user'
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const activeFileContext = useChatStore((state) => state.activeFileContext)
+  const latestUserFileMessageId = useChatStore((state) => {
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+      const current = state.messages[index]
+      if (current.role === 'user' && current.file && isJsonPreviewableFileName(current.file.name)) {
+        return current.id
+      }
+    }
+    return null
+  })
+  const previewableFile = !!msg.file && isJsonPreviewableFileName(msg.file.name)
+  const effectivePreviewText = msg.file?.previewText
+    || (previewableFile && msg.id === latestUserFileMessageId ? activeFileContext || undefined : undefined)
+  const canPreviewJson = previewableFile
+
+  const renderFileBadge = (tone: 'user' | 'assistant') => {
+    if (!msg.file) return null
+
+    if (!canPreviewJson) {
+      return (
+        <div className={`mb-1.5 flex items-center gap-1.5 text-[11px] ${tone === 'user' ? 'text-blue-100/85' : 'text-slate-500'}`}>
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32" />
+          </svg>
+          <span>{msg.file.name}</span>
+          <span className="opacity-60">({(msg.file.size / 1024).toFixed(1)}KB)</span>
+        </div>
+      )
+    }
+
+    if (tone === 'user') {
+      return (
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          className="mb-2 flex w-full max-w-full items-center gap-3 rounded-2xl border border-white/14 bg-white/12 px-3 py-2 text-[11px] text-blue-50 backdrop-blur-md transition hover:bg-white/15 hover:text-white soft-pop"
+          title="点击预览 JSON 文件"
+        >
+          <div className="min-w-0 flex flex-1 items-center gap-2">
+            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32" />
+            </svg>
+            <span className="truncate underline decoration-white/35 underline-offset-2">{msg.file.name}</span>
+            <span className="shrink-0 text-white/60">({(msg.file.size / 1024).toFixed(1)}KB)</span>
+          </div>
+          <span className="ml-auto shrink-0 rounded-full border border-white/18 bg-white/14 px-2.5 py-1 text-[10px] font-medium tracking-[0.02em] text-white/90">
+            预览
+          </span>
+        </button>
+      )
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+        className="mb-2 inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 soft-pop"
+        title="点击预览 JSON 文件"
+      >
+        <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15.75a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5Z" />
+        </svg>
+        <span className="truncate">{msg.file.name}</span>
+        <span className="shrink-0 opacity-65">({(msg.file.size / 1024).toFixed(1)}KB)</span>
+        <span className="shrink-0 opacity-90">预览</span>
+      </button>
+    )
+  }
 
   if (isUser) {
     return (
-      <div className="flex justify-end mb-3 animate-msg-in">
-        <div className="max-w-[85%] bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm shadow-blue-500/10 soft-surface">
-          {msg.file && (
-            <div className="text-[11px] text-blue-100/80 mb-1.5 flex items-center gap-1.5">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32" />
-              </svg>
-              <span>{msg.file.name}</span>
-              <span className="opacity-60">({(msg.file.size / 1024).toFixed(1)}KB)</span>
-            </div>
-          )}
-          <p className="text-[13.5px] leading-relaxed m-0">{msg.content}</p>
+      <>
+        <div className="flex justify-end mb-3 animate-msg-in">
+          <div className="max-w-[85%] bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl rounded-tr-md px-4 py-2.5 shadow-sm shadow-blue-500/10 soft-surface">
+            {renderFileBadge('user')}
+            <p className="text-[13.5px] leading-relaxed m-0">{msg.content}</p>
+          </div>
         </div>
-      </div>
+        <JsonPreviewModal
+          open={previewOpen}
+          title={msg.file?.name || 'JSON 文件'}
+          size={msg.file?.size}
+          jsonText={effectivePreviewText || null}
+          onClose={() => setPreviewOpen(false)}
+        />
+      </>
     )
   }
 
   // Assistant message — 无背景气泡，直接渲染，类似 ChatGPT 风格
   return (
-    <div className="flex items-start gap-2.5 mb-4 animate-msg-in">
-      {/* 助手头像 */}
-      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-blue-500/15 soft-surface">
-        <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.893 13.393l-1.135-1.135a2.252 2.252 0 01-.421-.585l-1.08-2.16a.414.414 0 00-.663-.107.827.827 0 01-.812.21l-1.273-.363a.89.89 0 00-.738 1.595l.587.39c.59.395.674 1.23.172 1.732l-.2.2c-.212.212-.33.498-.33.796v.41c0 .409-.11.809-.32 1.158l-1.315 2.191a2.11 2.11 0 01-1.81 1.025 1.055 1.055 0 01-1.055-1.055v-1.172c0-.92-.56-1.747-1.414-2.089l-.655-.261a2.25 2.25 0 01-1.383-2.46l.007-.042a2.25 2.25 0 01.29-.787l.09-.15a2.25 2.25 0 012.37-1.048l1.178.236a1.125 1.125 0 001.302-.795l.208-.73a1.125 1.125 0 00-.578-1.315l-.665-.332-.091.091a2.25 2.25 0 01-1.591.659h-.18c-.249 0-.487.1-.662.274a.931.931 0 01-1.458-1.137l1.411-2.353a2.25 2.25 0 00.286-.76m11.928 9.869A9 9 0 008.965 3.525m11.928 9.868A9 9 0 118.965 3.525" />
-        </svg>
-      </div>
+    <>
+      <div className="flex items-start gap-2.5 mb-4 animate-msg-in">
+        {/* 助手头像 */}
+        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-blue-500/15 soft-surface">
+          <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.893 13.393l-1.135-1.135a2.252 2.252 0 01-.421-.585l-1.08-2.16a.414.414 0 00-.663-.107.827.827 0 01-.812.21l-1.273-.363a.89.89 0 00-.738 1.595l.587.39c.59.395.674 1.23.172 1.732l-.2.2c-.212.212-.33.498-.33.796v.41c0 .409-.11.809-.32 1.158l-1.315 2.191a2.11 2.11 0 01-1.81 1.025 1.055 1.055 0 01-1.055-1.055v-1.172c0-.92-.56-1.747-1.414-2.089l-.655-.261a2.25 2.25 0 01-1.383-2.46l.007-.042a2.25 2.25 0 01.29-.787l.09-.15a2.25 2.25 0 012.37-1.048l1.178.236a1.125 1.125 0 001.302-.795l.208-.73a1.125 1.125 0 00-.578-1.315l-.665-.332-.091.091a2.25 2.25 0 01-1.591.659h-.18c-.249 0-.487.1-.662.274a.931.931 0 01-1.458-1.137l1.411-2.353a2.25 2.25 0 00.286-.76m11.928 9.869A9 9 0 008.965 3.525m11.928 9.868A9 9 0 118.965 3.525" />
+          </svg>
+        </div>
 
-      {/* 消息内容 */}
-      <div className={`min-w-0 flex-1 text-gray-700 ${msg.streaming ? 'typing-cursor' : ''}`}>
-        {msg.thoughtChain && msg.thoughtChain.length > 0 && (
-          <ThoughtChain items={msg.thoughtChain} streaming={msg.streaming} />
-        )}
-        {msg.file && (
-          <div className="text-[11px] text-gray-400 mb-1 flex items-center gap-1.5">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32" />
-            </svg>
-            <span>{msg.file.name}</span>
+        {/* 消息内容 */}
+        <div className={`min-w-0 flex-1 text-gray-700 ${msg.streaming ? 'typing-cursor' : ''}`}>
+          {msg.thoughtChain && msg.thoughtChain.length > 0 && (
+            <ThoughtChain items={msg.thoughtChain} streaming={msg.streaming} />
+          )}
+          {renderFileBadge('assistant')}
+          <div className="text-[13.5px] leading-[1.7] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{msg.content}</ReactMarkdown>
           </div>
-        )}
-        <div className="text-[13.5px] leading-[1.7] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{msg.content}</ReactMarkdown>
         </div>
       </div>
-    </div>
+      <JsonPreviewModal
+        open={previewOpen}
+        title={msg.file?.name || 'JSON 文件'}
+        size={msg.file?.size}
+        jsonText={effectivePreviewText || null}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
   )
 }
