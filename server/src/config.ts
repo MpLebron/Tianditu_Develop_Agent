@@ -164,12 +164,6 @@ export const config = {
     enabled: process.env.AGENT_TOOLS_ENABLED !== 'false',
     workspaceRoot: resolveAgentWorkspaceRoot(),
     maxPlanSteps: parseInt(process.env.AGENT_TOOL_MAX_STEPS || '3'),
-    search: {
-      provider: process.env.AGENT_WEB_SEARCH_PROVIDER || 'duckduckgo',
-      maxResults: parseInt(process.env.AGENT_WEB_SEARCH_MAX_RESULTS || '5'),
-      timeoutMs: parseInt(process.env.AGENT_WEB_SEARCH_TIMEOUT_MS || '15000'),
-      serperApiKey: process.env.SERPER_API_KEY || '',
-    },
     fetch: {
       timeoutMs: parseInt(process.env.AGENT_FETCH_TIMEOUT_MS || '15000'),
       maxBytes: parseInt(process.env.AGENT_FETCH_MAX_BYTES || '524288'),

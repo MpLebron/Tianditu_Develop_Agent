@@ -3,8 +3,19 @@ import type {
   AgentToolPlanStep,
 } from './AgentRuntimeTypes.js'
 import type { WebFetchResult } from './WebFetchService.js'
-import type { WebSearchResult } from './WebSearchService.js'
 import type { WorkspaceSnippetEditResult } from './WorkspaceSnippetEditService.js'
+
+type ToolSearchResultItem = {
+  title: string
+  url: string
+  snippet: string
+}
+
+type ToolSearchResult = {
+  provider: string
+  query: string
+  results: ToolSearchResultItem[]
+}
 
 export interface ToolExecutionRecord {
   step: AgentToolPlanStep
@@ -67,7 +78,7 @@ export function buildToolOnlySummary(plan: AgentToolPlan, records: ToolExecution
       continue
     }
     if (record.step.tool === 'web_search') {
-      const result = record.result as WebSearchResult
+      const result = record.result as ToolSearchResult
       lines.push(`已完成网络搜索：${result.query}（命中 ${result.results.length} 条结果）。`)
       continue
     }
@@ -87,7 +98,7 @@ export function buildToolOnlySummary(plan: AgentToolPlan, records: ToolExecution
 
 function formatSuccessfulToolRecord(step: AgentToolPlanStep, result: unknown): string {
   if (step.tool === 'web_search') {
-    const search = result as WebSearchResult
+    const search = result as ToolSearchResult
     const lines = [
       `### web_search`,
       `查询：${search.query}`,

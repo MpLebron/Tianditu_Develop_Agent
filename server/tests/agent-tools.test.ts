@@ -4,7 +4,6 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { config } from '../src/config.js'
 import { assertPublicUrl, isPrivateIp } from '../src/agent/WebFetchService.js'
-import { extractSearchResultsFromDuckDuckGoHtml } from '../src/agent/WebSearchService.js'
 import { WorkspaceSnippetEditService } from '../src/agent/WorkspaceSnippetEditService.js'
 
 const createdDirs: string[] = []
@@ -16,27 +15,6 @@ afterEach(async () => {
 })
 
 describe('agent tools', () => {
-  it('parses duckduckgo html results into title/url/snippet', () => {
-    const html = `
-      <html><body>
-        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fdoc">Example Doc</a>
-        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fdoc">Official guide for tool calling.</a>
-        <a class="result__a" href="https://example.org/blog">Blog Post</a>
-        <div class="result__snippet">A longer implementation note.</div>
-      </body></html>
-    `
-
-    const results = extractSearchResultsFromDuckDuckGoHtml(html)
-    expect(results).toHaveLength(2)
-    expect(results[0]).toEqual({
-      title: 'Example Doc',
-      url: 'https://example.com/doc',
-      snippet: 'Official guide for tool calling.',
-    })
-    expect(results[1]?.title).toBe('Blog Post')
-    expect(results[1]?.url).toBe('https://example.org/blog')
-  })
-
   it('blocks localhost/private destinations for web fetch', async () => {
     await expect(assertPublicUrl(new URL('http://localhost:3000/test'))).rejects.toThrow(/禁止访问/)
     expect(isPrivateIp('127.0.0.1')).toBe(true)
