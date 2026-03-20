@@ -323,6 +323,14 @@ export class NativeToolLoop {
     decisionSource: DecisionSource
     reason: string
   }> {
+    if (shouldHideWebSearchForLocalTiandituTask(params)) {
+      return {
+        availableTools: ['web_fetch', 'snippet_edit'],
+        decisionSource: 'fallback',
+        reason: '当前请求属于本地已覆盖的天地图地图 / LBS 任务，优先禁用 web_search，避免无意义联网搜索拖慢首包。',
+      }
+    }
+
     if (!params.localCapabilityCatalog?.trim()) {
       return {
         availableTools: ['web_search', 'web_fetch', 'snippet_edit'],
@@ -701,6 +709,19 @@ function applyDecisionGuards(
   }
 
   return decision
+}
+
+function shouldHideWebSearchForLocalTiandituTask(params: NativeToolLoopRunParams): boolean {
+  if (params.mode !== 'generate') return false
+  if (!params.userInput?.trim()) return false
+
+  const text = `${params.userInput}\n${params.conversationHistory || ''}`.toLowerCase()
+
+  if (/(最新|最近|新闻|github|开源|官方资料|官网|联网|搜索一下|查一下|web search|论文|文献)/i.test(text)) {
+    return false
+  }
+
+  return /(天地图|tmapgl|\/api\/tianditu\/|公交|地铁|换乘|路线规划|路径规划|busline|transit|drive|geocode|poi|行政区|热力图|聚合|geojson|图层|marker|popup|起点|终点|左侧控制面板|右侧地图)/i.test(text)
 }
 
 function parseDecisionJson(raw: string): {

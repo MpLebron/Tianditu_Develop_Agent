@@ -266,6 +266,41 @@ describe('native tool loop', () => {
     expect(finalResult.reason).toContain('本地能力')
   })
 
+  it('hides web_search for tianditu transit page generation requests', async () => {
+    const fetchUrl = vi.fn()
+    const apply = vi.fn()
+    const responsesCreate = vi.fn().mockResolvedValueOnce(createResponse({
+      outputText: '{"replyMode":"continue","reason":"本地能力足以生成公交地铁路线规划页面","assistantText":""}',
+    }))
+
+    const loop = new NativeToolLoop({
+      webFetch: { fetchUrl } as any,
+      snippetEdit: { apply } as any,
+      responsesClientFactory: () => ({
+        responses: { create: responsesCreate },
+      }),
+      toolAvailabilityModelFactory: () => ({
+        invoke: vi.fn().mockResolvedValueOnce({
+          content: '{"availableTools":["web_search","web_fetch","snippet_edit"],"reason":"这个 mock 不应该被调用。"}',
+        }),
+      }),
+    })
+
+    let finalResult: any
+    for await (const event of loop.run({
+      userInput: '请帮我生成一个美观可用的公交地铁路线规划网页：左侧控制面板 + 右侧地图，支持输入或地图点击选择起终点，支持较快捷/少换乘/少步行/不坐地铁策略，调用天地图 transit?type=busline API 获取真实方案并渲染线路、方案列表和换乘详情。',
+      localCapabilityCatalog: '<available_packages><package>tianditu-jsapi: 地图本体、渲染、图层、控件、事件、覆盖物</package><package>tianditu-lbs: 公交换乘、路径规划、地理编码、行政区划</package></available_packages>',
+      mode: 'generate',
+    })) {
+      if (event.type === 'final') finalResult = event.result
+    }
+
+    const firstRequest = responsesCreate.mock.calls[0]?.[0] as Record<string, any>
+    expect(firstRequest.tools.some((tool: Record<string, unknown>) => tool.type === 'web_search')).toBe(false)
+    expect(finalResult.replyMode).toBe('continue')
+    expect(finalResult.reason).toContain('公交地铁路线规划页面')
+  })
+
   it('forces continue mode for uploaded file interpretation requests and exposes a compact file digest', async () => {
     const fetchUrl = vi.fn()
     const apply = vi.fn()
