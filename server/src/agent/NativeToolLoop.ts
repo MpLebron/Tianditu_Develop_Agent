@@ -344,9 +344,9 @@ export class NativeToolLoop {
   }> {
     if (shouldHideWebSearchForLocalTiandituTask(params)) {
       return {
-        availableTools: ['web_fetch', 'snippet_edit'],
+        availableTools: ['snippet_edit'],
         decisionSource: 'fallback',
-        reason: '当前请求属于本地已覆盖的天地图地图 / LBS 任务，优先禁用 web_search，避免无意义联网搜索拖慢首包。',
+        reason: '当前请求属于本地已覆盖的天地图地图 / LBS 任务，优先禁用外部网页工具，改走 skill / contract / 代码生成主链路，避免把接口说明误交给联网搜索。',
       }
     }
 
@@ -740,7 +740,7 @@ function shouldHideWebSearchForLocalTiandituTask(params: NativeToolLoopRunParams
     return false
   }
 
-  return /(天地图|tmapgl|\/api\/tianditu\/|公交|地铁|换乘|路线规划|路径规划|busline|transit|drive|geocode|poi|行政区|热力图|聚合|geojson|图层|marker|popup|起点|终点|左侧控制面板|右侧地图)/i.test(text)
+  return /(天地图|tmapgl|\/api\/tianditu\/|地图|地理编码|逆地理|公交|地铁|换乘|路线规划|路径规划|busline|transit|drive|geocode|poi|行政区|热力图|聚合|geojson|图层|marker|popup|弹窗|点位|打点|上图|经纬度|坐标|列表|飞到|fitbounds|起点|终点|左侧控制面板|右侧地图|左侧列表|滚动列表)/i.test(text)
 }
 
 function getFastPathDecision(params: NativeToolLoopRunParams): {
@@ -769,7 +769,7 @@ function shouldFastPathContinueForLocalTiandituGeneration(params: NativeToolLoop
     return false
   }
 
-  return /(生成|创建|实现|开发|编写|搭建|做一个|做个|页面|网页|组件|界面|demo|示例|代码)/i.test(text)
+  return /(生成|创建|实现|开发|编写|搭建|做一个|做个|页面|网页|组件|界面|demo|示例|代码|显示|打点|上图|高亮|飞到|弹窗|列表|适配)/i.test(text)
 }
 
 function parseDecisionJson(raw: string): {

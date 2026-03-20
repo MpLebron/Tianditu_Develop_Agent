@@ -215,7 +215,7 @@ describe('native tool loop', () => {
 
     let finalResult: any
     for await (const event of loop.run({
-      userInput: '帮我做一个带点位标注的地图页面',
+      userInput: '帮我参考 GitHub 上的 marker 示例做一个带点位标注的地图页面',
       localCapabilityCatalog: '<available_packages><package>tianditu-jsapi: 地图本体、渲染、图层、控件、事件、覆盖物</package></available_packages>',
       mode: 'generate',
     })) {
@@ -232,14 +232,14 @@ describe('native tool loop', () => {
     expect(Array.isArray(secondRequest.input)).toBe(true)
   })
 
-  it('uses the tool availability planner to hide web_search for standard local map tasks', async () => {
+  it('hides external web tools for standard local tianditu knowledge tasks', async () => {
     const fetchUrl = vi.fn()
     const apply = vi.fn()
     const responsesCreate = vi.fn().mockResolvedValueOnce(createResponse({
-      outputText: '{"replyMode":"continue","reason":"本地能力足以支持基础地图初始化","assistantText":""}',
+      outputText: '{"replyMode":"continue","reason":"本地 skill 足以回答基础地图初始化问题","assistantText":""}',
     }))
     const toolAvailabilityInvoke = vi.fn().mockResolvedValueOnce({
-      content: '{"availableTools":["web_fetch","snippet_edit"],"reason":"本地 tianditu-jsapi 能力已覆盖基础地图初始化。"}',
+      content: '{"availableTools":["web_fetch","snippet_edit"],"reason":"这个 mock 不应该被调用。"}',
     })
 
     const loop = new NativeToolLoop({
@@ -253,7 +253,7 @@ describe('native tool loop', () => {
 
     let finalResult: any
     for await (const event of loop.run({
-      userInput: '创建一个北京的基础地图',
+      userInput: '天地图基础地图初始化怎么做',
       localCapabilityCatalog: '<available_packages><package>tianditu-jsapi: 地图本体、渲染、图层、控件、事件、覆盖物</package></available_packages>',
       mode: 'generate',
     })) {
@@ -262,8 +262,9 @@ describe('native tool loop', () => {
 
     const firstRequest = responsesCreate.mock.calls[0]?.[0] as Record<string, any>
     expect(firstRequest.tools.some((tool: Record<string, unknown>) => tool.type === 'web_search')).toBe(false)
+    expect(firstRequest.tools.some((tool: Record<string, unknown>) => tool.name === 'web_fetch')).toBe(false)
     expect(finalResult.replyMode).toBe('continue')
-    expect(finalResult.reason).toContain('本地能力')
+    expect(finalResult.reason).toContain('本地 skill')
   })
 
   it('fast-paths tianditu transit page generation requests into continue mode', async () => {
@@ -289,6 +290,41 @@ describe('native tool loop', () => {
     let finalResult: any
     for await (const event of loop.run({
       userInput: '请帮我生成一个美观可用的公交地铁路线规划网页：左侧控制面板 + 右侧地图，支持输入或地图点击选择起终点，支持较快捷/少换乘/少步行/不坐地铁策略，调用天地图 transit?type=busline API 获取真实方案并渲染线路、方案列表和换乘详情。',
+      localCapabilityCatalog: '<available_packages><package>tianditu-jsapi: 地图本体、渲染、图层、控件、事件、覆盖物</package><package>tianditu-lbs: 公交换乘、路径规划、地理编码、行政区划</package></available_packages>',
+      mode: 'generate',
+    })) {
+      if (event.type === 'final') finalResult = event.result
+    }
+
+    expect(responsesCreate).not.toHaveBeenCalled()
+    expect(finalResult.replyMode).toBe('continue')
+    expect(finalResult.reason).toContain('直接进入主链路')
+    expect(finalResult.fallbackReason).toBe('local_tianditu_generation_fast_path')
+  })
+
+  it('fast-paths location geocoding map requests with side list into continue mode', async () => {
+    const fetchUrl = vi.fn()
+    const apply = vi.fn()
+    const responsesCreate = vi.fn().mockResolvedValueOnce(createResponse({
+      outputText: '{"replyMode":"continue","reason":"本地能力足以生成地理编码点位页面","assistantText":""}',
+    }))
+
+    const loop = new NativeToolLoop({
+      webFetch: { fetchUrl } as any,
+      snippetEdit: { apply } as any,
+      responsesClientFactory: () => ({
+        responses: { create: responsesCreate },
+      }),
+      toolAvailabilityModelFactory: () => ({
+        invoke: vi.fn().mockResolvedValueOnce({
+          content: '{"availableTools":["web_search","web_fetch","snippet_edit"],"reason":"这个 mock 不应该被调用。"}',
+        }),
+      }),
+    })
+
+    let finalResult: any
+    for await (const event of loop.run({
+      userInput: '请把以下地点在地图上精确显示，并在页面左侧加一个可滚动列表框。要求：每个地点都做地理编码，拿到坐标后在地图上打点；点击地图点位时，左侧列表高亮对应地点；点击左侧列表项时，地图飞到该点并弹窗；左侧列表显示地点名称、经纬度与地理编码状态（成功/失败）；页面初始自动适配全部成功点位范围。',
       localCapabilityCatalog: '<available_packages><package>tianditu-jsapi: 地图本体、渲染、图层、控件、事件、覆盖物</package><package>tianditu-lbs: 公交换乘、路径规划、地理编码、行政区划</package></available_packages>',
       mode: 'generate',
     })) {
