@@ -1,0 +1,106 @@
+---
+title: 系统使用文档
+description: 面向业务、内容、交付与运营团队的天地图开发智能体使用说明。
+---
+
+import { Aside, Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/components'
+import FactGrid from '../../components/FactGrid.astro'
+import MediaFrame from '../../components/MediaFrame.astro'
+
+这套文档面向第一次接触系统的业务同学、要做正式交付的项目成员，以及后续需要培训和复盘的维护人员。它不会只讲功能清单，而是按真实使用流程去讲“先看什么、先做什么、什么时候发布”。
+
+<Aside type="tip" title="推荐阅读顺序">
+先读 [系统整体介绍](/docs/system-overview/) 和 [典型使用情景](/docs/scenarios/)，再进入 [5 分钟快速上手](/docs/quickstart/)。如果已经明确自己要做哪类页面，可以直接跳到 [故事地图路线](/docs/story-builder/) 或 [数据驱动路线](/docs/data-builder/)。
+</Aside>
+
+## 你可以从这里开始
+
+<CardGrid>
+  <LinkCard title="第一次使用系统" href="/docs/quickstart/" description="先跑通一次从生成、预览到分享的闭环。" />
+  <LinkCard title="我要做故事地图" href="/docs/story-builder/" description="适合没有现成数据，重点在主题表达、叙事与视觉呈现。" />
+  <LinkCard title="我要做数据驱动应用" href="/docs/data-builder/" description="适合已有 GeoJSON / JSON / Excel，或需要把业务数据上图。" />
+  <LinkCard title="我想先看系统全貌" href="/docs/system-overview/" description="先理解系统闭环、能力边界和适合谁使用。" />
+</CardGrid>
+
+## 按你的起点选阅读路径
+
+<Tabs>
+  <TabItem label="没有现成数据">
+    如果你更关心主题表达、汇报展示和故事脉络，先看 [故事地图路线](/docs/story-builder/)。第一次生成时先要求页面结构和叙事节奏，再逐步补风格、章节和地图联动。
+  </TabItem>
+  <TabItem label="已有 GeoJSON / JSON / Excel">
+    如果你已经有结构化数据，先看 [数据驱动路线](/docs/data-builder/)。重点不是“一次做全”，而是先保证最小可用数据被正确读取，再继续增强筛选、图例和统计模块。
+  </TabItem>
+  <TabItem label="已有第一版结果">
+    如果你已经得到初版页面，直接进入 [修改迭代与质量保障](/docs/quality/) 和 [分享、公开与管理](/docs/publish/)。这一段更适合收口、审阅和正式交付。
+  </TabItem>
+</Tabs>
+
+## 这套系统的完整闭环
+
+<CardGrid>
+  <Card title="1. 输入需求" icon="pencil">
+    用自然语言描述主题、结构、地图内容和预期效果。
+  </Card>
+  <Card title="2. 可选上传数据" icon="seti:json">
+    根据需要补充 GeoJSON、JSON、Excel 等结构化数据。
+  </Card>
+  <Card title="3. 生成并预览" icon="play">
+    系统生成页面后，会在工作区里直接运行和预览。
+  </Card>
+  <Card title="4. 继续修改" icon="refresh">
+    你可以继续追问，让系统在当前结果上做增量修改。
+  </Card>
+  <Card title="5. 自动修复与巡检" icon="check-circle">
+    运行错误和明显的视觉异常会进入自动修复与巡检链路。
+  </Card>
+  <Card title="6. 分享与管理" icon="share">
+    最终发布分享链接，并决定公开或仅内部访问。
+  </Card>
+</CardGrid>
+
+## 先记住这四件事
+
+<FactGrid
+  items={[
+    {
+      label: '第一次目标',
+      value: '先拿到结构正确、地图能跑的第一版，不要第一次就追求完美。',
+    },
+    {
+      label: '最常见误区',
+      value: '一开始就追求大而全的数据和所有交互，反而更容易卡住。',
+    },
+    {
+      label: '推荐节奏',
+      value: '先结构，再内容，再细节，最后再做发布和信息维护。',
+    },
+    {
+      label: '正式交付前',
+      value: '至少人工检查一次文案、数据口径、地图展示和分享页信息。',
+    },
+  ]}
+/>
+
+## 素材位与培训素材
+
+<MediaFrame
+  kind="image"
+  title="工作区界面截图"
+  note="建议替换为真实工作区截图，让首次阅读者快速理解聊天区、地图预览区和代码区分别做什么。"
+  bullets={[
+    '截图中建议保留一次真实生成过程。',
+    '最好同时标出聊天、地图、代码三个区域。',
+  ]}
+/>
+
+<MediaFrame
+  kind="video"
+  title="一分钟快速上手视频"
+  duration="60-90 秒"
+  note="建议录一个最短路径的演示视频：输入一句需求、拿到第一版、继续修改、生成分享链接。"
+  bullets={[
+    '适合给甲方做演示或培训开场。',
+    '视频内容尽量只保留一条最短主线。',
+  ]}
+/>

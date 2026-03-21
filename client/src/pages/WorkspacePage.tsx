@@ -8,6 +8,7 @@ import { ShareModal } from '../components/share/ShareModal'
 import { useWorkspaceStore } from '../stores/useWorkspaceStore'
 import { useMapStore } from '../stores/useMapStore'
 import { useChatStore } from '../stores/useChatStore'
+import { docsUrl } from '../utils/docsUrl'
 
 export function WorkspacePage() {
   const { showCode, chatWidth, codeWidth, toggleCode, setChatWidth, setCodeWidth } = useWorkspaceStore()
@@ -241,6 +242,12 @@ export function WorkspacePage() {
             >
               首页
             </Link>
+            <a
+              href={docsUrl}
+              className="text-[12.5px] text-gray-500 hover:text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-50/60 soft-pop no-underline"
+            >
+              使用文档
+            </a>
             <Link
               to="/gallery"
               className="text-[12.5px] text-gray-500 hover:text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-50/60 soft-pop no-underline"

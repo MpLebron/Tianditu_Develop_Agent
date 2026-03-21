@@ -1,0 +1,80 @@
+---
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute
+---
+
+<div class="site-title-group">
+  <a href="/" class="home-link">
+    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+      <path
+        d="M11.75 4.75 6.5 10l5.25 5.25"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.6"
+      ></path>
+    </svg>
+    <span>回到主页</span>
+  </a>
+
+  <a href={siteTitleHref} class="site-title sl-flex">
+    <span translate="no">{siteTitle}</span>
+  </a>
+</div>
+
+<style>
+  @layer starlight.core {
+    .site-title-group {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      min-width: 0;
+    }
+
+    .home-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.32rem;
+      color: var(--sl-color-text);
+      font-size: 0.92rem;
+      font-weight: 500;
+      line-height: 1;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .home-link:hover {
+      color: var(--sl-color-text-accent);
+    }
+
+    .home-link svg {
+      width: 0.9rem;
+      height: 0.9rem;
+      flex: none;
+    }
+
+    .site-title {
+      align-items: center;
+      gap: var(--sl-nav-gap);
+      font-size: var(--sl-text-h4);
+      font-weight: 600;
+      color: var(--sl-color-text-accent);
+      text-decoration: none;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .site-title span {
+      overflow: hidden;
+    }
+
+    @media (max-width: 40rem) {
+      .home-link span {
+        display: none;
+      }
+
+      .site-title-group {
+        gap: 0.5rem;
+      }
+    }
+  }
+</style>

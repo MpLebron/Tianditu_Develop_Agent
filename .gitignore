@@ -6,6 +6,7 @@ node_modules/
 # Build output
 dist/
 build/
+.astro/
 
 # Environment
 .env
@@ -42,3 +43,4 @@ coverage/
 output/
 server/data/run-dossiers/
 server/data/share/snapshots/
+client/public/docs/

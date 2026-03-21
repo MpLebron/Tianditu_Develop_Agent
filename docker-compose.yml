@@ -23,8 +23,8 @@ services:
 
   web:
     build:
-      context: ./client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: client/Dockerfile
     container_name: tianditu-web
     restart: unless-stopped
     depends_on:

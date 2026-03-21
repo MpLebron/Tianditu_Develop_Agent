@@ -1,0 +1,104 @@
+---
+interface Props {
+  kind: 'image' | 'video'
+  title: string
+  note: string
+  duration?: string
+  bullets?: string[]
+}
+
+const { kind, title, note, duration, bullets = [] } = Astro.props
+const badge = kind === 'video' ? '视频占位' : '图片占位'
+---
+
+<section class="media-frame" data-kind={kind}>
+  <div class="media-head">
+    <div class="media-badge">{badge}</div>
+    {duration && <div class="media-duration">{duration}</div>}
+  </div>
+  <div class="media-preview">
+    <div class="media-icon">{kind === 'video' ? '▶' : '▣'}</div>
+  </div>
+  <h3>{title}</h3>
+  <p>{note}</p>
+  {bullets.length > 0 && (
+    <ul>
+      {bullets.map((bullet) => (
+        <li>{bullet}</li>
+      ))}
+    </ul>
+  )}
+</section>
+
+<style>
+  .media-frame {
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 1rem;
+    background: white;
+    padding: 1rem;
+  }
+
+  .media-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .media-badge,
+  .media-duration {
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 999px;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.65rem;
+  }
+
+  .media-preview {
+    display: grid;
+    place-items: center;
+    margin-top: 0.9rem;
+    min-height: 14rem;
+    border-radius: 0.85rem;
+    border: 1px dashed #cbd5e1;
+    background:
+      radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 30%),
+      linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  }
+
+  .media-icon {
+    display: grid;
+    place-items: center;
+    width: 4.25rem;
+    height: 4.25rem;
+    border-radius: 999px;
+    background: white;
+    border: 1px solid #dbeafe;
+    color: #2563eb;
+    font-size: 1.4rem;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  h3 {
+    margin: 1rem 0 0;
+    font-size: 1rem;
+    color: #0f172a;
+  }
+
+  p {
+    margin: 0.6rem 0 0;
+    color: #475569;
+    line-height: 1.75;
+  }
+
+  ul {
+    margin: 0.9rem 0 0;
+    padding-left: 1.1rem;
+    color: #475569;
+  }
+
+  li + li {
+    margin-top: 0.45rem;
+  }
+</style>

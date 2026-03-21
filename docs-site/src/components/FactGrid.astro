@@ -1,0 +1,50 @@
+---
+interface Item {
+  label: string
+  value: string
+}
+
+interface Props {
+  items: Item[]
+}
+
+const { items } = Astro.props
+---
+
+<div class="fact-grid">
+  {items.map((item) => (
+    <article class="fact-card">
+      <div class="fact-label">{item.label}</div>
+      <div class="fact-value">{item.value}</div>
+    </article>
+  ))}
+</div>
+
+<style>
+  .fact-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  }
+
+  .fact-card {
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 1rem;
+    background: white;
+    padding: 1rem;
+  }
+
+  .fact-label {
+    color: #64748b;
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .fact-value {
+    margin-top: 0.7rem;
+    color: #0f172a;
+    line-height: 1.7;
+    font-size: 0.98rem;
+  }
+</style>

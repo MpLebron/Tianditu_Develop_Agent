@@ -30,6 +30,7 @@
 ```text
 .
 ├── client/                 # React + Vite 前端
+├── docs-site/              # Astro + Starlight 文档站
 ├── server/                 # Express + TypeScript 后端
 ├── skills/                 # 天地图技能与参考资料
 ├── DEPLOY_DOCKER.md        # Docker 部署说明
@@ -43,6 +44,7 @@
 
 ```bash
 cd client && npm install
+cd ../docs-site && npm install
 cd ../server && npm install
 ```
 
@@ -79,9 +81,19 @@ cd client
 npm run dev
 ```
 
+文档站：
+
+```bash
+cd docs-site
+npm run dev
+```
+
+如果你从主前端访问使用文档，`client` 在 `dev/build` 前会自动把 `docs-site` 构建并同步到 `/docs/`。
+
 默认访问：
 
 - 前端：[http://localhost:5173](http://localhost:5173)
+- 文档站：[http://localhost:4321](http://localhost:4321)
 - 后端：[http://localhost:3000](http://localhost:3000)
 
 ## 常用脚本
@@ -90,6 +102,15 @@ npm run dev
 
 ```bash
 cd client
+npm run sync-docs
+npm run dev
+npm run build
+```
+
+### docs-site
+
+```bash
+cd docs-site
 npm run dev
 npm run build
 ```
@@ -160,6 +181,7 @@ npm test
 当前仓库常用验证命令：
 
 ```bash
+cd docs-site && npm run build
 cd server && npm test
 cd server && npm run build
 cd client && npm run build

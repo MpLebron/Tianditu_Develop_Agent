@@ -1,0 +1,23 @@
+{
+  "name": "docs-site",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 0.0.0.0 --port 4321",
+    "build": "astro build",
+    "preview": "astro preview --host 0.0.0.0 --port 4321",
+    "check": "astro check"
+  },
+  "description": "Starlight documentation site for tianditu-smart-map",
+  "dependencies": {
+    "@astrojs/mdx": "^5.0.2",
+    "@astrojs/starlight": "^0.38.2",
+    "astro": "^6.0.8"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.8",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}

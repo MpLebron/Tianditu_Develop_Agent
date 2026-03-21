@@ -1,0 +1,97 @@
+:root {
+  --sl-font: "PingFang SC", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
+  --sl-sidebar-width: 17.75rem;
+  --sl-content-width: 48rem;
+  --sl-content-gap-y: 1.15rem;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #eaf2ff;
+  --sl-color-accent: #2563eb;
+  --sl-color-accent-high: #0f172a;
+  --sl-color-hairline: #e5e7eb;
+  --sl-color-hairline-light: #f1f5f9;
+  --sl-color-bg-nav: #ffffff;
+}
+
+:root[data-theme='light'] .sl-link-card {
+  border-color: #e5e7eb;
+  border-radius: 1rem;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+:root[data-theme='light'] .sl-link-card:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+:root[data-theme='light'] .sl-link-card .title {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .sl-link-card .description,
+:root[data-theme='light'] .sl-link-card .icon {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .card {
+  border-color: #e5e7eb;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: none;
+  padding: 1.25rem;
+}
+
+:root[data-theme='light'] .card .title {
+  color: #0f172a;
+  font-size: 1.05rem;
+}
+
+:root[data-theme='light'] .card .body {
+  color: #475569;
+}
+
+:root[data-theme='light'] .card .icon {
+  border-color: #dbeafe;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+:root[data-theme='light'] header {
+  backdrop-filter: saturate(180%) blur(16px);
+}
+
+:root[data-theme='light'] .sidebar-pane,
+:root[data-theme='light'] .right-sidebar {
+  border-color: #e5e7eb;
+}
+
+:root[data-theme='light'] .hero,
+:root[data-theme='light'] .site-title,
+:root[data-theme='light'] .page-title {
+  letter-spacing: -0.02em;
+}
+
+:root[data-theme='light'] .main-pane {
+  background: #ffffff;
+}
+
+.sl-markdown-content :where(h1, h2, h3) {
+  letter-spacing: -0.02em;
+}
+
+.sl-markdown-content :where(h2) {
+  margin-top: 2.75rem;
+}
+
+.sl-markdown-content :where(p, li) {
+  line-height: 1.75;
+}
+
+.sl-markdown-content :where(code):not(:where(pre code)) {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.45rem;
+  background: #f8fafc;
+  padding: 0.15rem 0.4rem;
+}

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { exampleCards, getExamplePrompt, type ExampleCard } from '../data/exampleCards'
+import { docsUrl } from '../utils/docsUrl'
 
 function CardPreview({ variant, gradient }: { variant: ExampleCard['preview']; gradient: string }) {
   return (
@@ -174,6 +175,12 @@ export function HomePage() {
             <img src="/tianditu-agent-logo.svg" alt="天地图开发智能体" className="h-9 sm:h-10 w-auto object-contain" />
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.location.assign(docsUrl)}
+              className="px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50/60 transition-all duration-200"
+            >
+              使用文档
+            </button>
             <button
               onClick={() => navigate('/gallery')}
               className="px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50/60 transition-all duration-200"
