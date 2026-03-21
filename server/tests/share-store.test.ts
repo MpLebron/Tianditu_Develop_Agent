@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { access, mkdir, rm } from 'fs/promises'
+import { access, mkdir, readFile, rm } from 'fs/promises'
 import { resolve } from 'path'
 import { tmpdir } from 'os'
 import { PNG } from 'pngjs'
@@ -43,12 +43,42 @@ describe('ShareStore thumbnails', () => {
     expect(created.item.thumbnailRelativePath).toBe(`${created.item.slug}/thumbnail.svg`)
     await access(resolve(rootDir, 'snapshots', created.item.thumbnailRelativePath))
   })
+
+  it('replaces tianditu token placeholders before persisting shared html', async () => {
+    const rootDir = await createTempDir('share')
+    const uploadDir = await createTempDir('uploads')
+    const token = 'abcd1234abcd1234abcd1234abcd1234'
+    const store = createStore(rootDir, uploadDir, token)
+
+    const created = await store.createShare({
+      htmlCode: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <script src="https://api.tianditu.gov.cn/api/v5/js?tk=your_tianditu_token_here"></script>
+          </head>
+          <body>
+            <script>window.tokenA = '\${TIANDITU_TOKEN}'</script>
+          </body>
+        </html>
+      `,
+      title: 'token check',
+      visibility: 'unlisted',
+    })
+
+    const storedHtml = await readFile(resolve(rootDir, 'snapshots', created.item.htmlRelativePath), 'utf-8')
+
+    expect(storedHtml).toContain(`https://api.tianditu.gov.cn/api/v5/js?tk=${token}`)
+    expect(storedHtml).not.toContain('your_tianditu_token_here')
+    expect(storedHtml).not.toContain('${TIANDITU_TOKEN}')
+  })
 })
 
-function createStore(rootDir: string, uploadDir: string) {
+function createStore(rootDir: string, uploadDir: string, tiandituToken?: string) {
   return new ShareStore({
     rootDir,
     uploadDir,
+    tiandituToken,
     thumbnail: {
       enabled: true,
       baseUrl: 'http://127.0.0.1:3000',

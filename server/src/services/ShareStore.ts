@@ -258,7 +258,8 @@ export class ShareStore {
 
     if (this.tiandituToken) {
       html = html.replace(/\$\{TIANDITU_TOKEN\}/g, this.tiandituToken)
-      html = html.replace(/(api\.tianditu\.gov\.cn\/api\/v5\/js\?tk=)[a-f0-9]{32}/gi, `$1${this.tiandituToken}`)
+      html = html.replace(/\b(?:your_tianditu_token_here|YOUR_TIANDITU_TOKEN|YOUR_TIANDITU_API_KEY|your_tianditu_api_key)\b/g, this.tiandituToken)
+      html = html.replace(/(api\.tianditu\.gov\.cn\/api\/v5\/js\?tk=)[^"'`\s&>]+/gi, `$1${this.tiandituToken}`)
     }
 
     return html
