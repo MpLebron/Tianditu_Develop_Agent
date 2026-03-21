@@ -199,21 +199,16 @@ export function HomePage() {
           </div>
         </header>
 
-        <main className="max-w-6xl mx-auto px-6 pt-14 pb-12 text-center">
-          <div>
-            <div className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-600 text-xs font-medium px-3 py-1.5 rounded-full mb-6 border border-blue-100/60">
-              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-              天地图 JS API v5.0
-            </div>
-
-            <h1 className="text-[42px] md:text-[48px] font-bold text-gray-900 mb-4 leading-tight tracking-tight">
+        <main className="max-w-6xl mx-auto px-6 pt-10 pb-14 text-center">
+          <div className="mx-auto max-w-4xl">
+            <h1 className="text-[46px] md:text-[56px] font-bold text-gray-900 mb-5 leading-[1.04] tracking-tight">
               用自然语言
               <br />
               <span className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 bg-clip-text text-transparent">
                 创建天地图应用
               </span>
             </h1>
-            <p className="text-lg text-gray-500 mb-12 max-w-3xl mx-auto leading-relaxed">
+            <p className="text-lg text-gray-500 mb-6 max-w-3xl mx-auto leading-relaxed">
               描述你想要的地图效果，AI 自动生成可运行代码。点击下方案例可直接进入工作区。
             </p>
           </div>

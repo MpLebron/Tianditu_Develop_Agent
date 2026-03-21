@@ -79,11 +79,13 @@ export function ChatPanel() {
             {/* 错误提示 */}
             {error && (
               <div className="animate-msg-in ml-9">
-                <div className="inline-flex items-center gap-2 bg-red-50 text-red-500 text-[12px] px-3 py-2 rounded-xl soft-surface">
+                <div className="flex max-w-full items-start gap-2 rounded-xl bg-red-50 px-3 py-2 text-[12px] text-red-500 soft-surface">
                   <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
-                  {error}
+                  <div className="min-w-0 whitespace-pre-wrap break-all leading-5">
+                    {error}
+                  </div>
                 </div>
               </div>
             )}
