@@ -1,3 +1,5 @@
+import html2canvas from 'html2canvas'
+
 const DEFAULT_MIN_BASE64_LEN = 800
 
 export interface MapPreviewCaptureResult {
@@ -38,6 +40,13 @@ function pickLargestCanvas(doc: Document): { canvas: HTMLCanvasElement | null; c
   return { canvas: candidate, count: canvases.length }
 }
 
+interface CaptureBounds {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
 function getRect(el: Element | null): DOMRect | null {
   if (!el || typeof (el as HTMLElement).getBoundingClientRect !== 'function') return null
   const rect = (el as HTMLElement).getBoundingClientRect()
@@ -47,15 +56,6 @@ function getRect(el: Element | null): DOMRect | null {
 
 function rectsIntersect(a: DOMRect, b: DOMRect): boolean {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
-}
-
-function pickCaptureRegion(doc: Document, fallbackCanvas: HTMLCanvasElement | null): DOMRect | null {
-  const hostSelectors = ['#map', '.map', '[id*="map"]', '[class*="map"]']
-  for (const selector of hostSelectors) {
-    const rect = getRect(doc.querySelector(selector))
-    if (rect && rect.width >= 180 && rect.height >= 120) return rect
-  }
-  return getRect(fallbackCanvas)
 }
 
 function fillCaptureBackground(ctx: CanvasRenderingContext2D, target: HTMLElement | null, width: number, height: number) {
@@ -71,6 +71,34 @@ function fillCaptureBackground(ctx: CanvasRenderingContext2D, target: HTMLElemen
   }
   ctx.fillStyle = color
   ctx.fillRect(0, 0, width, height)
+}
+
+async function capturePreviewDomBase64(
+  win: Window,
+  doc: Document,
+  bounds: CaptureBounds,
+  minLen: number,
+): Promise<string | null> {
+  const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
+  if (!rootEl) return null
+
+  const rendered = await html2canvas(rootEl, {
+    useCORS: true,
+    allowTaint: true,
+    logging: false,
+    backgroundColor: null,
+    ignoreElements: (el) => el instanceof HTMLCanvasElement || el.id === 'codex-app-fullscreen-button',
+    width: bounds.width,
+    height: bounds.height,
+    windowWidth: Math.max(bounds.width, win.innerWidth || 0),
+    windowHeight: Math.max(bounds.height, win.innerHeight || 0),
+    scrollX: win.scrollX || 0,
+    scrollY: win.scrollY || 0,
+  })
+
+  const base64 = dataUrlToBase64(rendered.toDataURL('image/png'))
+  if (!isCaptureValid(base64, minLen)) return null
+  return base64
 }
 
 function findPreviewIframe(): HTMLIFrameElement | null {
@@ -96,14 +124,19 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
   await new Promise((resolve) => setTimeout(resolve, 220))
 
   const canvasMeta = pickLargestCanvas(doc)
-  const captureRegion = pickCaptureRegion(doc, canvasMeta.canvas)
-  if (!captureRegion) throw new Error('未找到可截图的地图渲染区域')
+  const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
+  const captureBounds: CaptureBounds = {
+    left: 0,
+    top: 0,
+    width: Math.max(320, rootEl?.clientWidth || win.innerWidth || 0),
+    height: Math.max(240, rootEl?.clientHeight || win.innerHeight || 0),
+  }
 
   let canvasReadable = false
   let canvasTainted = false
   const output = document.createElement('canvas')
-  output.width = Math.max(1, Math.round(captureRegion.width))
-  output.height = Math.max(1, Math.round(captureRegion.height))
+  output.width = Math.max(1, Math.round(captureBounds.width))
+  output.height = Math.max(1, Math.round(captureBounds.height))
   const ctx = output.getContext('2d')
   if (!ctx) throw new Error('无法创建截图画布')
 
@@ -111,17 +144,25 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
   fillCaptureBackground(ctx, mapHost, output.width, output.height)
 
   let drawnCount = 0
+  let overlayMerged = false
   const canvases = Array.from(doc.querySelectorAll('canvas'))
   for (const canvas of canvases) {
     const rect = getRect(canvas)
-    if (!rect || !rectsIntersect(rect, captureRegion)) continue
+    if (!rect) continue
+    const regionRect = {
+      left: captureBounds.left,
+      top: captureBounds.top,
+      right: captureBounds.left + captureBounds.width,
+      bottom: captureBounds.top + captureBounds.height,
+    } as DOMRect
+    if (!rectsIntersect(rect, regionRect)) continue
 
     const scaleX = rect.width > 0 ? canvas.width / rect.width : 1
     const scaleY = rect.height > 0 ? canvas.height / rect.height : 1
-    const left = Math.max(rect.left, captureRegion.left)
-    const top = Math.max(rect.top, captureRegion.top)
-    const right = Math.min(rect.right, captureRegion.right)
-    const bottom = Math.min(rect.bottom, captureRegion.bottom)
+    const left = Math.max(rect.left, captureBounds.left)
+    const top = Math.max(rect.top, captureBounds.top)
+    const right = Math.min(rect.right, captureBounds.left + captureBounds.width)
+    const bottom = Math.min(rect.bottom, captureBounds.top + captureBounds.height)
     const width = right - left
     const height = bottom - top
     if (width <= 0 || height <= 0) continue
@@ -133,8 +174,8 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
         (top - rect.top) * scaleY,
         width * scaleX,
         height * scaleY,
-        left - captureRegion.left,
-        top - captureRegion.top,
+        left - captureBounds.left,
+        top - captureBounds.top,
         width,
         height,
       )
@@ -145,7 +186,33 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
     }
   }
 
+  try {
+    const domBase64 = await capturePreviewDomBase64(win, doc, captureBounds, minLen)
+    if (domBase64) {
+      const overlayImage = new Image()
+      await new Promise<void>((resolve, reject) => {
+        overlayImage.onload = () => resolve()
+        overlayImage.onerror = () => reject(new Error('DOM 叠加层解码失败'))
+        overlayImage.src = `data:image/png;base64,${domBase64}`
+      })
+      ctx.drawImage(overlayImage, 0, 0, output.width, output.height)
+      overlayMerged = true
+    }
+  } catch {
+    // ignore and keep canvas-only result
+  }
+
   if (!drawnCount) {
+    const fallbackBase64 = dataUrlToBase64(output.toDataURL('image/png'))
+    if (isCaptureValid(fallbackBase64, minLen)) {
+      return {
+        base64: fallbackBase64,
+        mode: 'dom',
+        canvasCount: canvasMeta.count,
+        canvasReadable,
+        canvasTainted,
+      }
+    }
     throw new Error('未能从地图渲染画布导出有效截图')
   }
 
@@ -154,7 +221,7 @@ export async function captureMapPreviewPngBase64(minLen = DEFAULT_MIN_BASE64_LEN
 
   return {
     base64,
-    mode: 'canvas',
+    mode: overlayMerged ? 'dom' : 'canvas',
     canvasCount: canvasMeta.count,
     canvasReadable,
     canvasTainted,

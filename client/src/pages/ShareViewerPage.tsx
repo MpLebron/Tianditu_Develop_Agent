@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { shareApi } from '../services/shareApi'
 import type { ShareItem, ShareVisibility } from '../types/share'
 import { copyText } from '../utils/copyText'
+import { docsUrl } from '../utils/docsUrl'
+import { installAppFullscreenEnhancer } from '../utils/appFullscreenEnhancer'
+import { hasActiveFullscreen, requestElementFullscreen, exitDocumentFullscreen } from '../utils/fullscreen'
+import { ViewportModeControls } from '../components/map/ViewportModeControls'
 
 type ShareDetail = ShareItem & { shareUrl: string }
 
@@ -15,11 +19,16 @@ export function ShareViewerPage() {
   const { slug = '' } = useParams()
   const [searchParams] = useSearchParams()
   const manageToken = searchParams.get('manageToken')?.trim() || ''
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const previewShellRef = useRef<HTMLElement | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [item, setItem] = useState<ShareDetail | null>(null)
   const [copyHint, setCopyHint] = useState<string | null>(null)
+  const [pageFilled, setPageFilled] = useState(false)
+  const [fullscreenActive, setFullscreenActive] = useState(false)
+  const contentOnlyMode = pageFilled || fullscreenActive
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -60,6 +69,88 @@ export function ShareViewerPage() {
     setDescription(item.description || '')
     setVisibility(item.visibility)
   }, [item?.slug, item?.updatedAt])
+
+  useEffect(() => {
+    const iframe = iframeRef.current
+    if (!iframe || item?.status !== 'active') return
+
+    let cleanup = () => {}
+
+    const installEnhancer = () => {
+      cleanup()
+      cleanup = installAppFullscreenEnhancer(iframe.contentDocument, { showButton: false })
+    }
+
+    iframe.addEventListener('load', installEnhancer)
+    installEnhancer()
+
+    return () => {
+      iframe.removeEventListener('load', installEnhancer)
+      cleanup()
+    }
+  }, [item?.htmlUrl, item?.status])
+
+  useEffect(() => {
+    if (!pageFilled) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [pageFilled])
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setFullscreenActive(hasActiveFullscreen(document))
+    }
+    syncFullscreenState()
+    document.addEventListener('fullscreenchange', syncFullscreenState)
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState as EventListener)
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState)
+      document.removeEventListener('webkitfullscreenchange', syncFullscreenState as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+
+      if (hasActiveFullscreen(document)) {
+        event.preventDefault()
+        void exitDocumentFullscreen(document)
+        return
+      }
+
+      if (pageFilled) {
+        event.preventDefault()
+        setPageFilled(false)
+      }
+    }
+
+    const bindWindow = (target: Window | null | undefined) => {
+      if (!target) return () => {}
+      target.addEventListener('keydown', handleEscape)
+      return () => target.removeEventListener('keydown', handleEscape)
+    }
+
+    const iframe = iframeRef.current
+    let cleanupFrameWindow = bindWindow(iframe?.contentWindow)
+
+    const handleFrameLoad = () => {
+      cleanupFrameWindow()
+      cleanupFrameWindow = bindWindow(iframe?.contentWindow)
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    iframe?.addEventListener('load', handleFrameLoad)
+
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+      iframe?.removeEventListener('load', handleFrameLoad)
+      cleanupFrameWindow()
+    }
+  }, [pageFilled])
 
   const metaItems = useMemo(() => {
     if (!item) return []
@@ -121,8 +212,21 @@ export function ShareViewerPage() {
     }
   }
 
+  const togglePageFill = () => {
+    setPageFilled((value) => !value)
+  }
+
+  const toggleSystemFullscreen = () => {
+    if (hasActiveFullscreen(document)) {
+      void exitDocumentFullscreen(document)
+      return
+    }
+    void requestElementFullscreen(previewShellRef.current)
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
+      {!contentOnlyMode && (
       <header className="h-14 border-b border-slate-200 bg-white/95 backdrop-blur-sm px-4 sm:px-6">
         <div className="max-w-[1600px] mx-auto h-full flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3 no-underline">
@@ -131,6 +235,9 @@ export function ShareViewerPage() {
           </Link>
 
           <div className="flex items-center gap-2 text-sm">
+            <a href={docsUrl} className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50/60 no-underline transition">
+              使用文档
+            </a>
             <Link to="/gallery" className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50/60 no-underline transition">
               公开样例
             </Link>
@@ -140,8 +247,10 @@ export function ShareViewerPage() {
           </div>
         </div>
       </header>
+      )}
 
-      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4">
+      <main className={`${contentOnlyMode ? 'max-w-none px-0 py-0' : 'max-w-[1600px] mx-auto px-4 sm:px-6 py-4'}`}>
+
         {loading && (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
             正在加载分享内容...
@@ -156,7 +265,15 @@ export function ShareViewerPage() {
 
         {!loading && !error && item && (
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
-            <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <section
+              ref={previewShellRef}
+              className={`rounded-xl border border-slate-200 bg-white overflow-hidden ${
+                contentOnlyMode
+                  ? 'fixed inset-0 z-[60] rounded-none border-0 shadow-none ring-0'
+                  : ''
+              }`}
+            >
+              {!contentOnlyMode && (
               <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h1 className="text-lg font-semibold text-slate-800 truncate">{item.title}</h1>
@@ -169,15 +286,27 @@ export function ShareViewerPage() {
                   复制链接
                 </button>
               </div>
+              )}
 
               {item.status === 'active' ? (
-                <div className="h-[calc(100vh-180px)] min-h-[520px]">
+                <div className={`relative ${contentOnlyMode ? 'h-screen min-h-0' : 'h-[calc(100vh-180px)] min-h-[520px]'}`}>
                   <iframe
+                    ref={iframeRef}
                     key={item.htmlUrl}
                     src={item.htmlUrl}
                     className="w-full h-full border-0"
                     sandbox="allow-scripts allow-same-origin"
+                    allow="fullscreen"
+                    allowFullScreen
                     title="分享地图预览"
+                  />
+
+                  <ViewportModeControls
+                    pageFilled={pageFilled}
+                    fullscreenActive={fullscreenActive}
+                    onTogglePageFill={togglePageFill}
+                    onToggleFullscreen={toggleSystemFullscreen}
+                    className="absolute right-3 bottom-3 z-20"
                   />
                 </div>
               ) : (
@@ -187,7 +316,7 @@ export function ShareViewerPage() {
               )}
             </section>
 
-            <aside className="rounded-xl border border-slate-200 bg-white p-4 space-y-4 h-fit">
+            <aside className={`rounded-xl border border-slate-200 bg-white p-4 space-y-4 h-fit ${contentOnlyMode ? 'hidden' : ''}`}>
               <div>
                 <h2 className="text-sm font-semibold text-slate-800 mb-2">分享信息</h2>
                 <div className="space-y-2">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { shareApi } from '../../services/shareApi'
 import { useChatStore } from '../../stores/useChatStore'
+import { useMapStore } from '../../stores/useMapStore'
 import type { Message } from '../../types/chat'
 import type { ShareCreateResult, ShareVisibility } from '../../types/share'
 import { copyText } from '../../utils/copyText'
@@ -60,6 +61,7 @@ function buildSuggestionPrompt(messages: Message[]): string {
 
 export function ShareModal({ open, code, onClose }: ShareModalProps) {
   const messages = useChatStore((s) => s.messages)
+  const shareThumbnailBase64 = useMapStore((s) => s.shareThumbnailBase64)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<ShareVisibility>('unlisted')
@@ -109,6 +111,12 @@ export function ShareModal({ open, code, onClose }: ShareModalProps) {
   }, [code, suggestionPrompt])
 
   const captureThumbnailOnPublish = async (): Promise<string | undefined> => {
+    const cachedThumbnail = shareThumbnailBase64 || useMapStore.getState().shareThumbnailBase64
+    if (cachedThumbnail) {
+      const cachedBlank = await isLikelyBlankThumbnailBase64(cachedThumbnail).catch(() => false)
+      if (!cachedBlank) return cachedThumbnail
+    }
+
     for (let attempt = 0; attempt < PUBLISH_CAPTURE_ATTEMPTS; attempt += 1) {
       try {
         const captured = await captureMapPreviewPngBase64()

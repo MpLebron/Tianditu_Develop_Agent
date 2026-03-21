@@ -16,6 +16,7 @@ export function WorkspacePage() {
   const { sendMessage } = useChatStore()
   const location = useLocation()
   const [shareOpen, setShareOpen] = useState(false)
+  const [mapPageFilled, setMapPageFilled] = useState(false)
   const [activeResizeHandle, setActiveResizeHandle] = useState<'chat' | 'code' | null>(null)
   const layoutRef = useRef<HTMLDivElement>(null)
   const chatPanelRef = useRef<HTMLDivElement>(null)
@@ -222,8 +223,9 @@ export function WorkspacePage() {
   }, [])
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className={`h-screen flex flex-col bg-gray-50 ${mapPageFilled ? 'overflow-hidden' : ''}`}>
       {/* ===== 顶部导航栏 ===== */}
+      {!mapPageFilled && (
       <header className="flex items-center justify-between px-5 h-12 bg-white border-b border-gray-200/60 shrink-0">
         {/* 左侧：天地图 Logo + 副标题 */}
         <Link to="/" className="flex items-center gap-3 no-underline">
@@ -313,6 +315,7 @@ export function WorkspacePage() {
           )}
         </div>
       </header>
+      )}
 
       {/* ===== 主体 ===== */}
       <div ref={layoutRef} className="flex-1 flex overflow-hidden">
@@ -333,7 +336,10 @@ export function WorkspacePage() {
 
         {/* 地图预览 */}
         <div className="flex-1 min-w-0 relative">
-          <MapPreview />
+          <MapPreview
+            pageFilled={mapPageFilled}
+            onTogglePageFill={() => setMapPageFilled((value) => !value)}
+          />
         </div>
 
         {/* 代码面板 */}

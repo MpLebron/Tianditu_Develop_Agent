@@ -7,6 +7,14 @@ import { runDossierApi } from '../../services/runDossierApi'
 import html2canvas from 'html2canvas'
 import { DEFAULT_TIANDITU_TOKEN } from '../../constants/tianditu'
 import { isLikelyBlankThumbnailBase64 } from '../../utils/isLikelyBlankThumbnail'
+import { installAppFullscreenEnhancer } from '../../utils/appFullscreenEnhancer'
+import { hasActiveFullscreen, requestElementFullscreen, exitDocumentFullscreen } from '../../utils/fullscreen'
+import { ViewportModeControls } from './ViewportModeControls'
+
+interface MapPreviewProps {
+  pageFilled?: boolean
+  onTogglePageFill?: () => void
+}
 
 /** 默认地图 HTML — 展示中国全景，indigo 主题风格 */
 const DEFAULT_MAP_HTML = `<!DOCTYPE html>
@@ -88,6 +96,64 @@ function pickLargestCanvas(doc: Document): { canvas: HTMLCanvasElement | null; c
   return { canvas: candidate, count: canvases.length, maxArea }
 }
 
+interface CaptureBounds {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+function getRect(el: Element | null): DOMRect | null {
+  if (!el || typeof (el as HTMLElement).getBoundingClientRect !== 'function') return null
+  const rect = (el as HTMLElement).getBoundingClientRect()
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null
+  return rect
+}
+
+function rectsIntersect(a: DOMRect, b: DOMRect): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+}
+
+function fillCaptureBackground(ctx: CanvasRenderingContext2D, target: HTMLElement | null, width: number, height: number) {
+  let color = '#ffffff'
+  try {
+    const view = target?.ownerDocument?.defaultView || window
+    const computed = target ? view.getComputedStyle(target).backgroundColor : ''
+    if (computed && computed !== 'rgba(0, 0, 0, 0)' && computed !== 'transparent') {
+      color = computed
+    }
+  } catch {
+    // ignore
+  }
+  ctx.fillStyle = color
+  ctx.fillRect(0, 0, width, height)
+}
+
+async function captureOverlayLayer(
+  win: Window,
+  doc: Document,
+  bounds: CaptureBounds,
+): Promise<string | null> {
+  const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
+  if (!rootEl) return null
+
+  const rendered = await html2canvas(rootEl, {
+    useCORS: true,
+    allowTaint: true,
+    logging: false,
+    backgroundColor: null,
+    ignoreElements: (el) => el instanceof HTMLCanvasElement || el.id === 'codex-app-fullscreen-button',
+    width: bounds.width,
+    height: bounds.height,
+    windowWidth: Math.max(bounds.width, win.innerWidth || 0),
+    windowHeight: Math.max(bounds.height, win.innerHeight || 0),
+    scrollX: win.scrollX || 0,
+    scrollY: win.scrollY || 0,
+  })
+
+  return dataUrlToBase64(rendered.toDataURL('image/png'))
+}
+
 async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promise<{
   imageBase64: string
   mode: 'dom' | 'canvas'
@@ -118,54 +184,90 @@ async function captureIframeScreenshot(iframe: HTMLIFrameElement | null): Promis
     }
   }
 
-  // 优先捕获完整页面，保留标题栏、侧栏、卡片等外围 UI 信息。
-  try {
-    const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
-    if (rootEl) {
-      const rendered = await html2canvas(rootEl, {
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: Math.max(320, rootEl.clientWidth || win.innerWidth || 0),
-        height: Math.max(240, rootEl.clientHeight || win.innerHeight || 0),
-        windowWidth: Math.max(320, win.innerWidth || 0),
-        windowHeight: Math.max(240, win.innerHeight || 0),
-        scrollX: win.scrollX || 0,
-        scrollY: win.scrollY || 0,
-      })
-      const domBase64 = dataUrlToBase64(rendered.toDataURL('image/png'))
-      if (isCaptureValid(domBase64)) {
-        return {
-          imageBase64: domBase64,
-          mode: 'dom',
-          canvasCount: canvasMeta.count,
-          largestCanvasArea: canvasMeta.maxArea,
-          canvasReadable,
-          canvasTainted,
-        }
-      }
-    }
-  } catch {
-    // ignore and fallback to canvas capture
+  const rootEl = (doc.documentElement || doc.body) as HTMLElement | null
+  const captureBounds: CaptureBounds = {
+    left: 0,
+    top: 0,
+    width: Math.max(320, rootEl?.clientWidth || win.innerWidth || 0),
+    height: Math.max(240, rootEl?.clientHeight || win.innerHeight || 0),
   }
 
-  // DOM 截图失败时，再退回到纯地图 canvas。
-  if (canvasMeta.canvas) {
+  const output = document.createElement('canvas')
+  output.width = Math.max(1, Math.round(captureBounds.width))
+  output.height = Math.max(1, Math.round(captureBounds.height))
+  const ctx = output.getContext('2d')
+  if (!ctx) throw new Error('无法创建截图画布')
+
+  const mapHost = doc.querySelector('#map, #map-container, .map-container, .map, [id*="map"], [class*="map"]') as HTMLElement | null
+  fillCaptureBackground(ctx, mapHost, output.width, output.height)
+
+  let drawnCount = 0
+  const regionRect = {
+    left: captureBounds.left,
+    top: captureBounds.top,
+    right: captureBounds.left + captureBounds.width,
+    bottom: captureBounds.top + captureBounds.height,
+  } as DOMRect
+
+  for (const canvas of Array.from(doc.querySelectorAll('canvas'))) {
+    const rect = getRect(canvas)
+    if (!rect || !rectsIntersect(rect, regionRect)) continue
+
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1
+    const left = Math.max(rect.left, captureBounds.left)
+    const top = Math.max(rect.top, captureBounds.top)
+    const right = Math.min(rect.right, captureBounds.left + captureBounds.width)
+    const bottom = Math.min(rect.bottom, captureBounds.top + captureBounds.height)
+    const width = right - left
+    const height = bottom - top
+    if (width <= 0 || height <= 0) continue
+
     try {
-      const directBase64 = dataUrlToBase64(canvasMeta.canvas.toDataURL('image/png'))
-      if (isCaptureValid(directBase64)) {
-        return {
-          imageBase64: directBase64,
-          mode: 'canvas',
-          canvasCount: canvasMeta.count,
-          largestCanvasArea: canvasMeta.maxArea,
-          canvasReadable: true,
-          canvasTainted: false,
-        }
-      }
+      ctx.drawImage(
+        canvas,
+        (left - rect.left) * scaleX,
+        (top - rect.top) * scaleY,
+        width * scaleX,
+        height * scaleY,
+        left - captureBounds.left,
+        top - captureBounds.top,
+        width,
+        height,
+      )
+      drawnCount += 1
+      canvasReadable = true
     } catch {
       canvasTainted = true
+    }
+  }
+
+  let overlayMerged = false
+  try {
+    const overlayBase64 = await captureOverlayLayer(win, doc, captureBounds)
+    if (isCaptureValid(overlayBase64)) {
+      const overlayImage = new Image()
+      await new Promise<void>((resolve, reject) => {
+        overlayImage.onload = () => resolve()
+        overlayImage.onerror = () => reject(new Error('DOM 叠加层解码失败'))
+        overlayImage.src = `data:image/png;base64,${overlayBase64}`
+      })
+      ctx.drawImage(overlayImage, 0, 0, output.width, output.height)
+      overlayMerged = true
+    }
+  } catch {
+    // ignore and fallback to canvas-only result
+  }
+
+  const mergedBase64 = dataUrlToBase64(output.toDataURL('image/png'))
+  if (isCaptureValid(mergedBase64)) {
+    return {
+      imageBase64: mergedBase64,
+      mode: overlayMerged ? 'dom' : 'canvas',
+      canvasCount: canvasMeta.count,
+      largestCanvasArea: canvasMeta.maxArea,
+      canvasReadable,
+      canvasTainted,
     }
   }
 
@@ -263,7 +365,7 @@ async function captureVisualInspectionCandidate(iframe: HTMLIFrameElement | null
   throw new Error('无法从前端页面捕获有效截图')
 }
 
-export function MapPreview() {
+export function MapPreview(props: MapPreviewProps) {
   const {
     currentRunId,
     previewCode,
@@ -279,7 +381,9 @@ export function MapPreview() {
     lastVisualCheckedCodeHash,
   } = useMapStore()
   const { iframeRef, run, activeRunIdRef } = useCodeRunner()
+  const shellRef = useRef<HTMLDivElement | null>(null)
   const [showError, setShowError] = useState(true)
+  const [fullscreenActive, setFullscreenActive] = useState(false)
   const fixTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const visualRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -298,6 +402,7 @@ export function MapPreview() {
   const THUMBNAIL_RETRY_WAIT_MS = 900
   const renderCode = previewCode || currentCode
   const previewing = Boolean(previewCode && codeStreaming)
+  const pageFilled = Boolean(props.pageFilled)
 
   const hashCode = (text: string) => {
     let hash = 2166136261
@@ -393,6 +498,101 @@ export function MapPreview() {
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
   }, [activeRunIdRef])
+
+  // 统一将全屏能力挂到“整页应用”，而不是仅放大地图容器。
+  useEffect(() => {
+    const iframe = iframeRef.current
+    if (!iframe) return
+
+    let cleanup = () => {}
+
+    const installEnhancer = () => {
+      cleanup()
+      cleanup = installAppFullscreenEnhancer(iframe.contentDocument, { showButton: false })
+    }
+
+    iframe.addEventListener('load', installEnhancer)
+    installEnhancer()
+
+    return () => {
+      iframe.removeEventListener('load', installEnhancer)
+      cleanup()
+    }
+  }, [iframeRef])
+
+  useEffect(() => {
+    if (!pageFilled) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [pageFilled])
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setFullscreenActive(hasActiveFullscreen(document))
+    }
+    syncFullscreenState()
+    document.addEventListener('fullscreenchange', syncFullscreenState)
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState as EventListener)
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState)
+      document.removeEventListener('webkitfullscreenchange', syncFullscreenState as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+
+      if (hasActiveFullscreen(document)) {
+        event.preventDefault()
+        void exitDocumentFullscreen(document)
+        return
+      }
+
+      if (pageFilled) {
+        event.preventDefault()
+        props.onTogglePageFill?.()
+      }
+    }
+
+    const bindWindow = (target: Window | null | undefined) => {
+      if (!target) return () => {}
+      target.addEventListener('keydown', handleEscape)
+      return () => target.removeEventListener('keydown', handleEscape)
+    }
+
+    const iframe = iframeRef.current
+    let cleanupFrameWindow = bindWindow(iframe?.contentWindow)
+
+    const handleFrameLoad = () => {
+      cleanupFrameWindow()
+      cleanupFrameWindow = bindWindow(iframe?.contentWindow)
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    iframe?.addEventListener('load', handleFrameLoad)
+
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+      iframe?.removeEventListener('load', handleFrameLoad)
+      cleanupFrameWindow()
+    }
+  }, [iframeRef, pageFilled, props.onTogglePageFill])
+
+  const togglePageFill = () => {
+    props.onTogglePageFill?.()
+  }
+
+  const toggleSystemFullscreen = () => {
+    if (hasActiveFullscreen(document)) {
+      void exitDocumentFullscreen(document)
+      return
+    }
+    void requestElementFullscreen(shellRef.current)
+  }
 
   // 错误出现时自动触发修复（延迟 1.5s，避免瞬间错误）
   useEffect(() => {
@@ -677,18 +877,35 @@ export function MapPreview() {
   const fixingMax = fixingSource === 'visual' ? MAX_VISUAL_FIX_RETRIES : MAX_FIX_RETRIES
 
   return (
-    <div className="relative w-full h-full overflow-hidden">
+    <div
+      ref={shellRef}
+      className={`relative overflow-hidden bg-white ${
+        pageFilled
+          ? 'fixed inset-0 z-[70] shadow-2xl shadow-slate-900/20'
+          : 'w-full h-full'
+      }`}
+    >
       {/* iframe — 始终可见（默认地图或用户代码） */}
       <iframe
         ref={iframeRef}
         className="w-full h-full border-0"
         sandbox="allow-scripts allow-same-origin"
+        allow="fullscreen"
+        allowFullScreen
         title="地图预览"
+      />
+
+      <ViewportModeControls
+        pageFilled={pageFilled}
+        fullscreenActive={fullscreenActive}
+        onTogglePageFill={togglePageFill}
+        onToggleFullscreen={toggleSystemFullscreen}
+        className="absolute right-3 bottom-3 z-20"
       />
 
       {/* 渲染中指示器 */}
       {executing && (
-        <div className="absolute top-3 right-3 animate-fade-in">
+        <div className="absolute top-3 right-28 animate-fade-in">
           <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md shadow-lg shadow-black/5 border border-gray-200/60 text-blue-600 text-xs font-medium px-3 py-2 rounded-xl soft-surface">
             <div className="w-3.5 h-3.5 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
             渲染地图中...
@@ -725,7 +942,7 @@ export function MapPreview() {
 
       {/* 自动修复中指示器 */}
       {fixing && (
-        <div className="absolute top-3 right-3 animate-fade-in z-10">
+        <div className="absolute top-3 right-28 animate-fade-in z-10">
           <div className="flex items-center gap-2 bg-amber-50/95 backdrop-blur-md shadow-lg shadow-amber-500/10 border border-amber-200/60 text-amber-700 text-xs font-medium px-3 py-2 rounded-xl soft-surface">
             <div className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-500 rounded-full animate-spin" />
             {fixingSource === 'visual' ? '正在视觉回灌补修' : '正在自动修复'} ({fixingAttempt}/{fixingMax})...
@@ -735,7 +952,7 @@ export function MapPreview() {
 
       {/* 视觉巡检中指示器（前台阻塞） */}
       {visualChecking && !fixing && (
-        <div className="absolute top-3 right-3 animate-fade-in z-10">
+        <div className="absolute top-3 right-28 animate-fade-in z-10">
           <div className="flex items-center gap-2 bg-slate-950/70 backdrop-blur-xl shadow-lg shadow-indigo-900/30 border border-indigo-300/20 text-indigo-100 text-xs font-medium px-3 py-2 rounded-xl soft-surface">
             <div className="w-3.5 h-3.5 border-2 border-violet-200 border-t-violet-500 rounded-full animate-spin" />
             正在进行AI视觉巡检...
