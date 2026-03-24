@@ -25,6 +25,7 @@ export function WorkspacePage() {
   const codeWidthRef = useRef(codeWidth)
   const dragCleanupRef = useRef<(() => void) | null>(null)
   const hasCodePanel = showCode && !!(currentCode || codeStreaming)
+  const contentOnlyMode = mapPageFilled
 
   const layoutConstraints = useMemo(() => ({
     minChatWidth: 320,
@@ -223,9 +224,9 @@ export function WorkspacePage() {
   }, [])
 
   return (
-    <div className={`h-screen flex flex-col bg-gray-50 ${mapPageFilled ? 'overflow-hidden' : ''}`}>
+    <div className={`h-screen flex flex-col bg-gray-50 ${contentOnlyMode ? 'overflow-hidden' : ''}`}>
       {/* ===== 顶部导航栏 ===== */}
-      {!mapPageFilled && (
+      {!contentOnlyMode && (
       <header className="flex items-center justify-between px-5 h-12 bg-white border-b border-gray-200/60 shrink-0">
         {/* 左侧：天地图 Logo + 副标题 */}
         <Link to="/" className="flex items-center gap-3 no-underline">
@@ -319,23 +320,27 @@ export function WorkspacePage() {
 
       {/* ===== 主体 ===== */}
       <div ref={layoutRef} className="flex-1 flex overflow-hidden">
-        {/* 聊天面板 */}
-        <div
-          ref={chatPanelRef}
-          className={`bg-white shrink-0 border-r border-gray-200/40 ${activeResizeHandle ? 'transition-none' : 'transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]'}`}
-          style={{ width: chatWidth }}
-        >
-          <ChatPanel />
-        </div>
+        {!contentOnlyMode && (
+          <>
+            {/* 聊天面板 */}
+            <div
+              ref={chatPanelRef}
+              className={`bg-white shrink-0 border-r border-gray-200/40 ${activeResizeHandle ? 'transition-none' : 'transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]'}`}
+              style={{ width: chatWidth }}
+            >
+              <ChatPanel />
+            </div>
 
-        <ResizeHandle
-          side="chat"
-          active={activeResizeHandle === 'chat'}
-          onPointerDown={beginResize}
-        />
+            <ResizeHandle
+              side="chat"
+              active={activeResizeHandle === 'chat'}
+              onPointerDown={beginResize}
+            />
+          </>
+        )}
 
         {/* 地图预览 */}
-        <div className="flex-1 min-w-0 relative">
+        <div className={`flex-1 min-w-0 ${contentOnlyMode ? '' : 'relative'}`}>
           <MapPreview
             pageFilled={mapPageFilled}
             onTogglePageFill={() => setMapPageFilled((value) => !value)}
@@ -343,7 +348,7 @@ export function WorkspacePage() {
         </div>
 
         {/* 代码面板 */}
-        {hasCodePanel && (
+        {hasCodePanel && !contentOnlyMode && (
           <>
             <ResizeHandle
               side="code"

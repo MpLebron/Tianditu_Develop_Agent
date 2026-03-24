@@ -881,7 +881,7 @@ export function MapPreview(props: MapPreviewProps) {
       ref={shellRef}
       className={`relative overflow-hidden bg-white ${
         pageFilled
-          ? 'fixed inset-0 z-[70] shadow-2xl shadow-slate-900/20'
+          ? 'w-full h-full z-[20] shadow-2xl shadow-slate-900/20'
           : 'w-full h-full'
       }`}
     >
