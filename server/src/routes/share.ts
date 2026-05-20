@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express'
 import { config } from '../config.js'
+import { requireAuth } from '../middleware/auth.js'
 import { ShareStore, type ShareRecord, type ShareVisibility } from '../services/ShareStore.js'
 import { ShareSuggestionService } from '../services/ShareSuggestionService.js'
 
@@ -64,7 +65,7 @@ function toPublicItem(req: Request, item: ShareRecord, canManage = false) {
 }
 
 // POST /api/share/maps — 创建分享快照
-router.post('/maps', async (req, res, next) => {
+router.post('/maps', requireAuth, async (req, res, next) => {
   try {
     await storeReady
     const code = typeof req.body?.code === 'string' ? req.body.code : ''
@@ -104,7 +105,7 @@ router.post('/maps', async (req, res, next) => {
 })
 
 // POST /api/share/maps/suggest — AI 生成分享标题和描述
-router.post('/maps/suggest', async (req, res, next) => {
+router.post('/maps/suggest', requireAuth, async (req, res, next) => {
   try {
     await storeReady
     const rawCode = typeof req.body?.code === 'string' ? req.body.code : ''
@@ -131,7 +132,7 @@ router.post('/maps/suggest', async (req, res, next) => {
 })
 
 // POST /api/share/maps/suggest/stream — 流式生成分享标题和描述
-router.post('/maps/suggest/stream', async (req, res, next) => {
+router.post('/maps/suggest/stream', requireAuth, async (req, res, next) => {
   try {
     await storeReady
     const rawCode = typeof req.body?.code === 'string' ? req.body.code : ''

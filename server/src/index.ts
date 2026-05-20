@@ -2,7 +2,9 @@ import express from 'express'
 import cors from 'cors'
 import { config } from './config.js'
 import { errorHandler } from './middleware/errorHandler.js'
+import { requireAuth } from './middleware/auth.js'
 import { requestContextMiddleware } from './middleware/requestContext.js'
+import authRouter from './routes/auth.js'
 import chatRouter from './routes/chat.js'
 import uploadRouter from './routes/upload.js'
 import tiandituRouter from './routes/tianditu.js'
@@ -20,6 +22,10 @@ mkdirSync(resolve(config.share.dir, 'snapshots'), { recursive: true })
 mkdirSync(config.runDossiers.dir, { recursive: true })
 
 const app = express()
+
+if (config.auth.trustProxy) {
+  app.set('trust proxy', true)
+}
 
 // 中间件
 app.use(cors())
@@ -41,11 +47,12 @@ app.use('/share-assets', express.static(resolve(config.share.dir, 'snapshots'), 
 }))
 
 // 路由
-app.use('/api/chat', chatRouter)
-app.use('/api/upload', uploadRouter)
-app.use('/api/tianditu', tiandituRouter)
+app.use('/api/auth', authRouter)
+app.use('/api/chat', requireAuth, chatRouter)
+app.use('/api/upload', requireAuth, uploadRouter)
+app.use('/api/tianditu', requireAuth, tiandituRouter)
 app.use('/api/share', shareRouter)
-app.use('/api/run-dossiers', runDossiersRouter)
+app.use('/api/run-dossiers', requireAuth, runDossiersRouter)
 
 // 健康检查
 app.get('/', (_req, res) => {

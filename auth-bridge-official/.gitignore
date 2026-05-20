@@ -1,0 +1,3 @@
+target/
+vendor/sdk/*.jar
+vendor/sdk/*.pom

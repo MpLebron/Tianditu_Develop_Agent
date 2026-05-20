@@ -4,6 +4,15 @@ import { resolve } from 'path'
 
 dotenv.config({ path: resolve(import.meta.dirname, '../../.env') })
 
+function envBoolean(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name]
+  if (raw == null || raw === '') return defaultValue
+  const normalized = raw.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false
+  return defaultValue
+}
+
 function resolveSkillsDir(): string {
   const candidates = [
     process.env.SKILLS_DIR,
@@ -172,5 +181,14 @@ export const config = {
       contextLines: parseInt(process.env.AGENT_EDIT_CONTEXT_LINES || '2'),
       maxSnippetChars: parseInt(process.env.AGENT_EDIT_MAX_SNIPPET_CHARS || '2400'),
     },
+  },
+
+  auth: {
+    enabled: envBoolean('AUTH_ENABLED', false),
+    cookieName: process.env.AUTH_COOKIE_NAME || 'tdt_auth',
+    sharedSecret: process.env.AUTH_SHARED_SECRET || 'tdt-dev-shared-secret',
+    loginPath: process.env.AUTH_LOGIN_PATH || '/sso/login',
+    logoutPath: process.env.AUTH_LOGOUT_PATH || '/sso/logout',
+    trustProxy: envBoolean('AUTH_TRUST_PROXY', true),
   },
 }

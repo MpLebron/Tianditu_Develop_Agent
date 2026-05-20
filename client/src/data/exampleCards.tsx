@@ -269,3 +269,31 @@ export const exampleCards: ExampleCard[] = [
 export function getExamplePrompt(example: ExampleCard) {
   return example.prompt || example.desc
 }
+
+export function getExampleBySampleId(sampleId: string | undefined) {
+  const normalized = String(sampleId || '').trim()
+  if (!normalized) return undefined
+  return exampleCards.find((item) => item.sampleId === normalized)
+}
+
+export function getExampleByLookupKey(lookup: string | undefined) {
+  const normalized = String(lookup || '').trim()
+  if (!normalized) return undefined
+
+  if (normalized.startsWith('sample:')) {
+    return getExampleBySampleId(normalized.slice('sample:'.length))
+  }
+
+  if (normalized.startsWith('title:')) {
+    const title = normalized.slice('title:'.length).trim()
+    return exampleCards.find((item) => item.title === title)
+  }
+
+  return getExampleBySampleId(normalized) || exampleCards.find((item) => item.title === normalized)
+}
+
+export function getExampleByIndex(index: number | undefined) {
+  if (typeof index !== 'number' || !Number.isInteger(index)) return undefined
+  if (index < 0 || index >= exampleCards.length) return undefined
+  return exampleCards[index]
+}

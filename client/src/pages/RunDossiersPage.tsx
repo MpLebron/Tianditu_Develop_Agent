@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { runDossierApi } from '../services/runDossierApi'
 import { copyText } from '../utils/copyText'
+import { docsUrl } from '../utils/docsUrl'
 import type {
   RunArtifactContentResult,
   RunArtifactRecord,
@@ -369,6 +370,7 @@ export function RunDossiersPage() {
 
             <nav className="flex items-center gap-1.5 text-sm">
               <Link to="/" className="rounded-xl px-3 py-2 text-slate-500 transition hover:bg-white hover:text-slate-900 no-underline">首页</Link>
+              <a href={docsUrl} className="rounded-xl px-3 py-2 text-slate-500 transition hover:bg-white hover:text-slate-900 no-underline">使用文档</a>
               <Link to="/workspace" className="rounded-xl px-3 py-2 text-slate-500 transition hover:bg-white hover:text-slate-900 no-underline">工作区</Link>
               <Link to="/gallery" className="rounded-xl px-3 py-2 text-slate-500 transition hover:bg-white hover:text-slate-900 no-underline">公开样例</Link>
               <Link to="/runs" className="rounded-xl bg-slate-900 px-3 py-2 text-white shadow-sm no-underline">运行档案</Link>

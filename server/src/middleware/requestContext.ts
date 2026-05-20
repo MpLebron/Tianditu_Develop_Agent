@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { NextFunction, Request, Response } from 'express'
+import { parseCookieHeader } from '../utils/cookies.js'
 
 export interface RequestContext {
   requestId: string
@@ -22,29 +23,6 @@ const SESSION_COOKIE_TTL_SECONDS = 60 * 60 * 24 * 30
 function normalizeToken(value: string, maxLen: number): string {
   const normalized = String(value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '')
   return normalized.slice(0, maxLen)
-}
-
-function parseCookieHeader(header: string | undefined): Record<string, string> {
-  const source = String(header || '')
-  if (!source) return {}
-
-  return source
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .reduce<Record<string, string>>((acc, part) => {
-      const idx = part.indexOf('=')
-      if (idx <= 0) return acc
-      const key = part.slice(0, idx).trim()
-      const value = part.slice(idx + 1).trim()
-      if (!key) return acc
-      try {
-        acc[key] = decodeURIComponent(value)
-      } catch {
-        acc[key] = value
-      }
-      return acc
-    }, {})
 }
 
 function pickRequestId(req: Request): string {

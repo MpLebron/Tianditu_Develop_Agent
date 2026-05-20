@@ -44,3 +44,4 @@ output/
 server/data/run-dossiers/
 server/data/share/snapshots/
 client/public/docs/
+auth-bridge/out/

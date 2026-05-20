@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useLocation, Link } from 'react-router-dom'
+import { getExampleByIndex, getExampleByLookupKey, getExampleBySampleId, getExamplePrompt } from '../data/exampleCards'
 import { ChatPanel } from '../components/chat/ChatPanel'
 import { MapPreview } from '../components/map/MapPreview'
 import { CodePanel } from '../components/map/CodePanel'
 import { ShareModal } from '../components/share/ShareModal'
 import { useWorkspaceStore } from '../stores/useWorkspaceStore'
 import { useMapStore } from '../stores/useMapStore'
+import { useAuthStore } from '../stores/useAuthStore'
 import { useChatStore } from '../stores/useChatStore'
 import { docsUrl } from '../utils/docsUrl'
 
@@ -15,6 +17,7 @@ export function WorkspacePage() {
   const { currentCode, codeStreaming } = useMapStore()
   const { sendMessage } = useChatStore()
   const location = useLocation()
+  const { session, status, refresh, openLogout } = useAuthStore()
   const [shareOpen, setShareOpen] = useState(false)
   const [mapPageFilled, setMapPageFilled] = useState(false)
   const [activeResizeHandle, setActiveResizeHandle] = useState<'chat' | 'code' | null>(null)
@@ -175,9 +178,23 @@ export function WorkspacePage() {
   // 从首页案例卡片跳转时自动发送 prompt
   const sentRef = useRef(false)
   useEffect(() => {
+    if (status === 'idle') {
+      void refresh().catch(() => {})
+    }
+  }, [status, refresh])
+
+  useEffect(() => {
     const state = (location.state as { prompt?: string; sampleId?: string } | null) || {}
-    const prompt = state.prompt
-    const sampleId = state.sampleId
+    const searchParams = new URLSearchParams(location.search)
+    const sampleIdFromQuery = searchParams.get('sampleId') || undefined
+    const lookupFromQuery = searchParams.get('example') || undefined
+    const exampleIndexRaw = searchParams.get('exampleIndex')
+    const exampleIndex = exampleIndexRaw != null && exampleIndexRaw !== '' ? Number(exampleIndexRaw) : undefined
+    const sampleId = state.sampleId || sampleIdFromQuery
+    const derivedExample = getExampleBySampleId(sampleId)
+      || getExampleByIndex(Number.isFinite(exampleIndex) ? exampleIndex : undefined)
+      || getExampleByLookupKey(lookupFromQuery)
+    const prompt = state.prompt || (derivedExample ? getExamplePrompt(derivedExample) : undefined)
 
     if (!prompt || sentRef.current) return
     sentRef.current = true
@@ -216,12 +233,13 @@ export function WorkspacePage() {
         if (!sampleReady) return
         await sendMessage(prompt, undefined, sampleFile, sampleId)
       } finally {
-        window.history.replaceState({}, '')
+        const cleanUrl = window.location.pathname
+        window.history.replaceState({}, '', cleanUrl)
       }
     }
 
     void run()
-  }, [])
+  }, [location.search, location.state, sendMessage])
 
   return (
     <div className={`h-screen flex flex-col bg-gray-50 ${contentOnlyMode ? 'overflow-hidden' : ''}`}>
@@ -277,6 +295,23 @@ export function WorkspacePage() {
               API 文档
             </a>
           </nav>
+
+          {session?.enabled && session.authenticated && (
+            <div className="hidden md:flex items-center gap-2 mr-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[12px] font-semibold text-blue-700">
+                {(session.user?.displayName || session.user?.loginName || 'U').slice(0, 1).toUpperCase()}
+              </span>
+              <span className="max-w-28 truncate text-[12px] font-medium text-slate-600">
+                {session.user?.displayName || session.user?.loginName}
+              </span>
+              <button
+                onClick={() => openLogout('/')}
+                className="text-[12px] text-slate-400 hover:text-rose-600 transition-colors"
+              >
+                退出
+              </button>
+            </div>
+          )}
 
           {/* 分隔线 */}
           {(currentCode || codeStreaming) && <div className="w-px h-5 bg-gray-200 mr-2" />}

@@ -95,6 +95,11 @@ export default defineConfig({
         changeOrigin: true,
         xfwd: true,
       },
+      '/sso': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        xfwd: true,
+      },
     },
   },
 })

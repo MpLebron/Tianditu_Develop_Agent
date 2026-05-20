@@ -1,0 +1,46 @@
+server:
+  port: ${AUTH_BRIDGE_OFFICIAL_PORT:8081}
+  use-forward-headers: true
+
+spring:
+  application:
+    name: tianditu-auth-bridge-official
+
+bridge:
+  auth:
+    cookie-name: ${AUTH_COOKIE_NAME:tdt_auth}
+    shared-secret: ${AUTH_SHARED_SECRET:change-this-in-production}
+    cookie-max-age-seconds: ${AUTH_COOKIE_MAX_AGE_SECONDS:7200}
+    cookie-secure: ${AUTH_COOKIE_SECURE:false}
+    cookie-domain: ${AUTH_COOKIE_DOMAIN:}
+    default-redirect: ${AUTH_BRIDGE_DEFAULT_REDIRECT:/workspace}
+    logout-redirect: ${AUTH_BRIDGE_LOGOUT_REDIRECT:/}
+    cas-logout-url: ${AUTH_BRIDGE_CAS_LOGOUT_URL:}
+    sdk-access-key: ${AUTH_BRIDGE_ACCESS_KEY:}
+    sdk-secret-key: ${AUTH_BRIDGE_SECRET_KEY:}
+    user-info-lookup-enabled: ${AUTH_BRIDGE_USER_INFO_LOOKUP_ENABLED:true}
+
+cas:
+  internal-filter-register:
+    active: true
+    cas-config:
+      server-name: ${AUTH_BRIDGE_PUBLIC_BASE_URL:http://localhost:8081}
+      cas-server-url-prefix: ${AUTH_BRIDGE_CAS_SERVER_URL_PREFIX:https://oauth.tianditu.gov.cn}
+      cas-server-login-url: ${AUTH_BRIDGE_CAS_SERVER_LOGIN_URL:https://oauth.tianditu.gov.cn/login}
+      client-clusters: ${AUTH_BRIDGE_CLIENT_CLUSTERS:http://localhost:8081}
+      access-key: ${AUTH_BRIDGE_ACCESS_KEY:}
+      secret-key: ${AUTH_BRIDGE_SECRET_KEY:}
+      uss-url: ${AUTH_BRIDGE_USS_URL:https://uss.tianditu.cn}
+      skip-check-key: ${AUTH_BRIDGE_SKIP_CHECK_KEY:}
+      encode-data: ${AUTH_BRIDGE_ENCODE_DATA:0}
+      authentication-filter:
+        ignore-pattern: /sso/health
+        url-patterns: /sso/login,/sso/me
+      cas20-proxy-receiving-ticket-validation-filter:
+        url-patterns: /sso/login,/sso/me
+        redirect-after-validation: ${AUTH_BRIDGE_REDIRECT_AFTER_VALIDATION:true}
+        user-session: ${AUTH_BRIDGE_USER_SESSION:true}
+      http-servlet-request-wrapper-filter:
+        url-patterns: /sso/login,/sso/me
+      single-sign-out-filter:
+        url-patterns: /sso/*

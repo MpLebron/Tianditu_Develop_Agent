@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { exampleCards, getExamplePrompt, type ExampleCard } from '../data/exampleCards'
+import { useEffect } from 'react'
+import { exampleCards, type ExampleCard } from '../data/exampleCards'
+import { useAuthStore } from '../stores/useAuthStore'
 import { docsUrl } from '../utils/docsUrl'
 
 function CardPreview({ variant, gradient }: { variant: ExampleCard['preview']; gradient: string }) {
@@ -140,9 +142,29 @@ function CardPreview({ variant, gradient }: { variant: ExampleCard['preview']; g
 
 export function HomePage() {
   const navigate = useNavigate()
+  const { status, session, refresh, openLogin, openLogout } = useAuthStore()
 
-  const handleExample = (example: ExampleCard) => {
-    navigate('/workspace', { state: { prompt: getExamplePrompt(example), sampleId: example.sampleId } })
+  useEffect(() => {
+    if (status === 'idle') {
+      void refresh().catch(() => {})
+    }
+  }, [status, refresh])
+
+  const authEnabled = session?.enabled === true
+  const isAuthenticated = session?.authenticated === true
+  const workspaceEntryPath = '/workspace'
+
+  const openWorkspace = (path = workspaceEntryPath) => {
+    if (authEnabled && !isAuthenticated) {
+      openLogin(path)
+      return
+    }
+    navigate(path)
+  }
+
+  const handleExample = (_example: ExampleCard, index: number) => {
+    const path = `/workspace?exampleIndex=${index}`
+    openWorkspace(path)
   }
 
   return (
@@ -187,11 +209,29 @@ export function HomePage() {
             >
               公开样例
             </button>
+            {isAuthenticated && (
+              <div className="hidden md:flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 font-semibold">
+                  {(session?.user?.displayName || session?.user?.loginName || 'U').slice(0, 1).toUpperCase()}
+                </span>
+                <span className="max-w-32 truncate font-medium">
+                  {session?.user?.displayName || session?.user?.loginName}
+                </span>
+              </div>
+            )}
+            {isAuthenticated && (
+              <button
+                onClick={() => openLogout('/')}
+                className="px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-200 bg-white text-slate-600 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50/60 transition-all duration-200"
+              >
+                退出登录
+              </button>
+            )}
             <button
-              onClick={() => navigate('/workspace')}
+              onClick={() => openWorkspace()}
               className="group flex items-center gap-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:shadow-lg hover:shadow-blue-500/25 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
             >
-              开始使用
+              {authEnabled && !isAuthenticated ? '统一登录' : '开始使用'}
               <svg className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
               </svg>
@@ -223,7 +263,7 @@ export function HomePage() {
               {exampleCards.map((ex, i) => (
                 <button
                   key={ex.title}
-                  onClick={() => handleExample(ex)}
+                  onClick={() => handleExample(ex, i)}
                   className="group relative bg-white/92 backdrop-blur-sm border border-gray-200/75 rounded-2xl p-4 hover:shadow-2xl hover:shadow-slate-900/[0.08] hover:border-blue-200 hover:-translate-y-0.5 transition-all duration-250 text-left overflow-hidden"
                   style={{ animationDelay: `${i * 35}ms` }}
                 >

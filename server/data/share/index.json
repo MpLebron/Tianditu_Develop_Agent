@@ -2,6 +2,23 @@
   "version": 1,
   "items": [
     {
+      "id": "f6580367-9977-4e10-acb0-029601d8d84d",
+      "slug": "mmvoupfo-f408aa0565",
+      "title": "江苏省乡村地点地理编码展示",
+      "description": "基于公交/地铁路径规划结果，展示路线、换乘信息与出行时长。主要接口：/api/tianditu/administrative、/api/tianditu/geocode。关键要素：江苏省苏州市吴江区七都镇开弦弓村、江苏省苏州市昆山市张浦镇姜杭村、江苏省苏州市昆山市周庄镇东浜村。",
+      "visibility": "public",
+      "status": "active",
+      "htmlRelativePath": "mmvoupfo-f408aa0565/index.html",
+      "thumbnailRelativePath": "mmvoupfo-f408aa0565/thumbnail.png",
+      "assetFiles": [],
+      "viewCount": 6,
+      "createdAt": 1773817016388,
+      "updatedAt": 1773817016388,
+      "manageTokenHash": "92cc879e54a8aee3ece5dfc7c88b476951b1c27198b6e527f3fee2cd93bc19f1",
+      "codeSizeBytes": 22467,
+      "lastViewedAt": 1774076917245
+    },
+    {
       "id": "f62bfa75-b8a9-4525-a641-b8b899b4e620",
       "slug": "mme7sis6-0dfb3fe5d2",
       "title": "全国妇联中心分布地图",
@@ -13,12 +30,12 @@
       "assetFiles": [
         "assets/asset-1.geojson"
       ],
-      "viewCount": 6,
+      "viewCount": 29,
       "createdAt": 1772760435990,
       "updatedAt": 1772760435990,
       "manageTokenHash": "86162f6a59484a8d01dfed7b119b9b415e1a37e23489d7411cabc6bee12829bf",
       "codeSizeBytes": 25688,
-      "lastViewedAt": 1772760518711
+      "lastViewedAt": 1774075535766
     },
     {
       "id": "f9c280ca-eea7-44c0-9837-ccd3b91cf804",
@@ -121,12 +138,12 @@
       "assetFiles": [
         "assets/asset-1.geojson"
       ],
-      "viewCount": 14,
+      "viewCount": 47,
       "createdAt": 1772693186684,
       "updatedAt": 1772693186684,
       "manageTokenHash": "4f94aa9b9aab3901726968a047ad35e2ed3efd17af8514d8e5c828a7ed097e00",
       "codeSizeBytes": 29101,
-      "lastViewedAt": 1772759930668
+      "lastViewedAt": 1776067921139
     },
     {
       "id": "b93c7a6f-0c03-4f94-b225-a64133c60d25",
@@ -140,12 +157,12 @@
       "assetFiles": [
         "assets/asset-1.geojson"
       ],
-      "viewCount": 8,
+      "viewCount": 10,
       "createdAt": 1772691648142,
       "updatedAt": 1772691648142,
       "manageTokenHash": "0159e6e77ac0c20d9f37f62bf3e586aa9ce8231e81f09d1040c0de343676d9bf",
       "codeSizeBytes": 17708,
-      "lastViewedAt": 1772696625203
+      "lastViewedAt": 1774857211533
     },
     {
       "id": "1c1be739-c92c-46b7-836b-fcdce3fa52b5",
@@ -246,12 +263,12 @@
       "assetFiles": [
         "assets/asset-1.geojson"
       ],
-      "viewCount": 8,
+      "viewCount": 10,
       "createdAt": 1772635339530,
       "updatedAt": 1772635339530,
       "manageTokenHash": "96e56e166f1f07e49f2331f25e225891cca68a64a615bc2b3fa6d78a24786ce0",
       "codeSizeBytes": 14286,
-      "lastViewedAt": 1772636478955
+      "lastViewedAt": 1776067952565
     },
     {
       "id": "c9b4c11e-9040-4b4f-b95b-21d43505aed7",
